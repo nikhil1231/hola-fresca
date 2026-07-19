@@ -1,0 +1,1473 @@
+{
+ "active": true,
+ "allergens": [
+  {
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052f6",
+   "type": "egg",
+   "name": "Egg",
+   "slug": "egg",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052f6-63afd198.png",
+   "tracesOf": false
+  },
+  {
+   "iconPath": "/allergens/57962a07b7e8697d4b3052fd-feb8e168.png",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052fd",
+   "type": "mustard",
+   "name": "Mustard",
+   "slug": "mustard"
+  },
+  {
+   "id": "57962a07b7e8697d4b3052fa",
+   "type": "milk",
+   "name": "Milk",
+   "slug": "milk",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052fa-be127d3f.png",
+   "tracesOf": false,
+   "triggersTracesOf": false
+  },
+  {
+   "type": "wheat",
+   "name": "Wheat",
+   "slug": "wheat",
+   "iconPath": "",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "60368d89cdbdf450236ad8cd"
+  },
+  {
+   "iconPath": "/allergens/57962a07b7e8697d4b3052f5-e20d9ca4.png",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052f5",
+   "type": "gluten",
+   "name": "Cereals containing gluten",
+   "slug": "cereals-containing-gluten"
+  },
+  {
+   "id": "57962a07b7e8697d4b3052ff",
+   "type": "sulphites",
+   "name": "Sulphites",
+   "slug": "sulphites",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052ff-04104ef2.png",
+   "tracesOf": false,
+   "triggersTracesOf": false
+  },
+  {
+   "type": "almonds",
+   "name": "Almonds",
+   "slug": "almonds",
+   "iconPath": "",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "5fdcaac412e5336f910e70bd"
+  },
+  {
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052fb",
+   "type": "nuts",
+   "name": "Nuts",
+   "slug": "nuts",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052fb-172b155c.png",
+   "tracesOf": false
+  },
+  {
+   "slug": "traces-of-milk",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "5acf97b7ae08b54d88061162",
+   "type": "traces-of-milk",
+   "name": "Milk"
+  },
+  {
+   "type": "maycontaintracesofallergens",
+   "name": "May contain traces of allergens",
+   "slug": "may-contain-traces-of-allergens",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": true,
+   "id": "57962a07b7e8697d4b3052f3"
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "63c00da40c675b6b333afdb4",
+   "type": "traces-of-pecan_nuts",
+   "name": "Pecan Nuts",
+   "slug": "traces-of-pecan-nuts",
+   "iconPath": ""
+  },
+  {
+   "id": "5acf972fae08b54d333ac322",
+   "type": "traces-of-sesame",
+   "name": "Sesame",
+   "slug": "traces-of-sesame",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false
+  },
+  {
+   "triggersTracesOf": false,
+   "id": "62cc417a2f15d58ec3559424",
+   "type": "traces-of-hazelnuts",
+   "name": "Hazelnuts",
+   "slug": "traces-of-hazelnuts",
+   "iconPath": "",
+   "tracesOf": true
+  },
+  {
+   "id": "63c00da4c4bb723852bbf3ef",
+   "type": "traces-of-pistachio",
+   "name": "Pistachio nuts",
+   "slug": "traces-of-pistachio-nuts",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false
+  },
+  {
+   "id": "63c00da4c4bb723852bbf3cb",
+   "type": "traces-of-cashew_nuts",
+   "name": "Cashew nuts",
+   "slug": "traces-of-cashew-nuts",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false
+  },
+  {
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b305302",
+   "type": "traces-of-nuts",
+   "name": "Nuts",
+   "slug": "traces-of-nuts",
+   "iconPath": "/allergens/57962a07b7e8697d4b305302-20b4388c.png",
+   "tracesOf": true
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "62038a7c614fc10b645e85b9",
+   "type": "traces-of-almonds",
+   "name": "Almonds",
+   "slug": "traces-of-almonds",
+   "iconPath": ""
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "5a9614ab30006c2c026cf562",
+   "type": "traces-of-peanuts",
+   "name": "Peanut",
+   "slug": "traces-of-peanut",
+   "iconPath": ""
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "63c00da40c675b6b333afd9e",
+   "type": "traces-of-macadamia",
+   "name": "Macadamia Nuts",
+   "slug": "traces-of-macadamia-nuts",
+   "iconPath": ""
+  },
+  {
+   "type": "traces-of-brazil_nuts",
+   "name": "Brazil nuts",
+   "slug": "traces-of-brazil-nuts",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "63c00da40c675b6b333afdb0"
+  }
+ ],
+ "allergensNew": [
+  {
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052f6",
+   "type": "egg",
+   "name": "Egg",
+   "slug": "egg",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052f6-63afd198.png",
+   "tracesOf": false
+  },
+  {
+   "iconPath": "/allergens/57962a07b7e8697d4b3052fd-feb8e168.png",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052fd",
+   "type": "mustard",
+   "name": "Mustard",
+   "slug": "mustard"
+  },
+  {
+   "id": "57962a07b7e8697d4b3052fa",
+   "type": "milk",
+   "name": "Milk",
+   "slug": "milk",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052fa-be127d3f.png",
+   "tracesOf": false,
+   "triggersTracesOf": false
+  },
+  {
+   "type": "wheat",
+   "name": "Wheat",
+   "slug": "wheat",
+   "iconPath": "",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "60368d89cdbdf450236ad8cd"
+  },
+  {
+   "iconPath": "/allergens/57962a07b7e8697d4b3052f5-e20d9ca4.png",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052f5",
+   "type": "gluten",
+   "name": "Cereals containing gluten",
+   "slug": "cereals-containing-gluten"
+  },
+  {
+   "id": "57962a07b7e8697d4b3052ff",
+   "type": "sulphites",
+   "name": "Sulphites",
+   "slug": "sulphites",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052ff-04104ef2.png",
+   "tracesOf": false,
+   "triggersTracesOf": false
+  },
+  {
+   "type": "almonds",
+   "name": "Almonds",
+   "slug": "almonds",
+   "iconPath": "",
+   "tracesOf": false,
+   "triggersTracesOf": false,
+   "id": "5fdcaac412e5336f910e70bd"
+  },
+  {
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b3052fb",
+   "type": "nuts",
+   "name": "Nuts",
+   "slug": "nuts",
+   "iconPath": "/allergens/57962a07b7e8697d4b3052fb-172b155c.png",
+   "tracesOf": false
+  },
+  {
+   "slug": "traces-of-milk",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "5acf97b7ae08b54d88061162",
+   "type": "traces-of-milk",
+   "name": "Milk"
+  },
+  {
+   "type": "maycontaintracesofallergens",
+   "name": "May contain traces of allergens",
+   "slug": "may-contain-traces-of-allergens",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": true,
+   "id": "57962a07b7e8697d4b3052f3"
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "63c00da40c675b6b333afdb4",
+   "type": "traces-of-pecan_nuts",
+   "name": "Pecan Nuts",
+   "slug": "traces-of-pecan-nuts",
+   "iconPath": ""
+  },
+  {
+   "id": "5acf972fae08b54d333ac322",
+   "type": "traces-of-sesame",
+   "name": "Sesame",
+   "slug": "traces-of-sesame",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false
+  },
+  {
+   "triggersTracesOf": false,
+   "id": "62cc417a2f15d58ec3559424",
+   "type": "traces-of-hazelnuts",
+   "name": "Hazelnuts",
+   "slug": "traces-of-hazelnuts",
+   "iconPath": "",
+   "tracesOf": true
+  },
+  {
+   "id": "63c00da4c4bb723852bbf3ef",
+   "type": "traces-of-pistachio",
+   "name": "Pistachio nuts",
+   "slug": "traces-of-pistachio-nuts",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false
+  },
+  {
+   "id": "63c00da4c4bb723852bbf3cb",
+   "type": "traces-of-cashew_nuts",
+   "name": "Cashew nuts",
+   "slug": "traces-of-cashew-nuts",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false
+  },
+  {
+   "triggersTracesOf": false,
+   "id": "57962a07b7e8697d4b305302",
+   "type": "traces-of-nuts",
+   "name": "Nuts",
+   "slug": "traces-of-nuts",
+   "iconPath": "/allergens/57962a07b7e8697d4b305302-20b4388c.png",
+   "tracesOf": true
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "62038a7c614fc10b645e85b9",
+   "type": "traces-of-almonds",
+   "name": "Almonds",
+   "slug": "traces-of-almonds",
+   "iconPath": ""
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "5a9614ab30006c2c026cf562",
+   "type": "traces-of-peanuts",
+   "name": "Peanut",
+   "slug": "traces-of-peanut",
+   "iconPath": ""
+  },
+  {
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "63c00da40c675b6b333afd9e",
+   "type": "traces-of-macadamia",
+   "name": "Macadamia Nuts",
+   "slug": "traces-of-macadamia-nuts",
+   "iconPath": ""
+  },
+  {
+   "type": "traces-of-brazil_nuts",
+   "name": "Brazil nuts",
+   "slug": "traces-of-brazil-nuts",
+   "iconPath": "",
+   "tracesOf": true,
+   "triggersTracesOf": false,
+   "id": "63c00da40c675b6b333afdb0"
+  }
+ ],
+ "canonical": "",
+ "cardLink": "https://www.hellofresh.co.uk/recipecards/card/693adbb51101204cae74ecbc-en-GB.pdf",
+ "clonedFrom": "648732d18425987db35df396",
+ "country": "GB",
+ "createdAt": "2025-12-15T20:10:55.108Z",
+ "createdBy": "Eva McCormick",
+ "cuisines": [
+  {
+   "country": "GB",
+   "locale": "en-GB",
+   "name": "American",
+   "slug": "",
+   "type": "",
+   "id": "67ebf900b2ffe612cd83e51a en-GB",
+   "cuisineId": "67ebf900b2ffe612cd83e51a"
+  }
+ ],
+ "description": "A comfort food favourite that you can make yourself, these Crispy Chicken Goujons and Cheesy Wedges are sure to be a crowd-pleaser. We've added some Central American style spices into the breadcrumbs for the chicken and sriracha to the mayo for a spicy kick too!",
+ "descriptionHTML": "<p>A comfort food favourite that you can make yourself, these Crispy Chicken Goujons and Cheesy Wedges are sure to be a crowd-pleaser. We've added some Central American style spices into the breadcrumbs for the chicken and sriracha to the mayo for a spicy kick too!</p>",
+ "descriptionMarkdown": "A comfort food favourite that you can make yourself, these Crispy Chicken Goujons and Cheesy Wedges are sure to be a crowd-pleaser. We've added some Central American style spices into the breadcrumbs for the chicken and sriracha to the mayo for a spicy kick too!",
+ "difficulty": 2,
+ "hasBeenProcessed": {
+  "updatedCanonical": true,
+  "tier": false,
+  "qualityJudge": false
+ },
+ "headline": "with Sriracha Mayo and Balsamic Glazed Cucumber-Rocket Salad",
+ "imagePath": "/image/HF_Y26_R17_W09_UK_R17041-18_RAN_HA_F2__Main_high-7c207462.jpg",
+ "ingredients": [
+  {
+   "shipped": true,
+   "imagePath": "/ingredient/5a39929ec9fd0814815939c2-354c6edd.png",
+   "allergensNew": [],
+   "uuid": "838d0fe0-6ab9-5d7a-8bec-e1f0346e365f",
+   "type": "potatoes",
+   "familyId": "58877cf3ed71a76e9c03fc13",
+   "id": "5a39929ec9fd0814815939c2",
+   "name": "Potatoes",
+   "slug": "potatoes",
+   "allergens": []
+  },
+  {
+   "type": "mayonnaise-tbsp",
+   "name": "Mayonnaise",
+   "slug": "mayonnaise",
+   "shipped": true,
+   "familyId": "58877cf3ed71a76e9c03fbd2",
+   "allergensNew": [
+    {
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052f6",
+     "type": "egg",
+     "name": "Egg",
+     "slug": "egg",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052f6-63afd198.png",
+     "tracesOf": false
+    },
+    {
+     "iconPath": "/allergens/57962a07b7e8697d4b3052fd-feb8e168.png",
+     "tracesOf": false,
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052fd",
+     "type": "mustard",
+     "name": "Mustard",
+     "slug": "mustard"
+    }
+   ],
+   "id": "555c9d234dab7162138b4568",
+   "uuid": "299fb038-5b86-57dd-95ba-4be0826d42cb",
+   "imagePath": "/ingredient/555c9d234dab7162138b4568-ab1ac6ad.png",
+   "allergens": [
+    {
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052f6",
+     "type": "egg",
+     "name": "Egg",
+     "slug": "egg",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052f6-63afd198.png",
+     "tracesOf": false
+    },
+    {
+     "iconPath": "/allergens/57962a07b7e8697d4b3052fd-feb8e168.png",
+     "tracesOf": false,
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052fd",
+     "type": "mustard",
+     "name": "Mustard",
+     "slug": "mustard"
+    }
+   ]
+  },
+  {
+   "slug": "mature-cheddar-cheese",
+   "shipped": true,
+   "imagePath": "/ingredient/69146769623e0c85b6821082-2d305a0b.png",
+   "allergensNew": [
+    {
+     "id": "5acf97b7ae08b54d88061162",
+     "type": "traces-of-milk",
+     "name": "Milk",
+     "slug": "traces-of-milk",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "triggersTracesOf": true,
+     "id": "57962a07b7e8697d4b3052f3",
+     "type": "maycontaintracesofallergens",
+     "name": "May contain traces of allergens",
+     "slug": "may-contain-traces-of-allergens",
+     "iconPath": "",
+     "tracesOf": true
+    },
+    {
+     "id": "57962a07b7e8697d4b3052fa",
+     "type": "milk",
+     "name": "Milk",
+     "slug": "milk",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052fa-be127d3f.png",
+     "tracesOf": false,
+     "triggersTracesOf": false
+    }
+   ],
+   "id": "69146769623e0c85b6821082",
+   "uuid": "668aa8c0-75d4-5a2d-84d7-7330dc57c99e",
+   "type": "cheddar-cheese",
+   "name": "Mature Cheddar Cheese",
+   "familyId": "58877cf3ed71a76e9c03fb68",
+   "allergens": [
+    {
+     "id": "5acf97b7ae08b54d88061162",
+     "type": "traces-of-milk",
+     "name": "Milk",
+     "slug": "traces-of-milk",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "triggersTracesOf": true,
+     "id": "57962a07b7e8697d4b3052f3",
+     "type": "maycontaintracesofallergens",
+     "name": "May contain traces of allergens",
+     "slug": "may-contain-traces-of-allergens",
+     "iconPath": "",
+     "tracesOf": true
+    },
+    {
+     "id": "57962a07b7e8697d4b3052fa",
+     "type": "milk",
+     "name": "Milk",
+     "slug": "milk",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052fa-be127d3f.png",
+     "tracesOf": false,
+     "triggersTracesOf": false
+    }
+   ]
+  },
+  {
+   "uuid": "0a12b986-df91-548e-b747-8585b80eacb3",
+   "slug": "british-chicken-breasts",
+   "shipped": true,
+   "familyId": "58877cf3ed71a76e9c03fb6b",
+   "allergensNew": [],
+   "id": "554a5e56f8b25ed7288b4576",
+   "type": "chicken-fillet",
+   "name": "British Chicken Breasts",
+   "imagePath": "/ingredient/554a5e56f8b25ed7288b4576-7d4a5958.png",
+   "allergens": []
+  },
+  {
+   "shipped": true,
+   "allergensNew": [
+    {
+     "name": "Wheat",
+     "slug": "wheat",
+     "iconPath": "",
+     "tracesOf": false,
+     "triggersTracesOf": false,
+     "id": "60368d89cdbdf450236ad8cd",
+     "type": "wheat"
+    },
+    {
+     "name": "Cereals containing gluten",
+     "slug": "cereals-containing-gluten",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052f5-e20d9ca4.png",
+     "tracesOf": false,
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052f5",
+     "type": "gluten"
+    }
+   ],
+   "id": "68371e2f42dc4b928197f136",
+   "uuid": "bc22c386-6177-54cb-a21d-e59a8239e9e1",
+   "type": "breadcrumbs",
+   "slug": "breadcrumbs",
+   "imagePath": "/ingredient/56e2cf9df8b25e71298b4567-8fc67ec6.png",
+   "familyId": "58877cf3ed71a76e9c03fb55",
+   "name": "Breadcrumbs",
+   "allergens": [
+    {
+     "name": "Wheat",
+     "slug": "wheat",
+     "iconPath": "",
+     "tracesOf": false,
+     "triggersTracesOf": false,
+     "id": "60368d89cdbdf450236ad8cd",
+     "type": "wheat"
+    },
+    {
+     "name": "Cereals containing gluten",
+     "slug": "cereals-containing-gluten",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052f5-e20d9ca4.png",
+     "tracesOf": false,
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052f5",
+     "type": "gluten"
+    }
+   ]
+  },
+  {
+   "allergensNew": [],
+   "id": "59ad32ea2c3e08228606b422",
+   "type": "central-american-style-spice-mix",
+   "name": "Central American Style Spice Mix",
+   "slug": "central-american-style-spice-mix",
+   "shipped": true,
+   "imagePath": "/ingredient/59ad32ea2c3e08228606b422-7850e5de.png",
+   "familyId": "58877cf3ed71a76e9c03fc32",
+   "uuid": "1d4063e2-3fd4-57e3-8932-c1d3fb33ea45",
+   "allergens": []
+  },
+  {
+   "uuid": "50a4516b-b328-56e7-b7bf-19aa198cb066",
+   "slug": "baby-cucumber",
+   "shipped": true,
+   "familyId": "6299e0f4f7cd25bc1c024384",
+   "allergensNew": [],
+   "id": "62fcaa53bd9a2478e193f0b4",
+   "type": "baby-cucumber",
+   "name": "Baby Cucumber",
+   "imagePath": "/ingredient/62fcaa53bd9a2478e193f0b4-cff3f243.png",
+   "allergens": []
+  },
+  {
+   "type": "rocket",
+   "name": "Wild Rocket",
+   "slug": "wild-rocket",
+   "shipped": true,
+   "imagePath": "/ingredient/555092a4f8b25ed3468b4569-2f048245.png",
+   "familyId": "58877cf3ed71a76e9c03fc22",
+   "allergensNew": [],
+   "id": "555092a4f8b25ed3468b4569",
+   "uuid": "0e54259d-82bb-566a-bcc5-4b8c6419a5fd",
+   "allergens": []
+  },
+  {
+   "name": "Balsamic Glaze",
+   "familyId": "58877cf3ed71a76e9c03fc4e",
+   "allergensNew": [
+    {
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052ff",
+     "type": "sulphites",
+     "name": "Sulphites",
+     "slug": "sulphites",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052ff-04104ef2.png",
+     "tracesOf": false
+    }
+   ],
+   "id": "6099506c9c6d58742c5645ca",
+   "slug": "balsamic-glaze",
+   "shipped": true,
+   "imagePath": "/ingredient/6099506c9c6d58742c5645ca-e90feae2.png",
+   "uuid": "7d6d6c52-1f3d-5b04-a304-da8006314d73",
+   "type": "balsamic-glaze",
+   "allergens": [
+    {
+     "triggersTracesOf": false,
+     "id": "57962a07b7e8697d4b3052ff",
+     "type": "sulphites",
+     "name": "Sulphites",
+     "slug": "sulphites",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052ff-04104ef2.png",
+     "tracesOf": false
+    }
+   ]
+  },
+  {
+   "allergensNew": [],
+   "id": "5c3f3eadc445fa4233599443",
+   "type": "sriracha (anchovy)",
+   "name": "Sriracha Sauce",
+   "slug": "sriracha-sauce",
+   "shipped": true,
+   "imagePath": "/ingredient/5c3f3eadc445fa4233599443-96eadeef.png",
+   "familyId": "58877cf3ed71a76e9c03fb6f",
+   "uuid": "4bb2d585-8bff-53e8-85b3-fc1744a8b5bd",
+   "allergens": []
+  },
+  {
+   "shipped": true,
+   "imagePath": "/ingredient/630743ac2cde2f8741db9ef8-d831ae12.png",
+   "familyId": "6299e0f4f7cd25bc1c024384",
+   "allergensNew": [
+    {
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "63c00da40c675b6b333afdb4",
+     "type": "traces-of-pecan_nuts",
+     "name": "Pecan Nuts",
+     "slug": "traces-of-pecan-nuts"
+    },
+    {
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "5acf972fae08b54d333ac322",
+     "type": "traces-of-sesame",
+     "name": "Sesame",
+     "slug": "traces-of-sesame",
+     "iconPath": ""
+    },
+    {
+     "triggersTracesOf": false,
+     "id": "62cc417a2f15d58ec3559424",
+     "type": "traces-of-hazelnuts",
+     "name": "Hazelnuts",
+     "slug": "traces-of-hazelnuts",
+     "iconPath": "",
+     "tracesOf": true
+    },
+    {
+     "id": "63c00da4c4bb723852bbf3ef",
+     "type": "traces-of-pistachio",
+     "name": "Pistachio nuts",
+     "slug": "traces-of-pistachio-nuts",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "triggersTracesOf": false,
+     "id": "63c00da4c4bb723852bbf3cb",
+     "type": "traces-of-cashew_nuts",
+     "name": "Cashew nuts",
+     "slug": "traces-of-cashew-nuts",
+     "iconPath": "",
+     "tracesOf": true
+    },
+    {
+     "id": "57962a07b7e8697d4b305302",
+     "type": "traces-of-nuts",
+     "name": "Nuts",
+     "slug": "traces-of-nuts",
+     "iconPath": "/allergens/57962a07b7e8697d4b305302-20b4388c.png",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "62038a7c614fc10b645e85b9",
+     "type": "traces-of-almonds",
+     "name": "Almonds",
+     "slug": "traces-of-almonds"
+    },
+    {
+     "id": "5a9614ab30006c2c026cf562",
+     "type": "traces-of-peanuts",
+     "name": "Peanut",
+     "slug": "traces-of-peanut",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "slug": "traces-of-macadamia-nuts",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "63c00da40c675b6b333afd9e",
+     "type": "traces-of-macadamia",
+     "name": "Macadamia Nuts"
+    },
+    {
+     "id": "63c00da40c675b6b333afdb0",
+     "type": "traces-of-brazil_nuts",
+     "name": "Brazil nuts",
+     "slug": "traces-of-brazil-nuts",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "tracesOf": true,
+     "triggersTracesOf": true,
+     "id": "57962a07b7e8697d4b3052f3",
+     "type": "maycontaintracesofallergens",
+     "name": "May contain traces of allergens",
+     "slug": "may-contain-traces-of-allergens",
+     "iconPath": ""
+    },
+    {
+     "triggersTracesOf": false,
+     "id": "5fdcaac412e5336f910e70bd",
+     "type": "almonds",
+     "name": "Almonds",
+     "slug": "almonds",
+     "iconPath": "",
+     "tracesOf": false
+    },
+    {
+     "id": "57962a07b7e8697d4b3052fb",
+     "type": "nuts",
+     "name": "Nuts",
+     "slug": "nuts",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052fb-172b155c.png",
+     "tracesOf": false,
+     "triggersTracesOf": false
+    }
+   ],
+   "id": "6837308042dc4b928197f3a9",
+   "uuid": "6232ce43-438d-40ac-9671-91c7981b569f",
+   "type": "toasted-flaked-almonds",
+   "name": "Toasted Flaked Almonds",
+   "slug": "toasted-flaked-almonds",
+   "allergens": [
+    {
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "63c00da40c675b6b333afdb4",
+     "type": "traces-of-pecan_nuts",
+     "name": "Pecan Nuts",
+     "slug": "traces-of-pecan-nuts"
+    },
+    {
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "5acf972fae08b54d333ac322",
+     "type": "traces-of-sesame",
+     "name": "Sesame",
+     "slug": "traces-of-sesame",
+     "iconPath": ""
+    },
+    {
+     "triggersTracesOf": false,
+     "id": "62cc417a2f15d58ec3559424",
+     "type": "traces-of-hazelnuts",
+     "name": "Hazelnuts",
+     "slug": "traces-of-hazelnuts",
+     "iconPath": "",
+     "tracesOf": true
+    },
+    {
+     "id": "63c00da4c4bb723852bbf3ef",
+     "type": "traces-of-pistachio",
+     "name": "Pistachio nuts",
+     "slug": "traces-of-pistachio-nuts",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "triggersTracesOf": false,
+     "id": "63c00da4c4bb723852bbf3cb",
+     "type": "traces-of-cashew_nuts",
+     "name": "Cashew nuts",
+     "slug": "traces-of-cashew-nuts",
+     "iconPath": "",
+     "tracesOf": true
+    },
+    {
+     "id": "57962a07b7e8697d4b305302",
+     "type": "traces-of-nuts",
+     "name": "Nuts",
+     "slug": "traces-of-nuts",
+     "iconPath": "/allergens/57962a07b7e8697d4b305302-20b4388c.png",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "62038a7c614fc10b645e85b9",
+     "type": "traces-of-almonds",
+     "name": "Almonds",
+     "slug": "traces-of-almonds"
+    },
+    {
+     "id": "5a9614ab30006c2c026cf562",
+     "type": "traces-of-peanuts",
+     "name": "Peanut",
+     "slug": "traces-of-peanut",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "slug": "traces-of-macadamia-nuts",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false,
+     "id": "63c00da40c675b6b333afd9e",
+     "type": "traces-of-macadamia",
+     "name": "Macadamia Nuts"
+    },
+    {
+     "id": "63c00da40c675b6b333afdb0",
+     "type": "traces-of-brazil_nuts",
+     "name": "Brazil nuts",
+     "slug": "traces-of-brazil-nuts",
+     "iconPath": "",
+     "tracesOf": true,
+     "triggersTracesOf": false
+    },
+    {
+     "tracesOf": true,
+     "triggersTracesOf": true,
+     "id": "57962a07b7e8697d4b3052f3",
+     "type": "maycontaintracesofallergens",
+     "name": "May contain traces of allergens",
+     "slug": "may-contain-traces-of-allergens",
+     "iconPath": ""
+    },
+    {
+     "triggersTracesOf": false,
+     "id": "5fdcaac412e5336f910e70bd",
+     "type": "almonds",
+     "name": "Almonds",
+     "slug": "almonds",
+     "iconPath": "",
+     "tracesOf": false
+    },
+    {
+     "id": "57962a07b7e8697d4b3052fb",
+     "type": "nuts",
+     "name": "Nuts",
+     "slug": "nuts",
+     "iconPath": "/allergens/57962a07b7e8697d4b3052fb-172b155c.png",
+     "tracesOf": false,
+     "triggersTracesOf": false
+    }
+   ]
+  },
+  {
+   "type": "egg",
+   "slug": "egg",
+   "shipped": false,
+   "familyId": "58877cf3ed71a76e9c03fb94",
+   "allergensNew": [],
+   "id": "5fc0f772688281450b8bd085",
+   "uuid": "172d30c6-5146-4ca5-94cb-3e3a1419a286",
+   "name": "Egg",
+   "imagePath": "/ingredient/5fc0f772688281450b8bd085-0465a8a3.png",
+   "allergens": []
+  },
+  {
+   "shipped": false,
+   "familyId": "58877cf3ed71a76e9c03fb61",
+   "allergensNew": [],
+   "id": "627c173e7497c13c5c9b98a0",
+   "uuid": "e26ca58d-4c2b-445d-9fa6-e83b6ab19951",
+   "name": "Salt for the Breadcrumbs",
+   "slug": "salt-for-the-breadcrumbs",
+   "imagePath": "/ingredient/627c173e7497c13c5c9b98a0-0920ccad.png",
+   "type": "salt-for-the-breadcrumbs",
+   "allergens": []
+  }
+ ],
+ "isAddon": false,
+ "isPublished": true,
+ "languageCode": "en-GB",
+ "name": "Crispy Chicken Goujons and Cheesy Wedges",
+ "nutrition": [
+  {
+   "unit": "kJ",
+   "id": "6a5a17be60ad7c1d46604441",
+   "type": "57b42a48b7e8697d4b30530d",
+   "name": "Energy (kJ)",
+   "amount": 2985
+  },
+  {
+   "name": "Energy (kcal)",
+   "unit": "kcal",
+   "id": "6a5a17be60ad7c1d46604442",
+   "type": "57b42a48b7e8697d4b305304",
+   "amount": 713
+  },
+  {
+   "unit": "g",
+   "id": "6a5a17be60ad7c1d46604443",
+   "type": "57b42a48b7e8697d4b305307",
+   "name": "Fat",
+   "amount": 26.2
+  },
+  {
+   "id": "6a5a17be60ad7c1d46604444",
+   "type": "57b42a48b7e8697d4b305308",
+   "name": "of which saturates",
+   "unit": "g",
+   "amount": 8.6
+  },
+  {
+   "id": "6a5a17be60ad7c1d46604445",
+   "type": "57b42a48b7e8697d4b305305",
+   "name": "Carbohydrate",
+   "unit": "g",
+   "amount": 76.7
+  },
+  {
+   "id": "6a5a17be60ad7c1d46604446",
+   "type": "57b42a48b7e8697d4b305306",
+   "name": "of which sugars",
+   "unit": "g",
+   "amount": 10.7
+  },
+  {
+   "id": "6a5a17be60ad7c1d46604447",
+   "type": "57b42a48b7e8697d4b30530a",
+   "name": "Dietary Fibre",
+   "unit": "g",
+   "amount": 7.9
+  },
+  {
+   "unit": "g",
+   "id": "6a5a17be60ad7c1d46604448",
+   "type": "57b42a48b7e8697d4b305309",
+   "name": "Protein",
+   "amount": 51.5
+  },
+  {
+   "unit": "g",
+   "id": "6a5a17be60ad7c1d4660444a",
+   "type": "57b42a48b7e8697d4b30530b",
+   "name": "Salt",
+   "amount": 3.5
+  },
+  {
+   "id": "6a5a17be60ad7c1d4660444c",
+   "type": "652d4d58ce1a3c29bd168c82",
+   "name": "Potassium",
+   "unit": "mg",
+   "amount": 1160.3
+  },
+  {
+   "unit": "mg",
+   "id": "6a5a17be60ad7c1d4660444d",
+   "type": "652d4d6bce1a3c29bd168c84",
+   "name": "Calcium",
+   "amount": 234.7
+  },
+  {
+   "id": "6a5a17be60ad7c1d4660444e",
+   "type": "652d4d7bce1a3c29bd168c86",
+   "name": "Iron",
+   "unit": "mg",
+   "amount": 1.6
+  }
+ ],
+ "prepTime": "PT45M",
+ "recipeId": "693adbb51101204cae74ecbc",
+ "servingSize": 546,
+ "slug": "crispy-chicken-goujons-and-cheesy-wedges",
+ "steps": [
+  {
+   "id": "6a5a17be60ad7c1d4660444f",
+   "index": 1,
+   "instructions": "<p>Preheat your oven to 220\u00b0C/200\u00b0C fan/gas mark 7.</p>\n<p>Chop the <strong>potatoes</strong> into 2cm wide wedges (no need to peel).</p>\n<p>Pop the <strong>wedges</strong> onto a large baking tray. Drizzle with <strong>oil</strong>, season with <strong>salt</strong> and <strong>pepper</strong>, then toss to coat. Spread out in a single layer. <span style=\"color: rgb(45, 194, 107)\"><strong>TIP:</strong></span> <em>Use two baking trays if necessary.</em></p>\n<p>When the oven is hot, roast on the top shelf until golden, 25-35 mins. Turn halfway through.</p>",
+   "instructionsHTML": "<p>Preheat your oven to 220\u00b0C/200\u00b0C fan/gas mark 7.</p>\n<p>Chop the <strong>potatoes</strong> into 2cm wide wedges (no need to peel).</p>\n<p>Pop the <strong>wedges</strong> onto a large baking tray. Drizzle with <strong>oil</strong>, season with <strong>salt</strong> and <strong>pepper</strong>, then toss to coat. Spread out in a single layer. <span style=\"color: rgb(45, 194, 107)\"><strong>TIP:</strong></span> <em>Use two baking trays if necessary.</em></p>\n<p>When the oven is hot, roast on the top shelf until golden, 25-35 mins. Turn halfway through.</p>",
+   "instructionsMarkdown": "<p>Preheat your oven to 220\u00b0C/200\u00b0C fan/gas mark 7.</p>\n<p>Chop the <strong>potatoes</strong> into 2cm wide wedges (no need to peel).</p>\n<p>Pop the <strong>wedges</strong> onto a large baking tray. Drizzle with <strong>oil</strong>, season with <strong>salt</strong> and <strong>pepper</strong>, then toss to coat. Spread out in a single layer. <span style=\"color: rgb(45, 194, 107)\"><strong>TIP:</strong></span> <em>Use two baking trays if necessary.</em></p>\n<p>When the oven is hot, roast on the top shelf until golden, 25-35 mins. Turn halfway through.</p>",
+   "images": [
+    {
+     "path": "/693adbb51101204cae74ecbc/step-baa42500.jpg",
+     "link": "/693adbb51101204cae74ecbc/step-baa42500.jpg",
+     "caption": "Bake the Wedges",
+     "id": "6a5a19749d7ea80023b9fe1c"
+    }
+   ],
+   "videos": []
+  },
+  {
+   "id": "6a5a17be60ad7c1d46604450",
+   "index": 2,
+   "instructions": "<p>Meanwhile, grate the <strong>Cheddar cheese</strong>. In a small bowl, combine the <span style=\"color: rgb(224, 62, 45)\"><strong>sriracha </strong></span>and <strong>mayo</strong>.\u00a0</p>\n<p><span style=\"color: rgb(230, 126, 35)\"><strong>Make kid friendly:</strong></span><em> If you\u2019re cooking for kids that don&#39;t like spice, keep the mayo and sriracha separate.</em></p>\n<p>Slice the <strong>chicken breasts</strong> widthways into 2cm thin strips. <span style=\"color: rgb(224, 62, 45)\"><strong>IMPORTANT:</strong></span> <em>Wash your hands and equipment after handling raw chicken and its packaging.</em></p>\n<p>Slice the<strong> chicken breasts </strong>widthways into 2cm thin strips. <span style=\"color: rgb(45, 194, 107)\"><strong id=\"docs-internal-guid-06aa3cfb-7fff-7fad-3618-265a0ee995c2\">TIP: </strong></span><em>Notice a stronger smell from your chicken? Don\u2019t worry, this is normal due to packaging we use to keep it fresh.</em><strong><span style=\"color: rgb(224, 62, 45)\"> IMPORTANT:</span></strong> <em>Wash your hands and equipment after handling raw chicken and its packaging.</em></p>",
+   "instructionsHTML": "<p>Meanwhile, grate the <strong>Cheddar cheese</strong>. In a small bowl, combine the <span style=\"color: rgb(224, 62, 45)\"><strong>sriracha </strong></span>and <strong>mayo</strong>.\u00a0</p>\n<p><span style=\"color: rgb(230, 126, 35)\"><strong>Make kid friendly:</strong></span><em> If you\u2019re cooking for kids that don&#39;t like spice, keep the mayo and sriracha separate.</em></p>\n<p>Slice the <strong>chicken breasts</strong> widthways into 2cm thin strips. <span style=\"color: rgb(224, 62, 45)\"><strong>IMPORTANT:</strong></span> <em>Wash your hands and equipment after handling raw chicken and its packaging.</em></p>\n<p>Slice the<strong> chicken breasts </strong>widthways into 2cm thin strips. <span style=\"color: rgb(45, 194, 107)\"><strong id=\"docs-internal-guid-06aa3cfb-7fff-7fad-3618-265a0ee995c2\">TIP: </strong></span><em>Notice a stronger smell from your chicken? Don\u2019t worry, this is normal due to packaging we use to keep it fresh.</em><strong><span style=\"color: rgb(224, 62, 45)\"> IMPORTANT:</span></strong> <em>Wash your hands and equipment after handling raw chicken and its packaging.</em></p>",
+   "instructionsMarkdown": "<p>Meanwhile, grate the <strong>Cheddar cheese</strong>. In a small bowl, combine the <span style=\"color: rgb(224, 62, 45)\"><strong>sriracha </strong></span>and <strong>mayo</strong>.\u00a0</p>\n<p><span style=\"color: rgb(230, 126, 35)\"><strong>Make kid friendly:</strong></span><em> If you\u2019re cooking for kids that don&#39;t like spice, keep the mayo and sriracha separate.</em></p>\n<p>Slice the <strong>chicken breasts</strong> widthways into 2cm thin strips. <span style=\"color: rgb(224, 62, 45)\"><strong>IMPORTANT:</strong></span> <em>Wash your hands and equipment after handling raw chicken and its packaging.</em></p>\n<p>Slice the<strong> chicken breasts </strong>widthways into 2cm thin strips. <span style=\"color: rgb(45, 194, 107)\"><strong id=\"docs-internal-guid-06aa3cfb-7fff-7fad-3618-265a0ee995c2\">TIP: </strong></span><em>Notice a stronger smell from your chicken? Don\u2019t worry, this is normal due to packaging we use to keep it fresh.</em><strong><span style=\"color: rgb(224, 62, 45)\"> IMPORTANT:</span></strong> <em>Wash your hands and equipment after handling raw chicken and its packaging.</em></p>",
+   "images": [
+    {
+     "path": "/693adbb51101204cae74ecbc/step-5c40ec10.jpg",
+     "link": "/693adbb51101204cae74ecbc/step-5c40ec10.jpg",
+     "caption": "Get Prepped",
+     "id": "6a5a19749d7ea80023b9fe1d"
+    }
+   ],
+   "videos": []
+  },
+  {
+   "instructions": "<p><span style=\"color: rgb(230, 126, 35)\"><strong>Kid&#39;s step:</strong> </span><em>Crack the egg (see pantry for amount) into a bowl and whisk.</em></p>\n<p>In another bowl, combine the <strong>breadcrumbs</strong>, <span style=\"color: rgb(224, 62, 45)\"><strong>Central American style spice mix</strong></span> and the <strong>salt</strong> (see pantry for amount).</p>\n<p>Season the <strong>chicken</strong>, then dip into the <strong>egg</strong> and then the <strong>breadcrumbs</strong>, ensuring it&#39;s completely coated. Transfer to a clean plate. <span style=\"color: rgb(224, 62, 45)\"><strong>IMPORTANT:</strong></span> <em>Wash your hands and equipment after handling raw chicken and its packaging and discard any excess egg.\u00a0</em></p>",
+   "instructionsHTML": "<p><span style=\"color: rgb(230, 126, 35)\"><strong>Kid&#39;s step:</strong> </span><em>Crack the egg (see pantry for amount) into a bowl and whisk.</em></p>\n<p>In another bowl, combine the <strong>breadcrumbs</strong>, <span style=\"color: rgb(224, 62, 45)\"><strong>Central American style spice mix</strong></span> and the <strong>salt</strong> (see pantry for amount).</p>\n<p>Season the <strong>chicken</strong>, then dip into the <strong>egg</strong> and then the <strong>breadcrumbs</strong>, ensuring it&#39;s completely coated. Transfer to a clean plate. <span style=\"color: rgb(224, 62, 45)\"><strong>IMPORTANT:</strong></span> <em>Wash your hands and equipment after handling raw chicken and its packaging and discard any excess egg.\u00a0</em></p>",
+   "instructionsMarkdown": "<p><span style=\"color: rgb(230, 126, 35)\"><strong>Kid&#39;s step:</strong> </span><em>Crack the egg (see pantry for amount) into a bowl and whisk.</em></p>\n<p>In another bowl, combine the <strong>breadcrumbs</strong>, <span style=\"color: rgb(224, 62, 45)\"><strong>Central American style spice mix</strong></span> and the <strong>salt</strong> (see pantry for amount).</p>\n<p>Season the <strong>chicken</strong>, then dip into the <strong>egg</strong> and then the <strong>breadcrumbs</strong>, ensuring it&#39;s completely coated. Transfer to a clean plate. <span style=\"color: rgb(224, 62, 45)\"><strong>IMPORTANT:</strong></span> <em>Wash your hands and equipment after handling raw chicken and its packaging and discard any excess egg.\u00a0</em></p>",
+   "images": [
+    {
+     "path": "/693adbb51101204cae74ecbc/step-d5b19020.jpg",
+     "link": "/693adbb51101204cae74ecbc/step-d5b19020.jpg",
+     "caption": "Kids\u2019 Step: Crumb the Chicken",
+     "id": "6a5a19749d7ea80023b9fe1e"
+    }
+   ],
+   "videos": [],
+   "id": "6a5a17be60ad7c1d46604451",
+   "index": 3
+  },
+  {
+   "instructionsMarkdown": "<p>Pop a large frying pan on high heat and add enough <strong>oil</strong> to completely coat the bottom of the pan. <span style=\"color: rgb(45, 194, 107)\"><strong>TIP:</strong></span> <em>You want the oil to be hot so the chicken fries properly - heat for 2-3 mins before you add the chicken.\u00a0</em></p>\n<p>Once hot, lay in the <strong>chicken</strong>. Season with <strong>salt</strong> and <strong>pepper</strong>. Cook until golden brown, 3-4 mins each side. Adjust the heat if necessary.<span style=\"color: rgb(224, 62, 45)\"><strong> IMPORTANT:</strong></span> <em>The chicken is cooked when no longer pink in the middle.</em></p>\n<p>Once cooked, transfer the <strong>chicken</strong> to a plate lined with kitchen paper.</p>",
+   "images": [
+    {
+     "path": "/693adbb51101204cae74ecbc/step-f88d9e30.jpg",
+     "link": "/693adbb51101204cae74ecbc/step-f88d9e30.jpg",
+     "caption": "Time to Fry",
+     "id": "6a5a19749d7ea80023b9fe1f"
+    }
+   ],
+   "videos": [],
+   "id": "6a5a17be60ad7c1d46604452",
+   "index": 4,
+   "instructions": "<p>Pop a large frying pan on high heat and add enough <strong>oil</strong> to completely coat the bottom of the pan. <span style=\"color: rgb(45, 194, 107)\"><strong>TIP:</strong></span> <em>You want the oil to be hot so the chicken fries properly - heat for 2-3 mins before you add the chicken.\u00a0</em></p>\n<p>Once hot, lay in the <strong>chicken</strong>. Season with <strong>salt</strong> and <strong>pepper</strong>. Cook until golden brown, 3-4 mins each side. Adjust the heat if necessary.<span style=\"color: rgb(224, 62, 45)\"><strong> IMPORTANT:</strong></span> <em>The chicken is cooked when no longer pink in the middle.</em></p>\n<p>Once cooked, transfer the <strong>chicken</strong> to a plate lined with kitchen paper.</p>",
+   "instructionsHTML": "<p>Pop a large frying pan on high heat and add enough <strong>oil</strong> to completely coat the bottom of the pan. <span style=\"color: rgb(45, 194, 107)\"><strong>TIP:</strong></span> <em>You want the oil to be hot so the chicken fries properly - heat for 2-3 mins before you add the chicken.\u00a0</em></p>\n<p>Once hot, lay in the <strong>chicken</strong>. Season with <strong>salt</strong> and <strong>pepper</strong>. Cook until golden brown, 3-4 mins each side. Adjust the heat if necessary.<span style=\"color: rgb(224, 62, 45)\"><strong> IMPORTANT:</strong></span> <em>The chicken is cooked when no longer pink in the middle.</em></p>\n<p>Once cooked, transfer the <strong>chicken</strong> to a plate lined with kitchen paper.</p>"
+  },
+  {
+   "instructionsMarkdown": "<p>When the <strong>wedges</strong> have 5 mins remaining, remove from the oven and sprinkle over the <strong>cheese</strong>.</p>\n<p><span style=\"color: rgb(0, 0, 0)\">Return to the oven and bake until melted, 5 mins.</span></p>\n<p><span style=\"color: rgb(0, 0, 0)\">Meanwhile, trim the <strong>cucumber</strong>, then halve lengthways. Cut lengthways into roughly 1cm wide strips, then cut into 1cm pieces widthways.</span></p>",
+   "images": [
+    {
+     "path": "/693adbb51101204cae74ecbc/step-ddc60840.jpg",
+     "link": "/693adbb51101204cae74ecbc/step-ddc60840.jpg",
+     "caption": "Cheese Please",
+     "id": "6a5a19749d7ea80023b9fe20"
+    }
+   ],
+   "videos": [],
+   "id": "6a5a17be60ad7c1d46604453",
+   "index": 5,
+   "instructions": "<p>When the <strong>wedges</strong> have 5 mins remaining, remove from the oven and sprinkle over the <strong>cheese</strong>.</p>\n<p><span style=\"color: rgb(0, 0, 0)\">Return to the oven and bake until melted, 5 mins.</span></p>\n<p><span style=\"color: rgb(0, 0, 0)\">Meanwhile, trim the <strong>cucumber</strong>, then halve lengthways. Cut lengthways into roughly 1cm wide strips, then cut into 1cm pieces widthways.</span></p>",
+   "instructionsHTML": "<p>When the <strong>wedges</strong> have 5 mins remaining, remove from the oven and sprinkle over the <strong>cheese</strong>.</p>\n<p><span style=\"color: rgb(0, 0, 0)\">Return to the oven and bake until melted, 5 mins.</span></p>\n<p><span style=\"color: rgb(0, 0, 0)\">Meanwhile, trim the <strong>cucumber</strong>, then halve lengthways. Cut lengthways into roughly 1cm wide strips, then cut into 1cm pieces widthways.</span></p>"
+  },
+  {
+   "instructions": "<p>Share the<strong> chicken goujons</strong> and<strong> cheesy wedges</strong> between serving plates.\u00a0</p>\n<p>Combine the<strong> cucumber chunks</strong> and <strong>rocket </strong>in a serving bowl.</p>\n<p>Drizzle over the<strong> balsamic glaze</strong> and a little<strong> olive oil</strong> to finish.\u00a0</p>\n<p>Sprinkle over the<strong> flaked almonds</strong> and drizzle over the <strong>sriracha mayo </strong>(add less if you&#39;d prefer things milder) for those who&#39;d like.</p>\n<p><span style=\"color: rgb(230, 126, 35)\"><strong>Make kid friendly:</strong></span> <em>If you&#39;ve kept the mayo and sriracha separate, drizzle the sriracha for those who&#39;d like and dollop the mayo alongside for dipping.</em></p>",
+   "instructionsHTML": "<p>Share the<strong> chicken goujons</strong> and<strong> cheesy wedges</strong> between serving plates.\u00a0</p>\n<p>Combine the<strong> cucumber chunks</strong> and <strong>rocket </strong>in a serving bowl.</p>\n<p>Drizzle over the<strong> balsamic glaze</strong> and a little<strong> olive oil</strong> to finish.\u00a0</p>\n<p>Sprinkle over the<strong> flaked almonds</strong> and drizzle over the <strong>sriracha mayo </strong>(add less if you&#39;d prefer things milder) for those who&#39;d like.</p>\n<p><span style=\"color: rgb(230, 126, 35)\"><strong>Make kid friendly:</strong></span> <em>If you&#39;ve kept the mayo and sriracha separate, drizzle the sriracha for those who&#39;d like and dollop the mayo alongside for dipping.</em></p>",
+   "instructionsMarkdown": "<p>Share the<strong> chicken goujons</strong> and<strong> cheesy wedges</strong> between serving plates.\u00a0</p>\n<p>Combine the<strong> cucumber chunks</strong> and <strong>rocket </strong>in a serving bowl.</p>\n<p>Drizzle over the<strong> balsamic glaze</strong> and a little<strong> olive oil</strong> to finish.\u00a0</p>\n<p>Sprinkle over the<strong> flaked almonds</strong> and drizzle over the <strong>sriracha mayo </strong>(add less if you&#39;d prefer things milder) for those who&#39;d like.</p>\n<p><span style=\"color: rgb(230, 126, 35)\"><strong>Make kid friendly:</strong></span> <em>If you&#39;ve kept the mayo and sriracha separate, drizzle the sriracha for those who&#39;d like and dollop the mayo alongside for dipping.</em></p>",
+   "images": [
+    {
+     "caption": "Serve Up",
+     "path": "/693adbb51101204cae74ecbc/step-f7e16b50.jpg",
+     "link": "/693adbb51101204cae74ecbc/step-f7e16b50.jpg",
+     "id": "6a5a19749d7ea80023b9fe21"
+    }
+   ],
+   "videos": [],
+   "id": "6a5a17be60ad7c1d46604454",
+   "index": 6
+  }
+ ],
+ "tags": [
+  {
+   "id": "6a5a17be60ad7c1d46604455",
+   "name": "High Protein",
+   "type": "high-protein",
+   "slug": "high-protein",
+   "colorHandle": "",
+   "preferences": [
+    "Protein Rich"
+   ],
+   "displayLabel": true
+  },
+  {
+   "id": "6a5a17be60ad7c1d46604456",
+   "name": "Medium Spice",
+   "type": "spicy",
+   "slug": "medium-spice",
+   "colorHandle": "spicy",
+   "preferences": null,
+   "displayLabel": true
+  },
+  {
+   "slug": "egg-s-not-included",
+   "colorHandle": "regular",
+   "preferences": [
+    "Chef's Choice"
+   ],
+   "displayLabel": true,
+   "id": "6a5a17be60ad7c1d46604457",
+   "name": "Egg(s) not included",
+   "type": "eggs-not-included"
+  },
+  {
+   "displayLabel": false,
+   "id": "6a5a17be60ad7c1d46604458",
+   "name": "world-flavors",
+   "type": "world-flavors",
+   "slug": "world-flavors",
+   "colorHandle": "",
+   "preferences": null
+  },
+  {
+   "displayLabel": false,
+   "id": "6a5a17be60ad7c1d46604459",
+   "name": "classic-plates",
+   "type": "classic-plates",
+   "slug": "classic-plates",
+   "colorHandle": "",
+   "preferences": null
+  },
+  {
+   "type": "customer-fave",
+   "slug": "customer-favourite",
+   "colorHandle": "",
+   "preferences": [
+    "Chef's Choice"
+   ],
+   "displayLabel": true,
+   "id": "6a5a17be60ad7c1d4660445a",
+   "name": "Customer Favourite"
+  },
+  {
+   "preferences": null,
+   "displayLabel": true,
+   "id": "6a5a17be60ad7c1d4660445b",
+   "name": "Family Friendly",
+   "type": "family-friendly",
+   "slug": "family-friendly",
+   "colorHandle": "familyFriendly"
+  }
+ ],
+ "tier": 3,
+ "totalTime": "PT35M",
+ "uniqueRecipeCode": "R17041-18",
+ "updatedAt": "2026-07-17T11:53:34.797Z",
+ "utensils": [
+  {
+   "id": "57e2674fb7e8697d4b305368",
+   "type": "bakingsheet",
+   "name": "Baking Tray"
+  },
+  {
+   "id": "57e2674fb7e8697d4b30536e",
+   "type": "grater",
+   "name": "Grater"
+  },
+  {
+   "id": "57e2674fb7e8697d4b305369",
+   "type": "bowl",
+   "name": "Bowl"
+  },
+  {
+   "name": "Pan",
+   "id": "57e2674fb7e8697d4b305375",
+   "type": "pan"
+  }
+ ],
+ "uuid": "d871c025-087b-4cad-ad8f-223a77de0c35",
+ "yields": [
+  {
+   "id": "6a5a17be60ad7c1d4660445c",
+   "yields": 2,
+   "ingredients": [
+    {
+     "amount": 450,
+     "unit": "grams",
+     "id": "5a39929ec9fd0814815939c2"
+    },
+    {
+     "id": "555c9d234dab7162138b4568",
+     "amount": 32,
+     "unit": "grams"
+    },
+    {
+     "id": "69146769623e0c85b6821082",
+     "amount": 50,
+     "unit": "grams"
+    },
+    {
+     "amount": 2,
+     "unit": "unit(s)",
+     "id": "554a5e56f8b25ed7288b4576"
+    },
+    {
+     "id": "68371e2f42dc4b928197f136",
+     "amount": 50,
+     "unit": "grams"
+    },
+    {
+     "id": "59ad32ea2c3e08228606b422",
+     "amount": 1,
+     "unit": "sachet(s)"
+    },
+    {
+     "amount": 1,
+     "unit": "unit(s)",
+     "id": "62fcaa53bd9a2478e193f0b4"
+    },
+    {
+     "id": "555092a4f8b25ed3468b4569",
+     "amount": 20,
+     "unit": "grams"
+    },
+    {
+     "id": "6099506c9c6d58742c5645ca",
+     "amount": 12,
+     "unit": "grams"
+    },
+    {
+     "unit": "milliliter(s)",
+     "id": "5c3f3eadc445fa4233599443",
+     "amount": 16
+    },
+    {
+     "amount": 15,
+     "unit": "grams",
+     "id": "6837308042dc4b928197f3a9"
+    },
+    {
+     "amount": 1,
+     "unit": "unit(s)",
+     "id": "5fc0f772688281450b8bd085"
+    },
+    {
+     "id": "627c173e7497c13c5c9b98a0",
+     "amount": 0.25,
+     "unit": "tsp"
+    }
+   ]
+  },
+  {
+   "id": "6a5a17be60ad7c1d4660445d",
+   "yields": 3,
+   "ingredients": [
+    {
+     "id": "5a39929ec9fd0814815939c2",
+     "amount": 700,
+     "unit": "grams"
+    },
+    {
+     "id": "555c9d234dab7162138b4568",
+     "amount": 64,
+     "unit": "grams"
+    },
+    {
+     "id": "69146769623e0c85b6821082",
+     "amount": 80,
+     "unit": "grams"
+    },
+    {
+     "amount": 3,
+     "unit": "unit(s)",
+     "id": "554a5e56f8b25ed7288b4576"
+    },
+    {
+     "amount": 75,
+     "unit": "grams",
+     "id": "68371e2f42dc4b928197f136"
+    },
+    {
+     "id": "59ad32ea2c3e08228606b422",
+     "amount": 1,
+     "unit": "sachet(s)"
+    },
+    {
+     "id": "62fcaa53bd9a2478e193f0b4",
+     "amount": 1.5,
+     "unit": "unit(s)"
+    },
+    {
+     "id": "555092a4f8b25ed3468b4569",
+     "amount": 40,
+     "unit": "grams"
+    },
+    {
+     "id": "6099506c9c6d58742c5645ca",
+     "amount": 18,
+     "unit": "grams"
+    },
+    {
+     "unit": "milliliter(s)",
+     "id": "5c3f3eadc445fa4233599443",
+     "amount": 32
+    },
+    {
+     "id": "6837308042dc4b928197f3a9",
+     "amount": 25,
+     "unit": "grams"
+    },
+    {
+     "id": "5fc0f772688281450b8bd085",
+     "amount": 2,
+     "unit": "unit(s)"
+    },
+    {
+     "amount": 0.5,
+     "unit": "tsp",
+     "id": "627c173e7497c13c5c9b98a0"
+    }
+   ]
+  },
+  {
+   "id": "6a5a17be60ad7c1d4660445e",
+   "yields": 4,
+   "ingredients": [
+    {
+     "id": "5a39929ec9fd0814815939c2",
+     "amount": 900,
+     "unit": "grams"
+    },
+    {
+     "id": "555c9d234dab7162138b4568",
+     "amount": 64,
+     "unit": "grams"
+    },
+    {
+     "id": "69146769623e0c85b6821082",
+     "amount": 100,
+     "unit": "grams"
+    },
+    {
+     "id": "554a5e56f8b25ed7288b4576",
+     "amount": 4,
+     "unit": "unit(s)"
+    },
+    {
+     "unit": "grams",
+     "id": "68371e2f42dc4b928197f136",
+     "amount": 100
+    },
+    {
+     "id": "59ad32ea2c3e08228606b422",
+     "amount": 2,
+     "unit": "sachet(s)"
+    },
+    {
+     "id": "62fcaa53bd9a2478e193f0b4",
+     "amount": 2,
+     "unit": "unit(s)"
+    },
+    {
+     "id": "555092a4f8b25ed3468b4569",
+     "amount": 40,
+     "unit": "grams"
+    },
+    {
+     "unit": "grams",
+     "id": "6099506c9c6d58742c5645ca",
+     "amount": 24
+    },
+    {
+     "id": "5c3f3eadc445fa4233599443",
+     "amount": 32,
+     "unit": "milliliter(s)"
+    },
+    {
+     "id": "6837308042dc4b928197f3a9",
+     "amount": 30,
+     "unit": "grams"
+    },
+    {
+     "id": "5fc0f772688281450b8bd085",
+     "amount": 2,
+     "unit": "unit(s)"
+    },
+    {
+     "id": "627c173e7497c13c5c9b98a0",
+     "amount": 0.5,
+     "unit": "tsp"
+    }
+   ]
+  }
+ ],
+ "label": [
+  {
+   "id": "6a5a17be60ad7c1d46604440",
+   "type": "cooking-with-kids",
+   "name": "Cooking with Kids",
+   "foregroundColor": "#FFFFFF",
+   "backgroundColor": "#1A5DB6",
+   "showToCustomer": true
+  }
+ ],
+ "updatedCanonical": "693adbb51101204cae74ecbc",
+ "adjustedRating": 4.137292861938477,
+ "averageRating": 3.3098342418670654,
+ "favoritesCount": 69,
+ "ratingsCount": 422,
+ "isCanonical": true,
+ "id": "693adbb51101204cae74ecbc-en-GB",
+ "videoMetadata": {
+  "thumbnails": {}
+ },
+ "reviews": null,
+ "canonicalLink": "https://www.hellofresh.co.uk/recipes/crispy-chicken-goujons-and-cheesy-wedges-693adbb51101204cae74ecbc",
+ "websiteUrl": "https://www.hellofresh.co.uk/recipes/crispy-chicken-goujons-and-cheesy-wedges-693adbb51101204cae74ecbc",
+ "disableTierAutoUpdate": false,
+ "reviewSummaryHighlights": [],
+ "aggregateRating": 4.315008798818938,
+ "aggregateRatingsCount": 2292
+}

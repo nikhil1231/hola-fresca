@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Scrape output: SQLite DB and raw payload cache (rebuildable from the source)
+data/
 .env
 .env.*
 !.env.example
