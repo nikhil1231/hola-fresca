@@ -77,6 +77,13 @@ class NormalizedRecipe:
     fat_g: float | None = None
     carbs_g: float | None = None
 
+    avg_rating: float | None = None
+    ratings_count: int | None = None
+    favorites_count: int | None = None
+    is_addon: bool = False
+    source_created_at: str | None = None
+    source_updated_at: str | None = None
+
     ingredients: list[NormalizedIngredient] = field(default_factory=list)
     steps: list[NormalizedStep] = field(default_factory=list)
     nutrition: list[NormalizedNutrition] = field(default_factory=list)

@@ -340,6 +340,18 @@ def normalize(
     return result
 
 
+def _parse_dt(value: str | None):
+    """Parse an ISO-8601 timestamp (e.g. '2025-12-15T20:10:55.108Z') to naive UTC."""
+    if not value:
+        return None
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
 def _set_status(session: Session, state_id: int, status: str, error: str | None) -> None:
     state = session.get(ScrapeState, state_id)
     if state is not None:
@@ -379,6 +391,12 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
         fat_g=recipe.fat_g,
         carbs_g=recipe.carbs_g,
         is_complete=1 if recipe.is_complete else 0,
+        avg_rating=recipe.avg_rating,
+        ratings_count=recipe.ratings_count,
+        favorites_count=recipe.favorites_count,
+        is_addon=1 if recipe.is_addon else 0,
+        source_created_at=_parse_dt(recipe.source_created_at),
+        source_updated_at=_parse_dt(recipe.source_updated_at),
         scraped_at=datetime.now(timezone.utc),
     )
     row.ingredients = [
@@ -433,8 +451,14 @@ def status_counts(source: RecipeSource, session_factory: sessionmaker[Session]) 
             .select_from(Recipe)
             .where(Recipe.source == source.name, Recipe.is_complete == 1)
         )
+        curated = session.scalar(
+            select(func.count())
+            .select_from(Recipe)
+            .where(Recipe.source == source.name, Recipe.curated == 1)
+        )
     return {
         "states": {status: count for status, count in state_rows},
         "recipes": recipes or 0,
         "complete": complete or 0,
+        "curated": curated or 0,
     }

@@ -42,6 +42,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--retry-errors", action="store_true")
     p_run.add_argument("--force", action="store_true")
 
+    p_cur = sub.add_parser("curate", help="flag the active library (Profile A by default)")
+    p_cur.add_argument("--min-ratings", type=int, default=25)
+    p_cur.add_argument("--min-stars", type=float, default=0.0)
+    p_cur.add_argument("--since-year", type=int, default=None)
+    p_cur.add_argument("--keep-addons", action="store_true", help="do not drop add-on items")
+    p_cur.add_argument("--no-dedup", action="store_true", help="keep all versions of a dish")
+
     sub.add_parser("status", help="print pipeline state counts")
     return parser
 
@@ -87,6 +94,26 @@ def main(argv: list[str] | None = None) -> int:
             f"({res.incomplete} incomplete stubs, {res.errors} errors)"
         )
 
+    if args.command == "curate":
+        from app.scraper.curate import CurationRules, curate
+
+        rules = CurationRules(
+            min_ratings=args.min_ratings,
+            min_avg_rating=args.min_stars,
+            since_year=args.since_year,
+            drop_addons=not args.keep_addons,
+            dedup_by_name=not args.no_dedup,
+        )
+        rep = curate(session_factory, source.name, rules)
+        print(f"curate: {rep.curated} of {rep.total} recipes flagged as active library")
+        print(
+            "  cut: "
+            f"{rep.cut_incomplete} incomplete, {rep.cut_bundle} bundles, "
+            f"{rep.cut_low_kcal} low-kcal, {rep.cut_addon} add-ons, "
+            f"{rep.cut_unrated} under-rated, {rep.cut_low_stars} low-stars, "
+            f"{rep.cut_old} too-old, {rep.cut_dup} duplicate versions"
+        )
+
     if args.command == "status":
         counts = pipeline.status_counts(source, session_factory)
         print(f"source: {source.name}")
@@ -95,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    {status:<12} {count}")
         print(f"  recipes stored : {counts['recipes']}")
         print(f"  complete       : {counts['complete']}")
+        print(f"  curated (active): {counts['curated']}")
 
     return 0
 

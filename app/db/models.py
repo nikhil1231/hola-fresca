@@ -87,6 +87,21 @@ class Recipe(Base):
     # Deprecated stub recipes from the source are stored but flagged False.
     is_complete: Mapped[bool] = mapped_column(Integer, default=0, index=True)
 
+    # Source quality/recency signals, used for library curation and as inputs
+    # to the planner (popularity, freshness). ``is_addon`` marks non-standalone
+    # items (extra protein, side veg) rather than full meals.
+    avg_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ratings_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    favorites_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_addon: Mapped[bool] = mapped_column(Integer, default=0)
+    source_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Curation flag: the active library the app/planner uses. Set by the
+    # ``curate`` command; all recipes are retained regardless so curation can be
+    # re-run with different rules.
+    curated: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+
     scraped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

@@ -45,6 +45,15 @@ def test_normalize_complete_recipe(source: HelloFreshSource) -> None:
     assert recipe.carbs_g == 76.7
 
 
+def test_curation_signal_fields(source: HelloFreshSource) -> None:
+    recipe = source.normalize(_load("hellofresh_complete.json"), url="")
+    assert recipe.ratings_count == 422
+    assert recipe.favorites_count == 69
+    assert recipe.avg_rating and 3.0 < recipe.avg_rating < 3.5
+    assert recipe.is_addon is False
+    assert recipe.source_created_at and recipe.source_created_at.startswith("2025-12-15")
+
+
 def test_ingredients_joined_with_base_yield_amounts(source: HelloFreshSource) -> None:
     recipe = source.normalize(_load("hellofresh_complete.json"), url="")
     assert len(recipe.ingredients) == 13

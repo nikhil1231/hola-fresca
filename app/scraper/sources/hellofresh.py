@@ -100,6 +100,12 @@ class HelloFreshSource:
             total_time_min=parse_iso8601_duration_minutes(r.get("totalTime")),
             serving_size_g=_as_float(r.get("servingSize")),
             image_path=r.get("imagePath") or None,
+            avg_rating=_as_float(r.get("averageRating")),
+            ratings_count=_as_int(r.get("ratingsCount")),
+            favorites_count=_as_int(r.get("favoritesCount")),
+            is_addon=bool(r.get("isAddon")),
+            source_created_at=r.get("createdAt") or None,
+            source_updated_at=r.get("updatedAt") or None,
         )
 
         recipe.ingredients = self._ingredients(r, recipe)
@@ -221,5 +227,14 @@ def _as_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
