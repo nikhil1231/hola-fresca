@@ -1,0 +1,15 @@
+{
+  "searchTerm": "potatoes",
+  "content": {
+    "products": [
+      {
+        "id": "552ecfc0-e064-4916-8968-4ed4c64c58de",
+        "name": "Ocado White Potatoes 2kg"
+      },
+      {
+        "id": "baac2960-65d0-4eab-91cc-944bdad56996",
+        "name": "M&S Baby Potatoes 1kg"
+      }
+    ]
+  }
+}

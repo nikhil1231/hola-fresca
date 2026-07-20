@@ -1,0 +1,22 @@
+{
+  "id": "552ecfc0-e064-4916-8968-4ed4c64c58de",
+  "name": "Ocado White Potatoes 2kg",
+  "brand": {
+    "name": "Ocado"
+  },
+  "packSize": "2kg",
+  "price": "£1.80",
+  "unitPrice": "£0.90 per kg",
+  "breadcrumbs": [
+    {
+      "name": "Fresh & Chilled Food"
+    },
+    {
+      "name": "Vegetables"
+    }
+  ],
+  "image": {
+    "url": "https://images.ocado.com/products/552ecfc0.jpg"
+  },
+  "url": "/products/ocado-white-potatoes-552ecfc0"
+}

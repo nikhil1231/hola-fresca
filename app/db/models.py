@@ -10,15 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import (
-    DateTime,
-    Float,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-)
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -234,3 +226,85 @@ class RecipeAllergen(Base):
     slug: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     recipe: Mapped[Recipe] = relationship(back_populates="allergens")
+
+
+class ProductScrapeState(Base):
+    """Restartable scrape bookkeeping for retailer product caches."""
+
+    __tablename__ = "product_scrape_state"
+    __table_args__ = (
+        UniqueConstraint("retailer", "kind", "key", name="uq_product_scrape_retailer_kind_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)  # search | product
+    key: Mapped[str] = mapped_column(String(256), index=True)
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(32), default="discovered", index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+    discovered_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    normalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Product(Base):
+    """Retailer grocery product candidate for recipe-ingredient mapping."""
+
+    __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("retailer", "sku", name="uq_product_retailer_sku"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    sku: Mapped[str] = mapped_column(String(128), index=True)
+
+    name: Mapped[str] = mapped_column(Text)
+    brand: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pack_size_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pack_size_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pack_size_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_price_basis: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    in_stock: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    scraped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    search_hits: Mapped[list["ProductSearchHit"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
+
+
+class ProductSearchHit(Base):
+    """Links an ingredient worklist term to every product candidate returned."""
+
+    __tablename__ = "product_search_hits"
+    __table_args__ = (
+        UniqueConstraint("retailer", "ingredient_key", "sku", name="uq_product_hit_term_sku"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    ingredient_key: Mapped[str] = mapped_column(Text, index=True)
+    search_term: Mapped[str] = mapped_column(Text)
+    term_rank: Mapped[int] = mapped_column(Integer)
+    line_count: Mapped[int] = mapped_column(Integer)
+    sku: Mapped[str] = mapped_column(String(128), index=True)
+    result_rank: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    product: Mapped[Product | None] = relationship(back_populates="search_hits")

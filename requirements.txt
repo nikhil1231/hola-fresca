@@ -3,3 +3,4 @@ uvicorn[standard]
 pytest
 httpx
 sqlalchemy>=2.0
+playwright
