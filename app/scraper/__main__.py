@@ -42,6 +42,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--retry-errors", action="store_true")
     p_run.add_argument("--force", action="store_true")
 
+    sub.add_parser(
+        "enrich",
+        help="backfill units, convert amounts to grams, compute diet/macro/ratio fields",
+    )
+
     p_cur = sub.add_parser("curate", help="flag the active library (Profile A by default)")
     p_cur.add_argument("--min-ratings", type=int, default=25)
     p_cur.add_argument("--min-stars", type=float, default=0.0)
@@ -94,6 +99,17 @@ def main(argv: list[str] | None = None) -> int:
             f"({res.incomplete} incomplete stubs, {res.errors} errors)"
         )
 
+    if args.command == "enrich":
+        from app.scraper.enrich import enrich
+
+        rep = enrich(session_factory)
+        print(
+            f"enrich: {rep.recipes} recipes; {rep.units_backfilled} units backfilled; "
+            f"{rep.ingredients_gram_resolved}/{rep.ingredients_total} ingredient lines "
+            f"resolved to grams "
+            f"({100 * rep.ingredients_gram_resolved / max(rep.ingredients_total, 1):.0f}%)"
+        )
+
     if args.command == "curate":
         from app.scraper.curate import CurationRules, curate
 
@@ -109,9 +125,10 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "  cut: "
             f"{rep.cut_incomplete} incomplete, {rep.cut_bundle} bundles, "
-            f"{rep.cut_low_kcal} low-kcal, {rep.cut_addon} add-ons, "
-            f"{rep.cut_unrated} under-rated, {rep.cut_low_stars} low-stars, "
-            f"{rep.cut_old} too-old, {rep.cut_dup} duplicate versions"
+            f"{rep.cut_low_kcal} low-kcal, {rep.cut_suspect} bad-macros, "
+            f"{rep.cut_addon} add-ons, {rep.cut_unrated} under-rated, "
+            f"{rep.cut_low_stars} low-stars, {rep.cut_old} too-old, "
+            f"{rep.cut_dup} duplicate versions"
         )
 
     if args.command == "status":

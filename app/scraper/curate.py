@@ -52,6 +52,7 @@ class CurationReport:
     cut_unrated: int = 0
     cut_old: int = 0
     cut_low_stars: int = 0
+    cut_suspect: int = 0
     cut_dup: int = 0
 
 
@@ -81,6 +82,9 @@ def curate(
                 continue
             if r.energy_kcal is not None and r.energy_kcal < MIN_KCAL:
                 report.cut_low_kcal += 1
+                continue
+            if r.macros_suspect:
+                report.cut_suspect += 1
                 continue
             if rules.drop_addons and r.is_addon:
                 report.cut_addon += 1

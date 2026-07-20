@@ -14,6 +14,13 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.canonicalize import to_grams
+from app.classify import (
+    diet_flags,
+    macros_implausible_for_veg,
+    macros_suspect,
+    protein_energy_ratio,
+)
 from app.scraper import storage
 from app.scraper.models import NormalizedRecipe
 from app.scraper.ratelimit import AdaptiveThrottle
@@ -399,19 +406,23 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
         source_updated_at=_parse_dt(recipe.source_updated_at),
         scraped_at=datetime.now(timezone.utc),
     )
-    row.ingredients = [
-        RecipeIngredient(
-            source_ingredient_id=i.source_ingredient_id,
-            name=i.name,
-            raw_text=i.raw_text,
-            type=i.type,
-            slug=i.slug,
-            amount=i.amount,
-            unit=i.unit,
-            image_path=i.image_path,
+    row.ingredients = []
+    for i in recipe.ingredients:
+        grams, canonical_unit = to_grams(i.name, i.amount, i.unit)
+        row.ingredients.append(
+            RecipeIngredient(
+                source_ingredient_id=i.source_ingredient_id,
+                name=i.name,
+                raw_text=i.raw_text,
+                type=i.type,
+                slug=i.slug,
+                amount=i.amount,
+                unit=i.unit,
+                amount_g=grams,
+                canonical_unit=canonical_unit,
+                image_path=i.image_path,
+            )
         )
-        for i in recipe.ingredients
-    ]
     row.steps = [
         RecipeStep(
             index=s.index,
@@ -428,6 +439,23 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
     row.allergens = [
         RecipeAllergen(name=a.name, slug=a.slug) for a in recipe.allergens
     ]
+
+    # Derived per-recipe signals (source-agnostic). Unit backfill + a full grams
+    # pass still run globally in `enrich` after a normalize.
+    names = [i.name for i in recipe.ingredients]
+    allergens = [a.name for a in recipe.allergens]
+    flags = diet_flags(names, allergens, recipe.carbs_g, recipe.energy_kcal)
+    row.is_vegetarian = int(flags["is_vegetarian"])
+    row.is_pescatarian = int(flags["is_pescatarian"])
+    row.is_dairy_free = int(flags["is_dairy_free"])
+    row.is_gluten_free = int(flags["is_gluten_free"])
+    row.is_low_carb = int(flags["is_low_carb"])
+    row.macros_suspect = int(
+        macros_suspect(recipe.protein_g, recipe.carbs_g, recipe.fat_g, recipe.energy_kcal)
+        or macros_implausible_for_veg(flags["is_vegetarian"], recipe.protein_g)
+    )
+    row.protein_energy_ratio = protein_energy_ratio(recipe.protein_g, recipe.energy_kcal)
+
     session.add(row)
     return row
 

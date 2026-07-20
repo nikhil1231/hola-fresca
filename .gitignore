@@ -3,8 +3,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# Scrape output: SQLite DB and raw payload cache (rebuildable from the source)
-data/
+# Scrape output: SQLite DB and raw payload cache (rebuildable from the source).
+# Anchored to the repo root so app/data/ (the committed gram reference) is kept.
+/data/
 .env
 .env.*
 !.env.example

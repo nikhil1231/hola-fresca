@@ -83,6 +83,20 @@ class Recipe(Base):
     fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Protein density (g protein per 100 kcal), a first-class browse/plan metric.
+    protein_energy_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # True when the stated macros don't reconcile with the stated energy (Atwater
+    # check) — a source data error; excluded from the curated library.
+    macros_suspect: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+
+    # Derived dietary suitability, computed from ingredients + allergens + macros
+    # (the source's own tags are incomplete). These back the diet filters.
+    is_vegetarian: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    is_pescatarian: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    is_dairy_free: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    is_gluten_free: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    is_low_carb: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+
     # A recipe is "complete" when it has ingredients, steps and nutrition.
     # Deprecated stub recipes from the source are stored but flagged False.
     is_complete: Mapped[bool] = mapped_column(Integer, default=0, index=True)
@@ -143,6 +157,11 @@ class RecipeIngredient(Base):
     amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Canonical quantity in a metric unit, from the gram-conversion stack. Null
+    # when the ingredient's unit could not be resolved to grams/ml.
+    amount_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    canonical_unit: Mapped[str | None] = mapped_column(String(4), nullable=True)  # 'g' | 'ml'
 
     # Reserved for the canonicalisation phase; unused by the scraper.
     canonical_ingredient_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
