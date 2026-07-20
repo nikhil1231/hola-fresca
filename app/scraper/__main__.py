@@ -53,6 +53,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_cur.add_argument("--since-year", type=int, default=None)
     p_cur.add_argument("--keep-addons", action="store_true", help="do not drop add-on items")
     p_cur.add_argument("--no-dedup", action="store_true", help="keep all versions of a dish")
+    p_cur.add_argument(
+        "--recent-days", type=int, default=120,
+        help="recipes newer than this need only --recent-min-ratings (0 disables)",
+    )
+    p_cur.add_argument("--recent-min-ratings", type=int, default=3)
 
     sub.add_parser("status", help="print pipeline state counts")
     return parser
@@ -119,9 +124,14 @@ def main(argv: list[str] | None = None) -> int:
             since_year=args.since_year,
             drop_addons=not args.keep_addons,
             dedup_by_name=not args.no_dedup,
+            recent_days=args.recent_days,
+            recent_min_ratings=args.recent_min_ratings,
         )
         rep = curate(session_factory, source.name, rules)
-        print(f"curate: {rep.curated} of {rep.total} recipes flagged as active library")
+        print(
+            f"curate: {rep.curated} of {rep.total} recipes flagged as active library "
+            f"({rep.kept_recent} kept via recency exception)"
+        )
         print(
             "  cut: "
             f"{rep.cut_incomplete} incomplete, {rep.cut_bundle} bundles, "

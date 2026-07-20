@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -39,6 +40,11 @@ class CurationRules:
     since_year: int | None = None
     drop_addons: bool = True
     dedup_by_name: bool = True
+    # Recency exception: recipes published within this many days need only
+    # ``recent_min_ratings`` ratings, so new menu items surface before they've
+    # accumulated the full rating count. Set recent_days=0 to disable.
+    recent_days: int = 120
+    recent_min_ratings: int = 3
 
 
 @dataclass
@@ -54,10 +60,17 @@ class CurationReport:
     cut_low_stars: int = 0
     cut_suspect: int = 0
     cut_dup: int = 0
+    kept_recent: int = 0
 
 
 def _year(recipe: Recipe) -> int | None:
     return recipe.source_created_at.year if recipe.source_created_at else None
+
+
+def _is_recent(recipe: Recipe, days: int) -> bool:
+    if days <= 0 or recipe.source_created_at is None:
+        return False
+    return (datetime.utcnow() - recipe.source_created_at) <= timedelta(days=days)
 
 
 def curate(
@@ -89,9 +102,14 @@ def curate(
             if rules.drop_addons and r.is_addon:
                 report.cut_addon += 1
                 continue
-            if (r.ratings_count or 0) < rules.min_ratings:
-                report.cut_unrated += 1
-                continue
+            ratings = r.ratings_count or 0
+            if ratings < rules.min_ratings:
+                # Recency exception: newer recipes qualify with fewer ratings.
+                if _is_recent(r, rules.recent_days) and ratings >= rules.recent_min_ratings:
+                    report.kept_recent += 1
+                else:
+                    report.cut_unrated += 1
+                    continue
             if rules.min_avg_rating and (r.avg_rating or 0) < rules.min_avg_rating:
                 report.cut_low_stars += 1
                 continue
@@ -141,6 +159,4 @@ def _dedup_newest_per_name(recipes: list[Recipe], report: CurationReport) -> lis
     return result
 
 
-from datetime import datetime as _dt  # noqa: E402
-
-_MIN_DT = _dt.min
+_MIN_DT = datetime.min

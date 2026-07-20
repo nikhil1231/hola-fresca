@@ -1,7 +1,7 @@
 """Curation rule tests using synthetic recipes in a temp DB."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -96,3 +96,34 @@ def test_rules_are_reapplyable(factory):
     assert curate(factory, rules=CurationRules(min_ratings=5)).curated == 2
     # Back to strict again.
     assert curate(factory, rules=CurationRules(min_ratings=25)).curated == 1
+
+
+def test_recency_exception_surfaces_new_recipes(factory):
+    now = datetime.utcnow()
+    _seed(
+        factory,
+        [
+            _recipe(source_id="proven", name="Proven", ratings_count=100),
+            _recipe(source_id="new_ok", name="New Popular", ratings_count=12,
+                    source_created_at=now - timedelta(days=40)),
+            _recipe(source_id="new_bare", name="Barely Rated", ratings_count=1,
+                    source_created_at=now - timedelta(days=40)),
+            _recipe(source_id="old_unrated", name="Old Unrated", ratings_count=12),
+        ],
+    )
+    rep = curate(factory, rules=CurationRules(min_ratings=25, recent_days=120,
+                                              recent_min_ratings=3, dedup_by_name=False))
+    with factory() as s:
+        active = {r.source_id for r in s.query(Recipe).filter(Recipe.curated == 1)}
+    # Proven passes normally; New Popular via recency; barely-rated and old-unrated cut.
+    assert active == {"proven", "new_ok"}
+    assert rep.kept_recent == 1
+
+
+def test_recency_can_be_disabled(factory):
+    now = datetime.utcnow()
+    _seed(factory, [_recipe(source_id="new", name="New", ratings_count=12,
+                            source_created_at=now - timedelta(days=10))])
+    rep = curate(factory, rules=CurationRules(recent_days=0, dedup_by_name=False))
+    assert rep.curated == 0
+    assert rep.kept_recent == 0
