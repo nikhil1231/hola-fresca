@@ -1,0 +1,33 @@
+.header {
+  height: 100%;
+  border-bottom: 1px solid var(--mantine-color-gray-2);
+  background: var(--mantine-color-body);
+}
+
+.logo {
+  text-decoration: none;
+  color: var(--mantine-color-dark-8);
+  letter-spacing: -0.02em;
+}
+
+.logoAccent {
+  color: var(--mantine-color-fresh-7);
+}
+
+.navLink {
+  text-decoration: none;
+  color: var(--mantine-color-gray-7);
+  font-weight: 500;
+  font-size: var(--mantine-font-size-sm);
+  padding: 4px 0;
+  border-bottom: 2px solid transparent;
+}
+
+.navLink:hover {
+  color: var(--mantine-color-dark-8);
+}
+
+.navLinkActive {
+  color: var(--mantine-color-fresh-8);
+  border-bottom-color: var(--mantine-color-fresh-6);
+}

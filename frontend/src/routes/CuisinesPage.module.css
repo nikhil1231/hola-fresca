@@ -1,0 +1,24 @@
+.tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 110px;
+  text-decoration: none;
+  color: var(--mantine-color-white);
+  background: linear-gradient(135deg, var(--mantine-color-fresh-6), var(--mantine-color-fresh-9));
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.tile:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+.name {
+  color: var(--mantine-color-white);
+  letter-spacing: -0.01em;
+}
+
+.count {
+  color: rgba(255, 255, 255, 0.85);
+}
