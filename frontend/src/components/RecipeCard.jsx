@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom'
-import { Badge, Card, Group, Image, Stack, Text } from '@mantine/core'
-import { IconClock, IconFlame, IconStarFilled } from '@tabler/icons-react'
+import { Badge, Card, Group, Image, Stack, Text, Tooltip } from '@mantine/core'
+import { IconClock, IconFlame, IconGauge, IconStarFilled } from '@tabler/icons-react'
 
 import classes from './RecipeCard.module.css'
+
+const PROTEIN_DENSITY_BREAKPOINTS = [4, 6, 8]
+const PROTEIN_DENSITY_SEGMENTS = PROTEIN_DENSITY_BREAKPOINTS.length + 1
 
 const PLACEHOLDER =
   'data:image/svg+xml;utf8,' +
@@ -12,6 +15,46 @@ const PLACEHOLDER =
 
 function round(value) {
   return value == null ? null : Math.round(value)
+}
+
+function proteinDensityLevel(value) {
+  if (value == null) return 0
+
+  return PROTEIN_DENSITY_BREAKPOINTS.filter((breakpoint) => value >= breakpoint).length + 1
+}
+
+function ProteinDensityMeter({ value }) {
+  const activeSegments = proteinDensityLevel(value)
+  const label = `${value}g/100kcal protein density`
+
+  return (
+    <Tooltip label={label} withArrow position="top">
+      <span className={classes.densityMetric} aria-label={label}>
+        <IconGauge size={14} className={classes.densityIcon} />
+        <span className={classes.densityMeter} aria-hidden="true">
+          {Array.from({ length: PROTEIN_DENSITY_SEGMENTS }).map((_, index) => (
+            <span
+              key={index}
+              className={[
+                classes.densitySegment,
+                index < activeSegments ? classes.densitySegmentActive : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            />
+          ))}
+        </span>
+      </span>
+    </Tooltip>
+  )
+}
+
+function StatSlot({ children, strong = false }) {
+  return (
+    <div className={strong ? `${classes.statSlot} ${classes.statSlotStrong}` : classes.statSlot}>
+      {children}
+    </div>
+  )
 }
 
 export default function RecipeCard({ recipe }) {
@@ -43,54 +86,64 @@ export default function RecipeCard({ recipe }) {
       </Card.Section>
 
       <Stack gap={6} p="sm" className={classes.body}>
-        {recipe.cuisines?.length > 0 && (
-          <Text size="xs" c="fresh.8" fw={600} tt="uppercase" className={classes.cuisine}>
-            {recipe.cuisines[0]}
-          </Text>
-        )}
-        <Text fw={600} lineClamp={2} className={classes.title}>
-          {recipe.name}
-        </Text>
-        {recipe.headline && (
-          <Text size="xs" c="dimmed" lineClamp={1}>
-            {recipe.headline}
-          </Text>
-        )}
-
-        <Group gap="md" mt={4} className={classes.meta}>
-          {recipe.energy_kcal != null && (
-            <Group gap={4} wrap="nowrap">
-              <IconFlame size={14} />
-              <Text size="xs">{round(recipe.energy_kcal)} kcal</Text>
-            </Group>
-          )}
-          {recipe.protein_g != null && (
-            <Text size="xs" fw={600}>
-              {round(recipe.protein_g)}g protein
+        <div className={classes.content}>
+          {recipe.cuisines?.length > 0 && (
+            <Text size="xs" c="fresh.8" fw={600} tt="uppercase" className={classes.cuisine}>
+              {recipe.cuisines[0]}
             </Text>
           )}
-          {recipe.protein_energy_ratio != null && (
-            <Text size="xs" c="dimmed" title="protein density">
-              {recipe.protein_energy_ratio}g/100kcal
+          <Text fw={600} lineClamp={2} className={classes.title}>
+            {recipe.name}
+          </Text>
+          {recipe.headline && (
+            <Text size="xs" c="dimmed" lineClamp={1}>
+              {recipe.headline}
             </Text>
           )}
-          {recipe.total_time_min != null && (
-            <Group gap={4} wrap="nowrap">
-              <IconClock size={14} />
-              <Text size="xs">{recipe.total_time_min} min</Text>
+          {recipe.tags?.length > 0 && (
+            <Group gap={6} mt={4}>
+              {recipe.tags.slice(0, 2).map((tag) => (
+                <Badge key={tag} variant="light" color="fresh" size="sm" radius="sm">
+                  {tag}
+                </Badge>
+              ))}
             </Group>
           )}
-        </Group>
+        </div>
 
-        {recipe.tags?.length > 0 && (
-          <Group gap={6} mt={4}>
-            {recipe.tags.slice(0, 2).map((tag) => (
-              <Badge key={tag} variant="light" color="fresh" size="sm" radius="sm">
-                {tag}
-              </Badge>
-            ))}
-          </Group>
-        )}
+        <div className={classes.stats}>
+          <div className={classes.statRow}>
+            <StatSlot>
+              {recipe.energy_kcal != null && (
+                <>
+                  <IconFlame size={14} />
+                  <Text size="xs">{round(recipe.energy_kcal)} kcal</Text>
+                </>
+              )}
+            </StatSlot>
+            <StatSlot strong>
+              {recipe.protein_g != null && (
+                <Text size="xs">{round(recipe.protein_g)}g protein</Text>
+              )}
+            </StatSlot>
+          </div>
+
+          <div className={classes.statRow}>
+            <StatSlot>
+              {recipe.protein_energy_ratio != null && (
+                <ProteinDensityMeter value={recipe.protein_energy_ratio} />
+              )}
+            </StatSlot>
+            <StatSlot>
+              {recipe.total_time_min != null && (
+                <>
+                  <IconClock size={14} />
+                  <Text size="xs">{recipe.total_time_min} min</Text>
+                </>
+              )}
+            </StatSlot>
+          </div>
+        </div>
       </Stack>
     </Card>
   )
