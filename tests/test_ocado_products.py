@@ -58,6 +58,19 @@ def test_ocado_fixture_parser_extracts_product_fields():
     assert normalized.url == "https://www.ocado.com/products/ocado-white-potatoes-552ecfc0"
 
 
+def test_product_url_falls_back_to_retailer_product_id():
+    # Real Ocado payloads carry no url field; the UUID productId is not a valid
+    # path (404), but /products/<retailerProductId> 301s to the canonical page.
+    product = {
+        "productId": "233a6dd5-cf2a-4e0d-ae2b-9cbb1f17a7a5",
+        "retailerProductId": "628808011",
+        "name": "Eat Real Lentil Creamy Dill Chips",
+        "price": {"amount": "2.00", "currency": "GBP"},
+    }
+    normalized = normalize_product(product)
+    assert normalized.url == "https://www.ocado.com/products/628808011"
+
+
 def test_ocado_search_fixture_extracts_candidate_ids():
     search = json.loads(open("tests/fixtures/ocado_search_potatoes.json", encoding="utf-8").read())
 

@@ -430,6 +430,12 @@ def _url(node: dict[str, Any], sku: str) -> str:
     value = node.get("url") or node.get("productUrl") or node.get("href")
     if isinstance(value, str) and value:
         return urljoin(BASE_URL, value)
+    # Ocado's canonical product path is /products/<slug>/<retailerProductId>; the
+    # slug is cosmetic, so /products/<retailerProductId> 301-redirects to it. The
+    # UUID sku is NOT a valid path (404), so prefer the retailer product id.
+    retailer_pid = node.get("retailerProductId")
+    if retailer_pid:
+        return f"{BASE_URL}/products/{quote(str(retailer_pid))}"
     return product_url(sku)
 
 
