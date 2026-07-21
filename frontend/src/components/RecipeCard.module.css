@@ -14,7 +14,7 @@
 
 .imageWrap {
   position: relative;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 10;
   overflow: hidden;
 }
 
@@ -33,6 +33,7 @@
 
 .cuisine {
   letter-spacing: 0.04em;
+  margin-bottom: 8px;
 }
 
 .title {
@@ -40,30 +41,44 @@
 }
 
 .body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+  padding: 16px;
 }
 
-.content {
+.copy {
   display: flex;
   flex-direction: column;
+  min-height: 118px;
+}
+
+.subtitle {
+  margin-top: 8px;
+}
+
+.badgeRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+  min-height: 26px;
+  margin-top: auto;
+  padding-top: 12px;
 }
 
 .stats {
   color: var(--mantine-color-gray-7);
   display: grid;
-  gap: 10px;
-  margin-top: auto;
-  padding-top: 12px;
+  gap: 12px;
+  margin: 16px -16px -16px;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--mantine-color-gray-2);
+  background: var(--mantine-color-gray-0);
 }
 
 .statRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
-  column-gap: 14px;
+  column-gap: 20px;
 }
 
 .statSlot {
@@ -86,32 +101,6 @@
   white-space: nowrap;
 }
 
-.densityMetric {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-.densityIcon {
-  color: var(--mantine-color-gray-6);
+.statSlot svg {
   flex: 0 0 auto;
-}
-
-.densityMeter {
-  display: inline-flex;
-  align-items: stretch;
-  gap: 3px;
-  height: 14px;
-  flex: 0 0 auto;
-}
-
-.densitySegment {
-  width: 4px;
-  border-radius: 2px;
-  background: var(--mantine-color-gray-2);
-}
-
-.densitySegmentActive {
-  background: var(--mantine-color-fresh-6);
 }

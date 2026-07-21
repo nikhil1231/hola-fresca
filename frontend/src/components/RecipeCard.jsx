@@ -1,11 +1,10 @@
 import { Link } from 'react-router-dom'
-import { Badge, Card, Group, Image, Stack, Text, Tooltip } from '@mantine/core'
-import { IconClock, IconFlame, IconGauge, IconStarFilled } from '@tabler/icons-react'
+import { Badge, Card, Group, Image, Text, Tooltip } from '@mantine/core'
+import { IconChefHat, IconClock, IconFlame, IconStarFilled } from '@tabler/icons-react'
 
 import classes from './RecipeCard.module.css'
 
-const PROTEIN_DENSITY_BREAKPOINTS = [4, 6, 8]
-const PROTEIN_DENSITY_SEGMENTS = PROTEIN_DENSITY_BREAKPOINTS.length + 1
+const DIFFICULTY = { 1: 'Easy', 2: 'Medium', 3: 'Hard' }
 
 const PLACEHOLDER =
   'data:image/svg+xml;utf8,' +
@@ -17,34 +16,14 @@ function round(value) {
   return value == null ? null : Math.round(value)
 }
 
-function proteinDensityLevel(value) {
-  if (value == null) return 0
+function ProteinValue({ protein, density }) {
+  const value = <Text size="xs">{round(protein)}g protein</Text>
 
-  return PROTEIN_DENSITY_BREAKPOINTS.filter((breakpoint) => value >= breakpoint).length + 1
-}
-
-function ProteinDensityMeter({ value }) {
-  const activeSegments = proteinDensityLevel(value)
-  const label = `${value}g/100kcal protein density`
+  if (density == null) return value
 
   return (
-    <Tooltip label={label} withArrow position="top">
-      <span className={classes.densityMetric} aria-label={label}>
-        <IconGauge size={14} className={classes.densityIcon} />
-        <span className={classes.densityMeter} aria-hidden="true">
-          {Array.from({ length: PROTEIN_DENSITY_SEGMENTS }).map((_, index) => (
-            <span
-              key={index}
-              className={[
-                classes.densitySegment,
-                index < activeSegments ? classes.densitySegmentActive : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            />
-          ))}
-        </span>
-      </span>
+    <Tooltip label={`${density}g protein / 100 kcal`} withArrow position="top">
+      {value}
     </Tooltip>
   )
 }
@@ -85,8 +64,8 @@ export default function RecipeCard({ recipe }) {
         )}
       </Card.Section>
 
-      <Stack gap={6} p="sm" className={classes.body}>
-        <div className={classes.content}>
+      <div className={classes.body}>
+        <div className={classes.copy}>
           {recipe.cuisines?.length > 0 && (
             <Text size="xs" c="fresh.8" fw={600} tt="uppercase" className={classes.cuisine}>
               {recipe.cuisines[0]}
@@ -96,19 +75,18 @@ export default function RecipeCard({ recipe }) {
             {recipe.name}
           </Text>
           {recipe.headline && (
-            <Text size="xs" c="dimmed" lineClamp={1}>
+            <Text size="xs" c="dimmed" lineClamp={1} className={classes.subtitle}>
               {recipe.headline}
             </Text>
           )}
-          {recipe.tags?.length > 0 && (
-            <Group gap={6} mt={4}>
-              {recipe.tags.slice(0, 2).map((tag) => (
+          <div className={classes.badgeRow}>
+            {recipe.tags?.length > 0 &&
+              recipe.tags.slice(0, 2).map((tag) => (
                 <Badge key={tag} variant="light" color="fresh" size="sm" radius="sm">
                   {tag}
                 </Badge>
               ))}
-            </Group>
-          )}
+          </div>
         </div>
 
         <div className={classes.stats}>
@@ -123,15 +101,21 @@ export default function RecipeCard({ recipe }) {
             </StatSlot>
             <StatSlot strong>
               {recipe.protein_g != null && (
-                <Text size="xs">{round(recipe.protein_g)}g protein</Text>
+                <ProteinValue
+                  protein={recipe.protein_g}
+                  density={recipe.protein_energy_ratio}
+                />
               )}
             </StatSlot>
           </div>
 
           <div className={classes.statRow}>
             <StatSlot>
-              {recipe.protein_energy_ratio != null && (
-                <ProteinDensityMeter value={recipe.protein_energy_ratio} />
+              {recipe.difficulty != null && (
+                <>
+                  <IconChefHat size={14} />
+                  <Text size="xs">{DIFFICULTY[recipe.difficulty] ?? 'Difficulty'}</Text>
+                </>
               )}
             </StatSlot>
             <StatSlot>
@@ -144,7 +128,7 @@ export default function RecipeCard({ recipe }) {
             </StatSlot>
           </div>
         </div>
-      </Stack>
+      </div>
     </Card>
   )
 }
