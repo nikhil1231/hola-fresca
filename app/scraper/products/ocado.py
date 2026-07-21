@@ -48,6 +48,8 @@ class NormalizedProduct:
     unit_price_basis: str | None = None
     category: str | None = None
     in_stock: bool | None = None
+    avg_rating: float | None = None
+    ratings_count: int | None = None
     image_url: str | None = None
     url: str | None = None
     raw_json: str | None = None
@@ -129,6 +131,7 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
     pack_raw = _pack_size_raw(payload, name)
     pack_value, pack_unit = parse_pack_size(pack_raw)
     unit_price, unit_basis = _unit_price(payload)
+    avg_rating, ratings_count = _rating(payload)
 
     return NormalizedProduct(
         retailer=RETAILER,
@@ -142,7 +145,9 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
         unit_price=unit_price,
         unit_price_basis=unit_basis,
         category=_category(payload),
-        in_stock=None,
+        in_stock=_in_stock(payload),
+        avg_rating=avg_rating,
+        ratings_count=ratings_count,
         image_url=_image_url(payload),
         url=_url(payload, sku),
         raw_json=json.dumps(payload, ensure_ascii=False),
@@ -380,6 +385,31 @@ def _category(node: dict[str, Any]) -> str | None:
                 if name:
                     parts.append(name)
         return " > ".join(parts) if parts else None
+    return None
+
+
+def _rating(node: dict[str, Any]) -> tuple[float | None, int | None]:
+    summary = node.get("ratingSummary")
+    if not isinstance(summary, dict):
+        return None, None
+    avg = summary.get("overallRating") if summary.get("overallRating") is not None else summary.get("averageRating")
+    count = summary.get("count") if summary.get("count") is not None else summary.get("numberOfRatings")
+    try:
+        avg_val = float(avg) if avg is not None else None
+    except (TypeError, ValueError):
+        avg_val = None
+    try:
+        count_val = int(count) if count is not None else None
+    except (TypeError, ValueError):
+        count_val = None
+    return avg_val, count_val
+
+
+def _in_stock(node: dict[str, Any]) -> bool | None:
+    for key in ("available", "inStock", "isAvailable"):
+        value = node.get(key)
+        if isinstance(value, bool):
+            return value
     return None
 
 

@@ -404,6 +404,8 @@ def _upsert_product(session: Session, product) -> Product:
     existing.unit_price_basis = product.unit_price_basis
     existing.category = product.category
     existing.in_stock = product.in_stock
+    existing.avg_rating = product.avg_rating
+    existing.ratings_count = product.ratings_count
     existing.image_url = product.image_url
     existing.url = product.url
     existing.raw_json = product.raw_json
