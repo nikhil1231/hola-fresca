@@ -1,0 +1,7 @@
+[Unit]
+Description=Sync HolaFresca testing checkout to integration head
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/Documents/Programming/AI/HolaFresca-testing/deploy/sync-integration.sh --restart

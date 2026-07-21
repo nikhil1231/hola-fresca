@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically pin HolaFresca testing to the integration head
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=holafresca-testing-sync.service
+
+[Install]
+WantedBy=timers.target
