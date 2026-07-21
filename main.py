@@ -4,11 +4,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.mapping import router as mapping_router
 from app.api.recipes import router as recipes_router
 
 app = FastAPI(title="HolaFresca")
 
 app.include_router(recipes_router)
+app.include_router(mapping_router)
 
 
 @app.get("/api/health")

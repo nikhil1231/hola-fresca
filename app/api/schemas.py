@@ -103,3 +103,80 @@ class FacetsOut(BaseModel):
     excludes: list[FacetCount]
     ranges: dict[str, NumericRange]
     sorts: list[FacetCount]
+
+
+# --- Ingredient → product mapping review -----------------------------------
+
+class MappingListItem(BaseModel):
+    ingredient_key: str
+    name: str
+    status: str
+    line_count: int
+    spend_score: float | None = None
+    num_candidates: int
+    num_accepted: int
+    needs_substitution: bool
+    each_to_grams: float | None = None
+    top_product_name: str | None = None
+
+
+class MappingListOut(BaseModel):
+    items: list[MappingListItem]
+    counts: dict[str, int]
+
+
+class MappingCandidateOut(BaseModel):
+    product_id: int
+    sku: str
+    name: str
+    brand: str | None = None
+    pack_size_raw: str | None = None
+    pack_size_value: float | None = None
+    pack_size_unit: str | None = None
+    price: float | None = None
+    unit_price: float | None = None
+    unit_price_basis: str | None = None
+    avg_rating: float | None = None
+    ratings_count: int | None = None
+    url: str | None = None
+    result_rank: int
+    # Decision overlay
+    accepted: bool = False
+    rank: int | None = None
+    match_type: str | None = None
+    reason: str | None = None
+
+
+class MappingDetailOut(BaseModel):
+    ingredient_key: str
+    name: str
+    status: str | None = None
+    line_count: int
+    spend_score: float | None = None
+    each_to_grams: float | None = None
+    needs_substitution: bool = False
+    decided_by: str | None = None
+    model: str | None = None
+    llm_notes: str | None = None
+    reviewer_notes: str | None = None
+    usage: dict = {}
+    candidates: list[MappingCandidateOut] = []
+
+
+class AcceptedIn(BaseModel):
+    sku: str
+    rank: int = 1
+    match_type: str = "exact"
+    reason: str | None = None
+
+
+class DecisionIn(BaseModel):
+    status: str
+    accepted: list[AcceptedIn] = []
+    each_to_grams: float | None = None
+    needs_substitution: bool = False
+    reviewer_notes: str | None = None
+
+
+class BulkApproveIn(BaseModel):
+    keys: list[str]

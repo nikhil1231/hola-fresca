@@ -274,6 +274,12 @@ class Product(Base):
 
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     in_stock: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+
+    # Customer rating signals (from the retailer payload); a tie-break between
+    # comparable products and a junk filter during ingredient mapping.
+    avg_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ratings_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -308,3 +314,73 @@ class ProductSearchHit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     product: Mapped[Product | None] = relationship(back_populates="search_hits")
+
+
+class IngredientMapping(Base):
+    """A canonical recipe ingredient resolved to acceptable retailer products.
+
+    One row per ``ingredient_key`` (the merged group from the frequency
+    analysis). Fixes product *identity*, not the pack chosen for a given week —
+    that is the planner's job. Populated as ``proposed`` by the offline LLM pass
+    and moved to ``approved`` by the human review UI; nothing downstream trusts a
+    mapping until it is approved, so the proposal pass is safe to re-run.
+    """
+
+    __tablename__ = "ingredient_mappings"
+    __table_args__ = (
+        UniqueConstraint("retailer", "ingredient_key", name="uq_ingredient_map_retailer_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    ingredient_key: Mapped[str] = mapped_column(Text, index=True)
+    name: Mapped[str] = mapped_column(Text)
+    line_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # proposed -> approved | rejected | needs_review | no_match
+    status: Mapped[str] = mapped_column(String(32), default="proposed", index=True)
+
+    # Grams per single unit, for ingredients the retailer sells by count
+    # (e.g. 1 lime ~= 67 g). Null when the ingredient is sold/used by weight.
+    each_to_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # True when no candidate is a direct match and a substitution/composite is
+    # needed (e.g. stock paste -> stock pot).
+    needs_substitution: Mapped[bool] = mapped_column(Integer, default=0)
+    # line_count x representative price; orders the review queue by spend impact.
+    spend_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    llm_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(16), nullable=True)  # llm | human
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    products: Mapped[list["IngredientMappingProduct"]] = relationship(
+        back_populates="mapping", cascade="all, delete-orphan"
+    )
+
+
+class IngredientMappingProduct(Base):
+    """A candidate product for an ingredient mapping, with the accept decision."""
+
+    __tablename__ = "ingredient_mapping_products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    mapping_id: Mapped[int] = mapped_column(
+        ForeignKey("ingredient_mappings.id", ondelete="CASCADE"), index=True
+    )
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    sku: Mapped[str] = mapped_column(String(128), index=True)
+
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    match_type: Mapped[str] = mapped_column(String(16), default="exact")  # exact|substitute|form_differs
+    accepted: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="llm")  # llm | human
+
+    mapping: Mapped[IngredientMapping] = relationship(back_populates="products")
+    product: Mapped[Product | None] = relationship()
