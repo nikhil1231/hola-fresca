@@ -15,6 +15,11 @@
 # `git reset --hard` restores it rather than losing it.
 set -euo pipefail
 
+# When invoked from the main repo's post-commit hook, git exports GIT_DIR etc.
+# pointing at the committing repo; clear them so our git commands act on the
+# testing checkout below, not on whoever called us.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX 2>/dev/null || true
+
 repo="$HOME/Documents/Programming/AI/HolaFresca-testing"
 branch="integration/hola-fresca"
 service="holafresca-testing.service"
