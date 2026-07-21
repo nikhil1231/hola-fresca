@@ -11,6 +11,7 @@ mappings; nothing downstream trusts them until approved in the review UI.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from sqlalchemy import func, select
@@ -49,6 +50,10 @@ def _statuses(include_proposed: bool) -> tuple[str, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # The OpenAI SDK logs one HTTP line per request at INFO; keep progress readable.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
     engine = make_engine()
     init_db(engine)
     session_factory = make_session_factory(engine)

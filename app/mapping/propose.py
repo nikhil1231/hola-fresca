@@ -8,6 +8,7 @@ safe to re-run and tune.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from app import config
 from app.mapping import service
 from app.mapping.candidates import Candidate, IngredientCandidates, iter_worklist
 from app.mapping.openai_client import Completer
+
+log = logging.getLogger("holafresca.mapping")
 
 MATCH_TYPES = ("exact", "substitute", "form_differs")
 
@@ -192,19 +195,39 @@ def run_propose(
         worklist = iter_worklist(session, csv_path=csv_path, limit=limit)
         existing = service.existing_mapping_keys(session)
 
-    for ic in worklist:
-        # By default (and with --only-missing) skip ingredients already mapped;
-        # --force re-proposes and overwrites them.
-        if ic.ingredient_key in existing and not force:
-            result.skipped += 1
-            continue
+    # By default (and with --only-missing) skip ingredients already mapped;
+    # --force re-proposes and overwrites them.
+    to_process = [ic for ic in worklist if force or ic.ingredient_key not in existing]
+    result.skipped = len(worklist) - len(to_process)
+    total = len(to_process)
+    log.info(
+        "propose: %d in worklist, %d to process, %d already mapped (skipped); model=%s",
+        len(worklist), total, result.skipped, model_name,
+    )
+
+    for i, ic in enumerate(to_process, start=1):
         try:
             proposed = propose_one(ic, complete)
         except Exception as exc:  # noqa: BLE001 - one bad ingredient must not abort the run
             result.errors += 1
             result.notes.append(f"{ic.name}: {exc}")
+            log.warning("[%d/%d] %s -> ERROR: %s", i, total, ic.name, exc)
             continue
         with session_factory() as session:
             service.write_proposal(session, ic, proposed, model=model_name)
         result.proposed += 1
+        flags = []
+        if proposed.each_to_grams is not None:
+            flags.append(f"{proposed.each_to_grams:g}g/ea")
+        if proposed.needs_substitution:
+            flags.append("needs-sub")
+        suffix = f" [{', '.join(flags)}]" if flags else ""
+        log.info(
+            "[%d/%d] %-28s %d/%d accepted%s",
+            i, total, ic.name[:28], len(proposed.accepted), len(ic.candidates), suffix,
+        )
+    log.info(
+        "propose done: %d proposed, %d skipped, %d errors",
+        result.proposed, result.skipped, result.errors,
+    )
     return result
