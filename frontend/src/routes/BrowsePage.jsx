@@ -17,6 +17,7 @@ import { useDisclosure, useIntersection } from '@mantine/hooks'
 import { IconAdjustmentsHorizontal, IconMoodEmpty } from '@tabler/icons-react'
 
 import FilterPanel from '../components/FilterPanel.jsx'
+import { DEFAULT_FACETS } from '../data/defaultFacets.js'
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useFilters, countActiveFilters } from '../hooks/useFilters.js'
 import { useFacets, useRecipes } from '../hooks/useRecipeQueries.js'
@@ -44,10 +45,11 @@ export default function BrowsePage() {
   const recipes = data?.pages.flatMap((p) => p.items) ?? []
   const total = data?.pages[0]?.total ?? 0
   const activeCount = countActiveFilters(filters)
+  const filterFacets = facets ?? DEFAULT_FACETS
 
   const panel = (
     <FilterPanel
-      facets={facets}
+      facets={filterFacets}
       filters={filters}
       setScalar={setScalar}
       setArray={setArray}
@@ -81,7 +83,7 @@ export default function BrowsePage() {
           <Select
             value={filters.sort ?? 'popular'}
             onChange={(v) => setScalar('sort', v)}
-            data={(facets?.sorts ?? []).map((s) => ({ value: s.value, label: s.label }))}
+            data={filterFacets.sorts.map((s) => ({ value: s.value, label: s.label }))}
             allowDeselect={false}
             radius="md"
             size="sm"
