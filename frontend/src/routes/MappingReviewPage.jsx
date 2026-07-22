@@ -72,6 +72,19 @@ export default function MappingReviewPage() {
     setTerm(data.search_term ?? data.name ?? '')
   }, [data])
 
+  // The next ingredient still awaiting review, in the same spend-sorted order as
+  // the list page. Falls back to the top of the queue when the current item is
+  // not in it (e.g. revisiting something already decided). Must run on every
+  // render (before the loading/error early returns) to keep hook order stable.
+  const nextKey = useMemo(() => {
+    const items = queue?.items ?? []
+    const remaining = items.filter((i) => i.ingredient_key !== key)
+    if (!remaining.length) return null
+    const idx = items.findIndex((i) => i.ingredient_key === key)
+    if (idx === -1) return remaining[0].ingredient_key
+    return (items[idx + 1] ?? remaining[0]).ingredient_key
+  }, [queue, key])
+
   if (isLoading) {
     return (
       <Group justify="center" py="xl">
@@ -99,18 +112,6 @@ export default function MappingReviewPage() {
       return { ...prev, [sku]: { ...prev[sku], accepted: checked, rank: checked ? nextRank : 0 } }
     })
   }
-
-  // The next ingredient still awaiting review, in the same spend-sorted order as
-  // the list page. Falls back to the top of the queue when the current item is
-  // not in it (e.g. revisiting something already decided).
-  const nextKey = useMemo(() => {
-    const items = queue?.items ?? []
-    const remaining = items.filter((i) => i.ingredient_key !== key)
-    if (!remaining.length) return null
-    const idx = items.findIndex((i) => i.ingredient_key === key)
-    if (idx === -1) return remaining[0].ingredient_key
-    return (items[idx + 1] ?? remaining[0]).ingredient_key
-  }, [queue, key])
 
   function update(sku, field, value) {
     setPicks((prev) => ({ ...prev, [sku]: { ...prev[sku], [field]: value } }))
