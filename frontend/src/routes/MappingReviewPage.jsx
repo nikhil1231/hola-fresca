@@ -14,11 +14,16 @@ import {
   Stack,
   Table,
   Text,
+  TextInput,
   Textarea,
   Title,
 } from '@mantine/core'
 
-import { useMappingDetail, useSaveDecision } from '../hooks/useMappingQueries.js'
+import {
+  useMappingDetail,
+  useSaveDecision,
+  useSearchCandidates,
+} from '../hooks/useMappingQueries.js'
 
 const MATCH_TYPES = [
   { value: 'exact', label: 'exact' },
@@ -35,12 +40,14 @@ export default function MappingReviewPage() {
   const navigate = useNavigate()
   const { data, isLoading, isError } = useMappingDetail(key)
   const save = useSaveDecision(key)
+  const research = useSearchCandidates(key)
 
   const [picks, setPicks] = useState({})
   const [eachToGrams, setEachToGrams] = useState('')
   const [needsSub, setNeedsSub] = useState(false)
   const [pantryStaple, setPantryStaple] = useState(false)
   const [notes, setNotes] = useState('')
+  const [term, setTerm] = useState('')
 
   // Seed local editing state once the detail loads.
   useEffect(() => {
@@ -59,6 +66,7 @@ export default function MappingReviewPage() {
     setNeedsSub(data.needs_substitution)
     setPantryStaple(data.pantry_staple)
     setNotes(data.reviewer_notes ?? '')
+    setTerm(data.search_term ?? data.name ?? '')
   }, [data])
 
   if (isLoading) {
@@ -150,6 +158,38 @@ export default function MappingReviewPage() {
         </Alert>
       )}
 
+      <Paper withBorder radius="md" p="md">
+        <Group align="flex-end" gap="sm">
+          <TextInput
+            label="Ocado search term"
+            description="Not finding the right product? Reword and search again — results are added to the list below."
+            value={term}
+            onChange={(e) => setTerm(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && term.trim()) research.mutate(term.trim())
+            }}
+            style={{ flex: 1 }}
+          />
+          <Button
+            onClick={() => research.mutate(term.trim())}
+            loading={research.isPending}
+            disabled={!term.trim()}
+          >
+            Search Ocado
+          </Button>
+        </Group>
+        {research.isPending && (
+          <Text size="xs" c="dimmed" mt="xs">
+            Searching Ocado — this drives a real browser session, so it takes a few seconds.
+          </Text>
+        )}
+        {research.isError && (
+          <Text size="xs" c="red" mt="xs">
+            Search failed: {research.error?.message}
+          </Text>
+        )}
+      </Paper>
+
       <Group>
         <NumberInput
           label="Grams per unit (for count-sold items)"
@@ -213,6 +253,11 @@ export default function MappingReviewPage() {
                         <Text size="xs" c="teal.7">
                           {c.reason}
                         </Text>
+                      )}
+                      {c.search_term && c.search_term !== data.name && (
+                        <Badge size="xs" variant="light" color="blue" mt={2}>
+                          via "{c.search_term}"
+                        </Badge>
                       )}
                     </Table.Td>
                     <Table.Td>{c.pack_size_raw ?? '—'}</Table.Td>

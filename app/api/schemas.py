@@ -141,6 +141,7 @@ class MappingCandidateOut(BaseModel):
     ratings_count: int | None = None
     url: str | None = None
     result_rank: int
+    search_term: str | None = None
     # Decision overlay
     accepted: bool = False
     rank: int | None = None
@@ -157,6 +158,7 @@ class MappingDetailOut(BaseModel):
     each_to_grams: float | None = None
     needs_substitution: bool = False
     pantry_staple: bool = False
+    search_term: str | None = None
     decided_by: str | None = None
     model: str | None = None
     llm_notes: str | None = None
@@ -179,6 +181,10 @@ class DecisionIn(BaseModel):
     needs_substitution: bool = False
     pantry_staple: bool = False
     reviewer_notes: str | None = None
+
+
+class SearchIn(BaseModel):
+    term: str
 
 
 class BulkApproveIn(BaseModel):

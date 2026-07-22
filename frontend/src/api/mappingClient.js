@@ -29,6 +29,12 @@ export function saveMappingDecision(key, body) {
   return postJSON(`/api/mapping/ingredients/${encodeURIComponent(key)}`, body)
 }
 
+// Live Ocado re-search: widens this ingredient's candidate pool. Slow (drives a
+// real browser), so the UI shows a loading state.
+export function searchMappingCandidates(key, term) {
+  return postJSON(`/api/mapping/ingredients/${encodeURIComponent(key)}/search`, { term })
+}
+
 export function bulkApprove(keys) {
   return postJSON('/api/mapping/bulk-approve', { keys })
 }

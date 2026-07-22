@@ -16,6 +16,7 @@ from app.api.deps import get_session
 from app.api.schemas import (
     BulkApproveIn,
     DecisionIn,
+    SearchIn,
     MappingCandidateOut,
     MappingDetailOut,
     MappingListItem,
@@ -79,6 +80,7 @@ def get_ingredient(key: str, session: Session = Depends(get_session)) -> Mapping
         each_to_grams=detail.each_to_grams,
         needs_substitution=detail.needs_substitution,
         pantry_staple=detail.pantry_staple,
+        search_term=detail.search_term,
         decided_by=detail.decided_by,
         model=detail.model,
         llm_notes=detail.llm_notes,
@@ -108,6 +110,27 @@ def save_ingredient(
         service.save_decision(session, ic, decision)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_ingredient(key, session)
+
+
+@router.post("/ingredients/{key}/search", response_model=MappingDetailOut)
+def search_ingredient(
+    key: str, body: SearchIn, session: Session = Depends(get_session)
+) -> MappingDetailOut:
+    """Re-search Ocado with the reviewer's own wording and merge the results.
+
+    Widens the candidate pool rather than replacing it, so an earlier good match
+    is never lost. Runs a real browser session, so it is slow (seconds) and
+    deliberately one-at-a-time.
+    """
+    from app.mapping import live_search
+
+    try:
+        live_search.search_and_store(session, key, body.term)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - browser/network failures are expected
+        raise HTTPException(status_code=502, detail=f"Ocado search failed: {exc}") from exc
     return get_ingredient(key, session)
 
 

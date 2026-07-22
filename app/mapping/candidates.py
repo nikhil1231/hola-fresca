@@ -48,6 +48,7 @@ class Candidate:
     ratings_count: int | None
     url: str | None
     result_rank: int
+    search_term: str | None = None
 
 
 @dataclass
@@ -141,6 +142,7 @@ def gather_candidates(
                 ratings_count=product.ratings_count or None,
                 url=product.url,
                 result_rank=hit.result_rank,
+                search_term=hit.search_term,
             )
         )
     return IngredientCandidates(

@@ -351,6 +351,10 @@ class IngredientMapping(Base):
     # builder skips it by default rather than buying it every week. Pantry
     # tracking will later decide when a staple actually needs restocking.
     pantry_staple: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    # The retailer search term that produced the current candidate pool. Seeded
+    # from the recipe ingredient name, overridable by the reviewer when better
+    # wording finds better products ("vegetable stock" vs "vegetable stock paste").
+    search_term: Mapped[str | None] = mapped_column(Text, nullable=True)
     # line_count x representative price; orders the review queue by spend impact.
     spend_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
 

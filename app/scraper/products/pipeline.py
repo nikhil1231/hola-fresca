@@ -295,7 +295,7 @@ def _normalize_products(
             payload = raw.get("response", raw)
             product = normalize_product(payload)
             with session_factory() as session:
-                _upsert_product(session, product)
+                upsert_product(session, product)
                 _set_state(session, state_id, "normalized", None)
             result.normalized += 1
             result.products += 1
@@ -348,7 +348,7 @@ def _normalize_search_hits(
                         product.sku,
                         {"sku": product.sku, "response": product_payload, "source": "search"},
                     )
-                    _upsert_product(session, product)
+                    upsert_product(session, product)
                     decorated_skus.append(product.sku)
                 if not product_ids:
                     product_ids = decorated_skus
@@ -387,7 +387,7 @@ def _normalize_search_hits(
             result.errors += 1
 
 
-def _upsert_product(session: Session, product) -> Product:
+def upsert_product(session: Session, product) -> Product:
     existing = session.scalar(
         select(Product).where(Product.retailer == product.retailer, Product.sku == product.sku)
     )

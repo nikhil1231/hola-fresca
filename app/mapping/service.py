@@ -72,6 +72,7 @@ class IngredientDetail:
     each_to_grams: float | None
     needs_substitution: bool
     pantry_staple: bool
+    search_term: str | None
     decided_by: str | None
     model: str | None
     llm_notes: str | None
@@ -244,6 +245,7 @@ def get_detail(session: Session, ic: IngredientCandidates, retailer: str = RETAI
         each_to_grams=mapping.each_to_grams if mapping else None,
         needs_substitution=bool(mapping.needs_substitution) if mapping else False,
         pantry_staple=bool(mapping.pantry_staple) if mapping else False,
+        search_term=(mapping.search_term if mapping and mapping.search_term else _default_term(ic)),
         decided_by=mapping.decided_by if mapping else None,
         model=mapping.model if mapping else None,
         llm_notes=mapping.llm_notes if mapping else None,
@@ -251,6 +253,11 @@ def get_detail(session: Session, ic: IngredientCandidates, retailer: str = RETAI
         usage=usage,
         candidates=views,
     )
+
+
+def _default_term(ic: IngredientCandidates) -> str:
+    """The term the batch scrape used — the ingredient's own name."""
+    return ic.name
 
 
 def _usage_dict(ic: IngredientCandidates) -> dict:

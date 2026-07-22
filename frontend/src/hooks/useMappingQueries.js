@@ -5,6 +5,7 @@ import {
   fetchMappingDetail,
   fetchMappingList,
   saveMappingDecision,
+  searchMappingCandidates,
 } from '../api/mappingClient.js'
 
 export function useMappingList(status) {
@@ -29,6 +30,16 @@ export function useSaveDecision(key) {
     onSuccess: (data) => {
       qc.setQueryData(['mapping-detail', key], data)
       qc.invalidateQueries({ queryKey: ['mapping-list'] })
+    },
+  })
+}
+
+export function useSearchCandidates(key) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (term) => searchMappingCandidates(key, term),
+    onSuccess: (data) => {
+      qc.setQueryData(['mapping-detail', key], data)
     },
   })
 }
