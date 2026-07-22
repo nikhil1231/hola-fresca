@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
@@ -21,6 +21,7 @@ import {
 
 import {
   useMappingDetail,
+  useMappingList,
   useSaveDecision,
   useSearchCandidates,
 } from '../hooks/useMappingQueries.js'
@@ -41,6 +42,8 @@ export default function MappingReviewPage() {
   const { data, isLoading, isError } = useMappingDetail(key)
   const save = useSaveDecision(key)
   const research = useSearchCandidates(key)
+  // The remaining review queue, so a decision can jump straight to the next one.
+  const { data: queue } = useMappingList('proposed')
 
   const [picks, setPicks] = useState({})
   const [eachToGrams, setEachToGrams] = useState('')
@@ -97,6 +100,18 @@ export default function MappingReviewPage() {
     })
   }
 
+  // The next ingredient still awaiting review, in the same spend-sorted order as
+  // the list page. Falls back to the top of the queue when the current item is
+  // not in it (e.g. revisiting something already decided).
+  const nextKey = useMemo(() => {
+    const items = queue?.items ?? []
+    const remaining = items.filter((i) => i.ingredient_key !== key)
+    if (!remaining.length) return null
+    const idx = items.findIndex((i) => i.ingredient_key === key)
+    if (idx === -1) return remaining[0].ingredient_key
+    return (items[idx + 1] ?? remaining[0]).ingredient_key
+  }, [queue, key])
+
   function update(sku, field, value) {
     setPicks((prev) => ({ ...prev, [sku]: { ...prev[sku], [field]: value } }))
   }
@@ -119,7 +134,12 @@ export default function MappingReviewPage() {
         pantry_staple: pantryStaple,
         reviewer_notes: notes,
       },
-      { onSuccess: () => navigate('/mapping') },
+      {
+        // Advance straight to the next item in the queue so a review pass keeps
+        // moving; fall back to the list once nothing is left to review.
+        onSuccess: () =>
+          navigate(nextKey ? `/mapping/${encodeURIComponent(nextKey)}` : '/mapping'),
+      },
     )
   }
 
