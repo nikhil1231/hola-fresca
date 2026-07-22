@@ -346,6 +346,11 @@ class IngredientMapping(Base):
     # True when no candidate is a direct match and a substitution/composite is
     # needed (e.g. stock paste -> stock pot).
     needs_substitution: Mapped[bool] = mapped_column(Integer, default=0)
+    # A cupboard staple assumed already owned (salt, oil, sugar). The mapping is
+    # still real and approved — identity is worth recording — but the basket
+    # builder skips it by default rather than buying it every week. Pantry
+    # tracking will later decide when a staple actually needs restocking.
+    pantry_staple: Mapped[bool] = mapped_column(Integer, default=0, index=True)
     # line_count x representative price; orders the review queue by spend impact.
     spend_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
 

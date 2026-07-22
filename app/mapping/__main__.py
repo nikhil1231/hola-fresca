@@ -40,6 +40,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_basket = sub.add_parser("basket", help="itemised priced basket for some recipes")
     p_basket.add_argument("recipe_ids", nargs="+", type=int)
     p_basket.add_argument("--include-proposed", action="store_true")
+    p_basket.add_argument(
+        "--include-staples", action="store_true",
+        help="also shop for pantry staples (salt, oil, ...) instead of assuming them owned",
+    )
 
     return parser
 
@@ -99,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "basket":
         basket = coverage_mod.build_basket(
-            session_factory, args.recipe_ids, statuses=_statuses(args.include_proposed)
+            session_factory,
+            args.recipe_ids,
+            statuses=_statuses(args.include_proposed),
+            include_staples=args.include_staples,
         )
         print(f"basket for recipes {args.recipe_ids}:")
         for line in basket.lines:
@@ -111,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
                 else f"{line.product_name or '—'} [{line.note}]"
             )
             print(f"  {line.name:<28} need {line.need_g:g}g -> {detail}")
+        if basket.staples:
+            print(f"  assumed in cupboard: {', '.join(basket.staples)}")
         if basket.unmapped:
             print(f"  unmapped: {', '.join(basket.unmapped)}")
         print(f"  estimated total: £{basket.total:.2f}")

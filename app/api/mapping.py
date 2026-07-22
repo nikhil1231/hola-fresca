@@ -78,6 +78,7 @@ def get_ingredient(key: str, session: Session = Depends(get_session)) -> Mapping
         spend_score=detail.spend_score,
         each_to_grams=detail.each_to_grams,
         needs_substitution=detail.needs_substitution,
+        pantry_staple=detail.pantry_staple,
         decided_by=detail.decided_by,
         model=detail.model,
         llm_notes=detail.llm_notes,
@@ -100,6 +101,7 @@ def save_ingredient(
         ],
         each_to_grams=body.each_to_grams,
         needs_substitution=body.needs_substitution,
+        pantry_staple=body.pantry_staple,
         reviewer_notes=body.reviewer_notes,
     )
     try:

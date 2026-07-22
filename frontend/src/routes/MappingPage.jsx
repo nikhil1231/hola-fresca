@@ -128,6 +128,11 @@ export default function MappingPage() {
                         needs substitution
                       </Badge>
                     )}
+                    {item.pantry_staple && (
+                      <Badge size="xs" color="gray" variant="light">
+                        pantry staple
+                      </Badge>
+                    )}
                   </Table.Td>
                   <Table.Td>{item.line_count.toLocaleString('en-GB')}</Table.Td>
                   <Table.Td>{money(item.spend_score)}</Table.Td>

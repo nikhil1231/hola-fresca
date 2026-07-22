@@ -93,3 +93,40 @@ def test_list_items_sorted_by_spend_desc(factory):
         items = service.list_items(s)
         # Beef (300 x 5.0) outranks salt (50 x 0.5).
         assert [i.ingredient_key for i in items] == ["name:beef", "name:salt"]
+
+
+def test_pantry_staple_persists_and_shows_in_detail(factory):
+    _seed(factory)
+    with factory() as s:
+        ic = gather_candidates(s, "name:chicken breast")
+        service.save_decision(
+            s,
+            ic,
+            service.DecisionInput(
+                status="approved",
+                accepted=[service.AcceptedInput(sku="p1", rank=1)],
+                pantry_staple=True,
+            ),
+        )
+
+    with factory() as s:
+        detail = service.get_detail(s, gather_candidates(s, "name:chicken breast"))
+        assert detail.pantry_staple is True
+        item = next(i for i in service.list_items(s) if i.ingredient_key == "name:chicken breast")
+        assert item.pantry_staple is True
+
+
+def test_pantry_staple_defaults_false(factory):
+    _seed(factory)
+    with factory() as s:
+        ic = gather_candidates(s, "name:chicken breast")
+        service.save_decision(
+            s,
+            ic,
+            service.DecisionInput(
+                status="approved", accepted=[service.AcceptedInput(sku="p1", rank=1)]
+            ),
+        )
+    with factory() as s:
+        detail = service.get_detail(s, gather_candidates(s, "name:chicken breast"))
+        assert detail.pantry_staple is False

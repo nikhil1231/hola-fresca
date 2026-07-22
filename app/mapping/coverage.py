@@ -114,6 +114,20 @@ class Basket:
     lines: list[BasketLine] = field(default_factory=list)
     total: float = 0.0
     unmapped: list[str] = field(default_factory=list)
+    # Cupboard staples assumed already owned, omitted from the shopping list.
+    staples: list[str] = field(default_factory=list)
+
+
+def _approved_mapping(
+    session: Session, key: str, statuses: tuple[str, ...]
+) -> IngredientMapping | None:
+    return session.scalar(
+        select(IngredientMapping).where(
+            IngredientMapping.retailer == RETAILER,
+            IngredientMapping.ingredient_key == key,
+            IngredientMapping.status.in_(statuses),
+        )
+    )
 
 
 def _best_product(session: Session, key: str, statuses: tuple[str, ...]) -> IngredientMappingProduct | None:
@@ -134,6 +148,7 @@ def build_basket(
     recipe_ids: list[int],
     *,
     statuses: tuple[str, ...] = DEFAULT_STATUSES,
+    include_staples: bool = False,
     csv_path: Path | None = None,
 ) -> Basket:
     sid_index = load_source_id_index(csv_path)
@@ -165,6 +180,12 @@ def build_basket(
 
         basket = Basket()
         for key, grams in sorted(need_g.items(), key=lambda kv: kv[1], reverse=True):
+            # Staples (salt, oil, sugar) are mapped and approved, but assumed
+            # already in the cupboard — record them, don't shop for them.
+            mapping = _approved_mapping(session, key, statuses)
+            if mapping is not None and mapping.pantry_staple and not include_staples:
+                basket.staples.append(name_by_key.get(key, key))
+                continue
             best = _best_product(session, key, statuses)
             if best is None:
                 basket.unmapped.append(name_by_key.get(key, key))

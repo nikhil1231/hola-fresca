@@ -116,6 +116,7 @@ class MappingListItem(BaseModel):
     num_candidates: int
     num_accepted: int
     needs_substitution: bool
+    pantry_staple: bool = False
     each_to_grams: float | None = None
     top_product_name: str | None = None
 
@@ -155,6 +156,7 @@ class MappingDetailOut(BaseModel):
     spend_score: float | None = None
     each_to_grams: float | None = None
     needs_substitution: bool = False
+    pantry_staple: bool = False
     decided_by: str | None = None
     model: str | None = None
     llm_notes: str | None = None
@@ -175,6 +177,7 @@ class DecisionIn(BaseModel):
     accepted: list[AcceptedIn] = []
     each_to_grams: float | None = None
     needs_substitution: bool = False
+    pantry_staple: bool = False
     reviewer_notes: str | None = None
 
 

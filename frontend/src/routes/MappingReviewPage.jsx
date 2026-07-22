@@ -39,6 +39,7 @@ export default function MappingReviewPage() {
   const [picks, setPicks] = useState({})
   const [eachToGrams, setEachToGrams] = useState('')
   const [needsSub, setNeedsSub] = useState(false)
+  const [pantryStaple, setPantryStaple] = useState(false)
   const [notes, setNotes] = useState('')
 
   // Seed local editing state once the detail loads.
@@ -56,6 +57,7 @@ export default function MappingReviewPage() {
     setPicks(initial)
     setEachToGrams(data.each_to_grams ?? '')
     setNeedsSub(data.needs_substitution)
+    setPantryStaple(data.pantry_staple)
     setNotes(data.reviewer_notes ?? '')
   }, [data])
 
@@ -106,6 +108,7 @@ export default function MappingReviewPage() {
         accepted,
         each_to_grams: eachToGrams === '' ? null : Number(eachToGrams),
         needs_substitution: needsSub,
+        pantry_staple: pantryStaple,
         reviewer_notes: notes,
       },
       { onSuccess: () => navigate('/mapping') },
@@ -160,6 +163,13 @@ export default function MappingReviewPage() {
           label="Needs substitution / no direct match"
           checked={needsSub}
           onChange={(e) => setNeedsSub(e.currentTarget.checked)}
+          mt="xl"
+        />
+        <Checkbox
+          label="Pantry staple (assume already owned)"
+          description="Kept mapped, but left out of the shopping basket."
+          checked={pantryStaple}
+          onChange={(e) => setPantryStaple(e.currentTarget.checked)}
           mt="xl"
         />
       </Group>

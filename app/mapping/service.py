@@ -34,6 +34,7 @@ class DecisionInput:
     accepted: list[AcceptedInput] = field(default_factory=list)
     each_to_grams: float | None = None
     needs_substitution: bool = False
+    pantry_staple: bool = False
     reviewer_notes: str | None = None
 
 
@@ -56,6 +57,7 @@ class IngredientListItem:
     num_candidates: int
     num_accepted: int
     needs_substitution: bool
+    pantry_staple: bool
     each_to_grams: float | None
     top_product_name: str | None
 
@@ -69,6 +71,7 @@ class IngredientDetail:
     spend_score: float | None
     each_to_grams: float | None
     needs_substitution: bool
+    pantry_staple: bool
     decided_by: str | None
     model: str | None
     llm_notes: str | None
@@ -184,6 +187,7 @@ def save_decision(
     mapping.decided_by = "human"
     mapping.each_to_grams = decision.each_to_grams
     mapping.needs_substitution = 1 if decision.needs_substitution else 0
+    mapping.pantry_staple = 1 if decision.pantry_staple else 0
     mapping.reviewer_notes = decision.reviewer_notes
     mapping.spend_score = _spend_score(ic, [a.sku for a in accepted])
     session.commit()
@@ -239,6 +243,7 @@ def get_detail(session: Session, ic: IngredientCandidates, retailer: str = RETAI
         spend_score=mapping.spend_score if mapping else None,
         each_to_grams=mapping.each_to_grams if mapping else None,
         needs_substitution=bool(mapping.needs_substitution) if mapping else False,
+        pantry_staple=bool(mapping.pantry_staple) if mapping else False,
         decided_by=mapping.decided_by if mapping else None,
         model=mapping.model if mapping else None,
         llm_notes=mapping.llm_notes if mapping else None,
@@ -300,6 +305,7 @@ def list_items(
                 num_candidates=cand_counts.get(mapping.ingredient_key, 0),
                 num_accepted=len(accepted),
                 needs_substitution=bool(mapping.needs_substitution),
+                pantry_staple=bool(mapping.pantry_staple),
                 each_to_grams=mapping.each_to_grams,
                 top_product_name=top_name,
             )
