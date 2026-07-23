@@ -8,6 +8,7 @@ import {
   fetchJob,
   fetchMappingDetail,
   fetchMappingList,
+  fetchMappingStats,
   saveMappingDecision,
   searchMappingCandidates,
   setMappingAlias,
@@ -36,6 +37,7 @@ export function useSaveDecision(key) {
     onSuccess: (data) => {
       qc.setQueryData(['mapping-detail', key], data)
       qc.invalidateQueries({ queryKey: ['mapping-list'] })
+      qc.invalidateQueries({ queryKey: ['mapping-stats'] })
     },
   })
 }
@@ -50,6 +52,10 @@ export function useSearchCandidates(key) {
   })
 }
 
+export function useMappingStats() {
+  return useQuery({ queryKey: ['mapping-stats'], queryFn: fetchMappingStats })
+}
+
 export function useAliases() {
   return useQuery({ queryKey: ['mapping-aliases'], queryFn: fetchAliases })
 }
@@ -62,6 +68,7 @@ export function useSetAlias(key) {
       qc.setQueryData(['mapping-detail', key], data)
       qc.invalidateQueries({ queryKey: ['mapping-list'] })
       qc.invalidateQueries({ queryKey: ['mapping-aliases'] })
+      qc.invalidateQueries({ queryKey: ['mapping-stats'] })
     },
   })
 }
@@ -89,6 +96,7 @@ export function useGenerateMappings() {
   useEffect(() => {
     if (!finished) return
     qc.invalidateQueries({ queryKey: ['mapping-list'] })
+    qc.invalidateQueries({ queryKey: ['mapping-stats'] })
     // Hold on to the finished job so its outcome (including a failure) stays on
     // screen; clearing jobId only stops the polling.
     setLastJob(job)

@@ -35,6 +35,10 @@ export function searchMappingCandidates(key, term) {
   return postJSON(`/api/mapping/ingredients/${encodeURIComponent(key)}/search`, { term })
 }
 
+export function fetchMappingStats() {
+  return getJSON('/api/mapping/stats')
+}
+
 export function fetchAliases() {
   return getJSON('/api/mapping/aliases')
 }

@@ -7,7 +7,9 @@ import {
   Button,
   Group,
   Loader,
+  Paper,
   Progress,
+  Select,
   SegmentedControl,
   Stack,
   Table,
@@ -19,6 +21,7 @@ import {
   useBulkApprove,
   useGenerateMappings,
   useMappingList,
+  useMappingStats,
 } from '../hooks/useMappingQueries.js'
 
 const STATUS_COLORS = {
@@ -29,6 +32,13 @@ const STATUS_COLORS = {
   no_match: 'gray',
 }
 
+const BATCH_SIZES = [
+  { value: '5', label: '5' },
+  { value: '10', label: '10' },
+  { value: '25', label: '25' },
+  { value: '50', label: '50' },
+]
+
 const FILTERS = [
   { label: 'All', value: 'all' },
   { label: 'Proposed', value: 'proposed' },
@@ -37,6 +47,22 @@ const FILTERS = [
   { label: 'No match', value: 'no_match' },
   { label: 'Rejected', value: 'rejected' },
 ]
+
+function Stat({ label, value, sub }) {
+  return (
+    <div>
+      <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+        {label}
+      </Text>
+      <Text fw={700} style={{ fontSize: 22, lineHeight: 1.2 }}>
+        {value ?? '—'}
+      </Text>
+      <Text size="xs" c="dimmed">
+        {sub}
+      </Text>
+    </div>
+  )
+}
 
 function money(value) {
   if (value == null) return '—'
@@ -50,6 +76,8 @@ export default function MappingPage() {
   const { data, isLoading } = useMappingList(status)
   const bulk = useBulkApprove()
   const generate = useGenerateMappings()
+  const { data: stats } = useMappingStats()
+  const [batchSize, setBatchSize] = useState('10')
 
   const counts = data?.counts ?? {}
   const total = Object.values(counts).reduce((a, b) => a + b, 0)
@@ -73,19 +101,43 @@ export default function MappingPage() {
         </Anchor>
       </div>
 
-      {total > 0 && (
-        <div>
-          <Group justify="space-between" mb={4}>
-            <Text size="sm" c="dimmed">
-              {approved} of {total} approved
+      <Paper withBorder radius="md" p="md">
+        <Group align="flex-end" gap="xl" wrap="wrap">
+          <div style={{ minWidth: 220, flex: 1 }}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+              Recipe coverage
             </Text>
-            <Text size="sm" c="dimmed">
-              {counts.proposed ?? 0} proposed · {counts.needs_review ?? 0} needs review
+            <Group align="baseline" gap="xs">
+              <Text fw={700} style={{ fontSize: 30, lineHeight: 1.1 }}>
+                {stats ? `${stats.lines_pct}%` : '—'}
+              </Text>
+              <Text size="sm" c="dimmed">
+                of ingredient uses
+              </Text>
+            </Group>
+            <Progress value={stats?.lines_pct ?? 0} color="teal" mt={6} />
+            <Text size="xs" c="dimmed" mt={4}>
+              {stats
+                ? `${stats.lines_resolved.toLocaleString('en-GB')} of ${stats.lines_total.toLocaleString('en-GB')} ingredient lines across the curated library`
+                : 'loading…'}
             </Text>
-          </Group>
-          <Progress value={total ? (approved / total) * 100 : 0} color="teal" />
-        </div>
-      )}
+          </div>
+
+          <Stat label="Ingredients mapped" value={stats?.resolved_keys} sub={`of ${stats?.distinct_keys ?? '—'} used in recipes`} />
+          <Stat label="Approved" value={approved} sub={`of ${total} in the queue`} />
+          <Stat
+            label="Not yet added"
+            value={stats?.remaining_to_add}
+            sub="available to load"
+          />
+        </Group>
+        {(counts.proposed || counts.needs_review) && (
+          <Text size="sm" c="dimmed" mt="sm">
+            {counts.proposed ?? 0} proposed · {counts.needs_review ?? 0} needs review ·{' '}
+            {counts.no_match ?? 0} no match
+          </Text>
+        )}
+      </Paper>
 
       <Group justify="space-between">
         <SegmentedControl value={filter} onChange={setFilter} data={FILTERS} size="sm" />
@@ -168,7 +220,7 @@ export default function MappingPage() {
 
       {!isLoading && (data?.items ?? []).length === 0 && (
         <Text c="dimmed" ta="center" py="xl">
-          No mappings yet — use “Load 10 more ingredients” below to start, or run{' '}
+          No mappings yet — use “Load more ingredients” below to start, or run{' '}
           <code>python -m app.mapping propose</code>.
         </Text>
       )}
@@ -179,19 +231,37 @@ export default function MappingPage() {
         </Alert>
       )}
 
-      <Group justify="center" pb="xl">
+      <Group justify="center" gap="sm" pb={4}>
+        <Select
+          value={batchSize}
+          onChange={(v) => setBatchSize(v ?? '10')}
+          data={BATCH_SIZES}
+          disabled={generate.running}
+          w={110}
+          allowDeselect={false}
+          aria-label="How many ingredients to add"
+        />
+        {/* The label must not change while loading: Mantine hides the children
+            but keeps the button sized to them, so a live-updating label makes
+            the spinner jitter. Progress goes underneath instead. */}
         <Button
           variant="light"
           loading={generate.running}
-          onClick={() => generate.start(10)}
+          onClick={() => generate.start(Number(batchSize))}
         >
-          {generate.running && generate.job
+          Load more ingredients
+        </Button>
+      </Group>
+
+      {generate.running && (
+        <Text size="sm" c="dimmed" ta="center" pb="xl">
+          {generate.job
             ? `Adding ingredients… ${generate.job.processed}/${generate.job.total}${
                 generate.job.current ? ` · ${generate.job.current}` : ''
               }`
-            : 'Load 10 more ingredients'}
-        </Button>
-      </Group>
+            : 'Starting…'}
+        </Text>
+      )}
 
       {generate.job?.status === 'done' && (
         <Text size="sm" c="dimmed" ta="center">

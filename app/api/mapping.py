@@ -21,6 +21,7 @@ from app.api.schemas import (
     DecisionIn,
     GenerateIn,
     JobOut,
+    MappingStatsOut,
     SearchIn,
     MappingCandidateOut,
     MappingDetailOut,
@@ -149,6 +150,39 @@ def search_ingredient(
     except Exception as exc:  # noqa: BLE001 - browser/network failures are expected
         raise HTTPException(status_code=502, detail=f"Ocado search failed: {exc}") from exc
     return get_ingredient(key, session)
+
+
+@router.get("/stats", response_model=MappingStatsOut)
+def get_stats(session: Session = Depends(get_session)) -> MappingStatsOut:
+    """Headline progress: how much of the recipe library the mapping can price."""
+    from contextlib import contextmanager
+
+    from app.mapping import coverage as coverage_mod
+    from app.mapping import generate as generate_mod
+
+    # coverage_report wants a session factory; hand it this request's session
+    # (without closing it) so the endpoint honours the injected dependency.
+    @contextmanager
+    def _request_session():
+        yield session
+
+    rep = coverage_mod.coverage_report(_request_session)
+    counts = dict(
+        session.execute(
+            select(IngredientMapping.status, func.count()).group_by(IngredientMapping.status)
+        ).all()
+    )
+    remaining = len(generate_mod.pending_worklist(session, count=100_000))
+    return MappingStatsOut(
+        lines_total=rep.lines_total,
+        lines_resolved=rep.lines_resolved,
+        lines_pct=round(rep.pct, 1),
+        distinct_keys=rep.distinct_keys,
+        resolved_keys=rep.resolved_keys,
+        mappings_total=sum(counts.values()),
+        approved=counts.get("approved", 0),
+        remaining_to_add=remaining,
+    )
 
 
 @router.get("/aliases", response_model=AliasListOut)

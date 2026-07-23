@@ -210,6 +210,19 @@ class GenerateIn(BaseModel):
     count: int = 10
 
 
+class MappingStatsOut(BaseModel):
+    # Coverage measured by ingredient *uses* across the curated library, which is
+    # what actually matters: resolving one common ingredient beats ten rare ones.
+    lines_total: int = 0
+    lines_resolved: int = 0
+    lines_pct: float = 0.0
+    distinct_keys: int = 0
+    resolved_keys: int = 0
+    mappings_total: int = 0
+    approved: int = 0
+    remaining_to_add: int = 0
+
+
 class JobOut(BaseModel):
     job_id: str
     status: str

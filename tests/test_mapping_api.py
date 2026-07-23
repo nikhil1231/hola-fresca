@@ -95,3 +95,27 @@ def test_bulk_approve_endpoint(client):
     r = client.post("/api/mapping/bulk-approve", json={"keys": [KEY]})
     assert r.status_code == 200 and r.json()["approved"] == 1
     assert client.get("/api/mapping/ingredients").json()["counts"] == {"approved": 1}
+
+
+def test_stats_reports_coverage_and_remaining(client):
+    r = client.get("/api/mapping/stats")
+    assert r.status_code == 200
+    body = r.json()
+    # No curated recipes seeded, so line coverage is zero but the shape is right.
+    assert set(body) >= {
+        "lines_total", "lines_resolved", "lines_pct",
+        "distinct_keys", "resolved_keys", "mappings_total", "approved",
+        "remaining_to_add",
+    }
+    assert body["lines_pct"] == 0.0
+    assert body["remaining_to_add"] == 0  # the one CSV row already has candidates
+
+
+def test_stats_counts_approved_mappings(client):
+    client.post(
+        f"/api/mapping/ingredients/{KEY_Q}",
+        json={"status": "approved", "accepted": [{"sku": "p1", "rank": 1}]},
+    )
+    body = client.get("/api/mapping/stats").json()
+    assert body["approved"] == 1
+    assert body["mappings_total"] == 1
