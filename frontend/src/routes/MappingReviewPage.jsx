@@ -24,6 +24,7 @@ import {
   useMappingList,
   useSaveDecision,
   useSearchCandidates,
+  useSetAlias,
 } from '../hooks/useMappingQueries.js'
 
 const MATCH_TYPES = [
@@ -44,6 +45,9 @@ export default function MappingReviewPage() {
   const research = useSearchCandidates(key)
   // The remaining review queue, so a decision can jump straight to the next one.
   const { data: queue } = useMappingList('proposed')
+  // Every mapping, for the "same as" dropdown.
+  const { data: allItems } = useMappingList()
+  const alias = useSetAlias(key)
 
   const [picks, setPicks] = useState({})
   const [eachToGrams, setEachToGrams] = useState('')
@@ -85,6 +89,15 @@ export default function MappingReviewPage() {
     return (items[idx + 1] ?? remaining[0]).ingredient_key
   }, [queue, key])
 
+  const aliasOptions = useMemo(
+    () =>
+      (allItems?.items ?? [])
+        .filter((i) => i.ingredient_key !== key && !i.alias_of)
+        .map((i) => ({ value: i.ingredient_key, label: i.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [allItems, key],
+  )
+
   if (isLoading) {
     return (
       <Group justify="center" py="xl">
@@ -104,6 +117,9 @@ export default function MappingReviewPage() {
   }
 
   const acceptedCount = Object.values(picks).filter((p) => p.accepted).length
+  // When aliased, this ingredient inherits another's mapping — its own inputs
+  // are inert, so everything below is disabled to make that obvious.
+  const isAlias = Boolean(data.alias_of)
 
   function toggle(sku, checked) {
     setPicks((prev) => {
@@ -146,6 +162,29 @@ export default function MappingReviewPage() {
 
   const u = data.usage ?? {}
 
+  // Rendered twice — under the header and at the foot of the candidate table —
+  // so a quick approve never needs a scroll past the whole list.
+  function actionButtons() {
+    return (
+      <Group>
+        <Button variant="default" onClick={() => submit('rejected')} loading={save.isPending}>
+          Reject
+        </Button>
+        <Button
+          variant="light"
+          color="yellow"
+          onClick={() => submit('needs_review')}
+          loading={save.isPending}
+        >
+          Needs review
+        </Button>
+        <Button color="teal" onClick={() => submit('approved')} loading={save.isPending}>
+          Approve
+        </Button>
+      </Group>
+    )
+  }
+
   return (
     <Stack gap="lg">
       <Anchor component={Link} to="/mapping">
@@ -166,12 +205,57 @@ export default function MappingReviewPage() {
             </Text>
           )}
         </div>
-        {data.status && (
-          <Badge size="lg" variant="light">
-            {data.status.replace('_', ' ')}
-          </Badge>
-        )}
+        <Group align="center" gap="sm">
+          {data.status && (
+            <Badge size="lg" variant="light">
+              {data.status.replace('_', ' ')}
+            </Badge>
+          )}
+          {!isAlias && actionButtons()}
+        </Group>
       </Group>
+
+      <Paper withBorder radius="md" p="md">
+        <Group align="flex-end" gap="sm">
+          <Select
+            label="Same as another ingredient"
+            description="Link near-duplicates so they share one mapping and their demand is bought together."
+            placeholder="Not an alias"
+            data={aliasOptions}
+            value={data.alias_of}
+            onChange={(v) => alias.mutate(v)}
+            searchable
+            clearable
+            disabled={alias.isPending}
+            style={{ flex: 1 }}
+          />
+          {isAlias && (
+            <Button
+              variant="default"
+              onClick={() => alias.mutate(null)}
+              loading={alias.isPending}
+            >
+              Remove alias
+            </Button>
+          )}
+        </Group>
+        {alias.isError && (
+          <Text size="xs" c="red" mt="xs">
+            {alias.error?.message}
+          </Text>
+        )}
+      </Paper>
+
+      {isAlias && (
+        <Alert color="blue" variant="light" title="This ingredient is an alias">
+          It inherits the mapping for{' '}
+          <Anchor component={Link} to={`/mapping/${encodeURIComponent(data.alias_of)}`}>
+            {data.alias_of_name ?? data.alias_of}
+          </Anchor>
+          , and recipe demand for both is summed onto that product. Remove the alias to map it
+          separately.
+        </Alert>
+      )}
 
       {data.llm_notes && (
         <Alert color="blue" variant="light" title={`Proposal note${data.model ? ` (${data.model})` : ''}`}>
@@ -179,6 +263,15 @@ export default function MappingReviewPage() {
         </Alert>
       )}
 
+      <div
+        style={
+          isAlias
+            ? { opacity: 0.45, pointerEvents: 'none', userSelect: 'none' }
+            : undefined
+        }
+        aria-disabled={isAlias}
+      >
+       <Stack gap="lg">
       <Paper withBorder radius="md" p="md">
         <Group align="flex-end" gap="sm">
           <TextInput
@@ -234,6 +327,13 @@ export default function MappingReviewPage() {
           mt="xl"
         />
       </Group>
+
+      {data.candidates.length === 0 && (
+        <Alert color="yellow" variant="light" title="No product candidates">
+          Ocado returned nothing for this ingredient's name — common for HelloFresh-specific wording
+          ("21 Day Aged British Sirloin Steaks"). Reword the search above to find real products.
+        </Alert>
+      )}
 
       <Paper withBorder radius="md">
         <Table.ScrollContainer minWidth={820}>
@@ -332,18 +432,10 @@ export default function MappingReviewPage() {
         <Text size="sm" c="dimmed">
           {acceptedCount} product{acceptedCount === 1 ? '' : 's'} accepted
         </Text>
-        <Group>
-          <Button variant="default" onClick={() => submit('rejected')} loading={save.isPending}>
-            Reject
-          </Button>
-          <Button variant="light" color="yellow" onClick={() => submit('needs_review')} loading={save.isPending}>
-            Needs review
-          </Button>
-          <Button color="teal" onClick={() => submit('approved')} loading={save.isPending}>
-            Approve
-          </Button>
-        </Group>
+        {actionButtons()}
       </Group>
+       </Stack>
+      </div>
     </Stack>
   )
 }

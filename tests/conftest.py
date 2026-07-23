@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 
 from app.db.models import Product, ProductSearchHit
 from app.db.session import init_db, make_engine, make_session_factory
@@ -20,6 +21,26 @@ def seed_candidates(session, ingredient_key, name, products, *, line_count=100):
     ``products`` is a list of dicts with at least ``sku`` and ``name``.
     """
     for rank, p in enumerate(products, start=1):
+        # The same product can be a candidate for several ingredients (which is
+        # exactly the alias case), so reuse an existing row rather than
+        # re-inserting and tripping the retailer+sku unique constraint.
+        product = session.scalar(
+            select(Product).where(Product.retailer == "ocado", Product.sku == p["sku"])
+        )
+        if product is not None:
+            session.add(
+                ProductSearchHit(
+                    product_id=product.id,
+                    retailer="ocado",
+                    ingredient_key=ingredient_key,
+                    search_term=name,
+                    term_rank=1,
+                    line_count=line_count,
+                    sku=p["sku"],
+                    result_rank=rank,
+                )
+            )
+            continue
         product = Product(
             retailer="ocado",
             sku=p["sku"],

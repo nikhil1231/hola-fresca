@@ -16,7 +16,7 @@ from app.db.models import IngredientMapping, IngredientMappingProduct
 from app.mapping.candidates import Candidate, IngredientCandidates
 
 RETAILER = "ocado"
-VALID_STATUSES = ("proposed", "approved", "rejected", "needs_review", "no_match")
+VALID_STATUSES = ("proposed", "approved", "rejected", "needs_review", "no_match", "alias")
 MATCH_TYPES = ("exact", "substitute", "form_differs")
 
 
@@ -58,6 +58,7 @@ class IngredientListItem:
     num_accepted: int
     needs_substitution: bool
     pantry_staple: bool
+    alias_of: str | None
     each_to_grams: float | None
     top_product_name: str | None
 
@@ -73,6 +74,8 @@ class IngredientDetail:
     needs_substitution: bool
     pantry_staple: bool
     search_term: str | None
+    alias_of: str | None
+    alias_of_name: str | None
     decided_by: str | None
     model: str | None
     llm_notes: str | None
@@ -195,6 +198,99 @@ def save_decision(
     return mapping
 
 
+def resolve_alias(session: Session, key: str, retailer: str = RETAILER) -> str:
+    """Follow ``alias_of`` to the canonical ingredient for ``key``.
+
+    Aliases are stored flat (always pointing at a root), but this walks the chain
+    defensively with a visited set so hand-edited data can never loop forever.
+    """
+    seen: set[str] = set()
+    current = key
+    while current not in seen:
+        seen.add(current)
+        target = session.scalar(
+            select(IngredientMapping.alias_of).where(
+                IngredientMapping.retailer == retailer,
+                IngredientMapping.ingredient_key == current,
+            )
+        )
+        if not target:
+            return current
+        current = target
+    return current
+
+
+def set_alias(
+    session: Session, ingredient_key: str, target_key: str | None, retailer: str = RETAILER
+) -> IngredientMapping:
+    """Point ``ingredient_key`` at ``target_key`` (or clear the alias when None).
+
+    The alias inherits the target's products, so its own accepted rows are left
+    untouched and simply ignored — clearing the alias restores them.
+    """
+    mapping = session.scalar(
+        select(IngredientMapping).where(
+            IngredientMapping.retailer == retailer,
+            IngredientMapping.ingredient_key == ingredient_key,
+        )
+    )
+    if mapping is None:
+        raise ValueError(f"no mapping for {ingredient_key!r}")
+
+    if target_key is None:
+        mapping.alias_of = None
+        # Back into the review queue: the products it kept are its own again.
+        mapping.status = "proposed"
+        mapping.decided_by = "human"
+        session.commit()
+        return mapping
+
+    if target_key == ingredient_key:
+        raise ValueError("an ingredient cannot be an alias of itself")
+    target = session.scalar(
+        select(IngredientMapping).where(
+            IngredientMapping.retailer == retailer,
+            IngredientMapping.ingredient_key == target_key,
+        )
+    )
+    if target is None:
+        raise ValueError(f"no mapping for target {target_key!r}")
+
+    # Point at the target's root so chains stay flat, then reject the link if
+    # that root is this ingredient (which would make a cycle).
+    root = resolve_alias(session, target_key, retailer)
+    if root == ingredient_key:
+        raise ValueError("that would create an alias cycle")
+
+    mapping.alias_of = root
+    mapping.status = "alias"
+    mapping.decided_by = "human"
+    session.commit()
+    return mapping
+
+
+def list_aliases(session: Session, retailer: str = RETAILER) -> list[tuple[str, str, str, str]]:
+    """``(alias_key, alias_name, canonical_key, canonical_name)`` for every alias."""
+    rows = session.scalars(
+        select(IngredientMapping).where(
+            IngredientMapping.retailer == retailer,
+            IngredientMapping.alias_of.is_not(None),
+        )
+    ).all()
+    out = []
+    for m in rows:
+        out.append((m.ingredient_key, m.name, m.alias_of, _name_of(session, m.alias_of) or m.alias_of))
+    return sorted(out, key=lambda r: r[3].lower())
+
+
+def _name_of(session: Session, key: str, retailer: str = RETAILER) -> str | None:
+    return session.scalar(
+        select(IngredientMapping.name).where(
+            IngredientMapping.retailer == retailer, IngredientMapping.ingredient_key == key
+        )
+    )
+
+
 def bulk_approve(session: Session, keys: list[str], retailer: str = RETAILER) -> int:
     n = 0
     for mapping in session.scalars(
@@ -246,6 +342,8 @@ def get_detail(session: Session, ic: IngredientCandidates, retailer: str = RETAI
         needs_substitution=bool(mapping.needs_substitution) if mapping else False,
         pantry_staple=bool(mapping.pantry_staple) if mapping else False,
         search_term=(mapping.search_term if mapping and mapping.search_term else _default_term(ic)),
+        alias_of=mapping.alias_of if mapping else None,
+        alias_of_name=_name_of(session, mapping.alias_of) if mapping and mapping.alias_of else None,
         decided_by=mapping.decided_by if mapping else None,
         model=mapping.model if mapping else None,
         llm_notes=mapping.llm_notes if mapping else None,
@@ -313,6 +411,7 @@ def list_items(
                 num_accepted=len(accepted),
                 needs_substitution=bool(mapping.needs_substitution),
                 pantry_staple=bool(mapping.pantry_staple),
+                alias_of=mapping.alias_of,
                 each_to_grams=mapping.each_to_grams,
                 top_product_name=top_name,
             )

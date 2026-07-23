@@ -13,7 +13,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import (
@@ -23,6 +23,7 @@ from app.db.models import (
     Recipe,
     RecipeIngredient,
 )
+from app.mapping import service
 from app.mapping.candidates import load_source_id_index
 
 RETAILER = "ocado"
@@ -30,16 +31,32 @@ DEFAULT_STATUSES = ("approved",)
 
 
 def _mapped_keys(session: Session, statuses: tuple[str, ...]) -> set[str]:
-    return {
+    """Ingredient keys that no longer need shopping decisions.
+
+    Three ways to qualify: the mapping has accepted products; it is a pantry
+    staple (assumed owned, so it needs none); or it is an alias of something that
+    itself qualifies.
+    """
+    resolved = {
         row[0]
         for row in session.execute(
             select(IngredientMapping.ingredient_key).where(
                 IngredientMapping.retailer == RETAILER,
                 IngredientMapping.status.in_(statuses),
-                IngredientMapping.products.any(),
+                or_(IngredientMapping.products.any(), IngredientMapping.pantry_staple == 1),
             )
         )
     }
+    alias_rows = session.execute(
+        select(IngredientMapping.ingredient_key).where(
+            IngredientMapping.retailer == RETAILER,
+            IngredientMapping.alias_of.is_not(None),
+        )
+    ).all()
+    for (key,) in alias_rows:
+        if service.resolve_alias(session, key) in resolved:
+            resolved.add(key)
+    return resolved
 
 
 @dataclass
@@ -161,18 +178,24 @@ def build_basket(
             if recipe is None:
                 continue
             for ing in recipe.ingredients:
-                key = sid_index.get(ing.source_ingredient_id or "")
-                if not key:
+                raw_key = sid_index.get(ing.source_ingredient_id or "")
+                if not raw_key:
                     continue
+                # Count aliased ingredients ("Fresh Pesto") against their
+                # canonical ("Basil Pesto"), so demand for the same thing under
+                # different names sums into one pack instead of buying twice.
+                mapping = session.scalar(
+                    select(IngredientMapping).where(
+                        IngredientMapping.retailer == RETAILER,
+                        IngredientMapping.ingredient_key == raw_key,
+                    )
+                )
+                key = service.resolve_alias(session, raw_key) if mapping else raw_key
                 name_by_key.setdefault(key, ing.name)
                 grams = ing.amount_g
                 if grams is None:
-                    mapping = session.scalar(
-                        select(IngredientMapping).where(
-                            IngredientMapping.retailer == RETAILER,
-                            IngredientMapping.ingredient_key == key,
-                        )
-                    )
+                    # Unit-sold items convert via the ingredient's own grams-per-unit,
+                    # which belongs to the name the recipe used, not the canonical.
                     if mapping and mapping.each_to_grams and ing.amount:
                         grams = mapping.each_to_grams * ing.amount
                 if grams:

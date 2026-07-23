@@ -12,6 +12,7 @@ import App from './App.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
 import CuisinesPage from './routes/CuisinesPage.jsx'
 import RecipeDetailPage from './routes/RecipeDetailPage.jsx'
+import MappingAliasesPage from './routes/MappingAliasesPage.jsx'
 import MappingPage from './routes/MappingPage.jsx'
 import MappingReviewPage from './routes/MappingReviewPage.jsx'
 
@@ -32,6 +33,7 @@ createRoot(document.getElementById('root')).render(
               <Route path="cuisines" element={<CuisinesPage />} />
               <Route path="recipes/:id" element={<RecipeDetailPage />} />
               <Route path="mapping" element={<MappingPage />} />
+              <Route path="mapping/aliases" element={<MappingAliasesPage />} />
               <Route path="mapping/:key" element={<MappingReviewPage />} />
             </Route>
           </Routes>

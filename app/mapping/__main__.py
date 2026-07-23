@@ -32,6 +32,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_propose.add_argument("--force", action="store_true", help="re-propose already-mapped items")
     p_propose.add_argument("--model", default=None)
 
+    p_gen = sub.add_parser("generate", help="add the next N ingredients to the review queue")
+    p_gen.add_argument("--count", type=int, default=10)
+    p_gen.add_argument("--model", default=None)
+
     sub.add_parser("status", help="counts by mapping status")
 
     p_cov = sub.add_parser("coverage", help="share of curated-recipe lines that resolve")
@@ -77,6 +81,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"propose: {res.proposed} proposed, {res.skipped} skipped, {res.errors} errors")
         for note in res.notes[:10]:
             print(f"  ! {note}")
+
+    elif args.command == "generate":
+        from app.mapping import generate as generate_mod
+
+        try:
+            job = generate_mod.generate(session_factory, count=args.count, model=args.model)
+        except Exception as exc:  # noqa: BLE001 - config/auth errors should print cleanly
+            print(f"generate failed: {exc}", file=sys.stderr)
+            return 1
+        print(
+            f"generate: {job.added} proposed, {job.staples} pantry staples, "
+            f"{job.no_match} no-match, {job.errors} errors"
+        )
 
     elif args.command == "status":
         with session_factory() as session:

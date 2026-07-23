@@ -35,6 +35,26 @@ export function searchMappingCandidates(key, term) {
   return postJSON(`/api/mapping/ingredients/${encodeURIComponent(key)}/search`, { term })
 }
 
+export function fetchAliases() {
+  return getJSON('/api/mapping/aliases')
+}
+
+// Pass null to clear the alias and return the ingredient to the review queue.
+export function setMappingAlias(key, aliasOf) {
+  return postJSON(`/api/mapping/ingredients/${encodeURIComponent(key)}/alias`, {
+    alias_of: aliasOf,
+  })
+}
+
+// Kicks off a background job; poll fetchJob() until it is no longer 'running'.
+export function startGenerate(count = 10) {
+  return postJSON('/api/mapping/generate', { count })
+}
+
+export function fetchJob(jobId) {
+  return getJSON(`/api/mapping/jobs/${encodeURIComponent(jobId)}`)
+}
+
 export function bulkApprove(keys) {
   return postJSON('/api/mapping/bulk-approve', { keys })
 }

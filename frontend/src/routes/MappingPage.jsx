@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
+  Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -13,7 +15,11 @@ import {
   Title,
 } from '@mantine/core'
 
-import { useBulkApprove, useMappingList } from '../hooks/useMappingQueries.js'
+import {
+  useBulkApprove,
+  useGenerateMappings,
+  useMappingList,
+} from '../hooks/useMappingQueries.js'
 
 const STATUS_COLORS = {
   proposed: 'blue',
@@ -43,6 +49,7 @@ export default function MappingPage() {
   const status = filter === 'all' ? undefined : filter
   const { data, isLoading } = useMappingList(status)
   const bulk = useBulkApprove()
+  const generate = useGenerateMappings()
 
   const counts = data?.counts ?? {}
   const total = Object.values(counts).reduce((a, b) => a + b, 0)
@@ -61,6 +68,9 @@ export default function MappingPage() {
           Confirm which Ocado products each ingredient maps to. Sorted by spend impact — review the
           top rows carefully; the obvious tail can be bulk-approved.
         </Text>
+        <Anchor component={Link} to="/mapping/aliases" size="sm">
+          Manage aliases →
+        </Anchor>
       </div>
 
       {total > 0 && (
@@ -158,7 +168,35 @@ export default function MappingPage() {
 
       {!isLoading && (data?.items ?? []).length === 0 && (
         <Text c="dimmed" ta="center" py="xl">
-          No mappings yet. Run <code>python -m app.mapping propose</code> to generate proposals.
+          No mappings yet — use “Load 10 more ingredients” below to start, or run{' '}
+          <code>python -m app.mapping propose</code>.
+        </Text>
+      )}
+
+      {generate.error && (
+        <Alert color="red" variant="light">
+          {generate.error.message}
+        </Alert>
+      )}
+
+      <Group justify="center" pb="xl">
+        <Button
+          variant="light"
+          loading={generate.running}
+          onClick={() => generate.start(10)}
+        >
+          {generate.running && generate.job
+            ? `Adding ingredients… ${generate.job.processed}/${generate.job.total}${
+                generate.job.current ? ` · ${generate.job.current}` : ''
+              }`
+            : 'Load 10 more ingredients'}
+        </Button>
+      </Group>
+
+      {generate.job && generate.job.status === 'done' && (
+        <Text size="sm" c="dimmed" ta="center">
+          Added {generate.job.added} for review, {generate.job.staples} pantry staples,{' '}
+          {generate.job.no_match} with no products found.
         </Text>
       )}
     </Stack>

@@ -117,6 +117,7 @@ class MappingListItem(BaseModel):
     num_accepted: int
     needs_substitution: bool
     pantry_staple: bool = False
+    alias_of: str | None = None
     each_to_grams: float | None = None
     top_product_name: str | None = None
 
@@ -159,6 +160,8 @@ class MappingDetailOut(BaseModel):
     needs_substitution: bool = False
     pantry_staple: bool = False
     search_term: str | None = None
+    alias_of: str | None = None
+    alias_of_name: str | None = None
     decided_by: str | None = None
     model: str | None = None
     llm_notes: str | None = None
@@ -185,6 +188,39 @@ class DecisionIn(BaseModel):
 
 class SearchIn(BaseModel):
     term: str
+
+
+class AliasIn(BaseModel):
+    # None clears the alias and returns the ingredient to the review queue.
+    alias_of: str | None = None
+
+
+class AliasOut(BaseModel):
+    ingredient_key: str
+    name: str
+    alias_of: str
+    alias_of_name: str
+
+
+class AliasListOut(BaseModel):
+    items: list[AliasOut] = []
+
+
+class GenerateIn(BaseModel):
+    count: int = 10
+
+
+class JobOut(BaseModel):
+    job_id: str
+    status: str
+    processed: int = 0
+    total: int = 0
+    added: int = 0
+    staples: int = 0
+    no_match: int = 0
+    errors: int = 0
+    error: str | None = None
+    current: str | None = None
 
 
 class BulkApproveIn(BaseModel):

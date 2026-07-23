@@ -355,6 +355,11 @@ class IngredientMapping(Base):
     # from the recipe ingredient name, overridable by the reviewer when better
     # wording finds better products ("vegetable stock" vs "vegetable stock paste").
     search_term: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Set when this ingredient is just another name for a different one ("Fresh
+    # Pesto" -> "Basil Pesto"): it inherits that mapping's products, and the
+    # basket sums their demand together instead of buying the same thing twice.
+    # Always points at a root (never another alias); status becomes 'alias'.
+    alias_of: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     # line_count x representative price; orders the review queue by spend impact.
     spend_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
 

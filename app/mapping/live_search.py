@@ -127,6 +127,8 @@ def search_and_store(
     term: str,
     *,
     runner: OcadoSearchRunner | None = None,
+    term_rank: int | None = None,
+    line_count: int | None = None,
 ) -> int:
     """Search Ocado for ``term`` and merge the results into ``ingredient_key``.
 
@@ -162,8 +164,10 @@ def search_and_store(
             ProductSearchHit.ingredient_key == ingredient_key,
         )
     )
-    term_rank = existing.term_rank if existing else 0
-    line_count = existing.line_count if existing else 0
+    # Explicit values win (a brand-new ingredient has no prior hit to inherit
+    # its frequency metadata from, and without it the review list mis-sorts).
+    term_rank = term_rank if term_rank is not None else (existing.term_rank if existing else 0)
+    line_count = line_count if line_count is not None else (existing.line_count if existing else 0)
 
     ordered = [o for o in objects if not product_ids or _sku_of(o) in set(product_ids)] or objects
     added = 0
