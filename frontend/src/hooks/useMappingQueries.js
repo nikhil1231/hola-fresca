@@ -85,17 +85,27 @@ export function useGenerateMappings() {
   })
 
   const finished = job != null && job.status !== 'running'
+  const [lastJob, setLastJob] = useState(null)
   useEffect(() => {
     if (!finished) return
     qc.invalidateQueries({ queryKey: ['mapping-list'] })
+    // Hold on to the finished job so its outcome (including a failure) stays on
+    // screen; clearing jobId only stops the polling.
+    setLastJob(job)
     setJobId(null)
-  }, [finished, qc])
+  }, [finished, job, qc])
 
+  const current = job ?? lastJob
   return {
-    start: (count) => start.mutate(count),
-    job,
-    running: start.isPending || (jobId != null && job?.status === 'running'),
-    error: start.error,
+    start: (count) => {
+      setLastJob(null)
+      start.mutate(count)
+    },
+    job: current,
+    // Treat the gap between the POST resolving and the first poll as running too,
+    // otherwise the button flickers back to idle mid-job.
+    running: start.isPending || (jobId != null && current?.status !== 'failed'),
+    error: start.error?.message ?? current?.error ?? null,
   }
 }
 

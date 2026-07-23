@@ -180,6 +180,26 @@ def _file_no_match(session: Session, key: str, name: str, line_count: int) -> No
     session.commit()
 
 
+def _file_needs_review(
+    session: Session, key: str, name: str, line_count: int, reason: str
+) -> None:
+    """Record an ingredient whose candidates cached but whose proposal failed."""
+    mapping = session.scalar(
+        select(IngredientMapping).where(
+            IngredientMapping.retailer == RETAILER, IngredientMapping.ingredient_key == key
+        )
+    )
+    if mapping is None:
+        mapping = IngredientMapping(retailer=RETAILER, ingredient_key=key)
+        session.add(mapping)
+    mapping.name = name
+    mapping.line_count = line_count
+    mapping.status = "needs_review"
+    mapping.decided_by = "auto"
+    mapping.llm_notes = f"Candidates cached but the proposal step failed: {reason}"
+    session.commit()
+
+
 def generate(
     session_factory: sessionmaker[Session],
     *,
@@ -192,13 +212,20 @@ def generate(
 ) -> GenerateJob:
     """Bring ``count`` more ingredients into the review queue."""
     job = job or GenerateJob(job_id=uuid.uuid4().hex[:12])
-    if complete is None:
-        from app.mapping.openai_client import OpenAIJSONClient
 
-        complete = OpenAIJSONClient(model=model)
-        model_name = complete.model
-    else:
-        model_name = model or "test"
+    # Built on first use, not up front: a batch of nothing but pantry lines needs
+    # no LLM at all, and a missing API key should cost only the ingredients that
+    # genuinely need a proposal rather than aborting the whole run.
+    state: dict = {"client": complete, "model": model or "test"}
+
+    def completer() -> Completer:
+        if state["client"] is None:
+            from app.mapping.openai_client import OpenAIJSONClient
+
+            client = OpenAIJSONClient(model=model)
+            state["client"] = client
+            state["model"] = client.model
+        return state["client"]
 
     usage_by_key = load_usage_stats(csv_path)
 
@@ -231,8 +258,18 @@ def generate(
                         ic = gather_candidates(
                             session, key, name=name, usage=usage_by_key.get(key)
                         )
-                        proposed = propose_one(ic, complete)
-                        service.write_proposal(session, ic, proposed, model=model_name)
+                        try:
+                            proposed = propose_one(ic, completer())
+                            service.write_proposal(
+                                session, ic, proposed, model=state["model"]
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            # The search already cached candidates, so this key
+                            # now looks "covered" and would never be revisited.
+                            # Record it as needing review rather than orphaning
+                            # cached candidates behind no mapping row at all.
+                            _file_needs_review(session, key, name, line_count, str(exc))
+                            raise
                     job.added += 1
                     log.info(
                         "[%d/%d] %s -> %d candidates, %d accepted",

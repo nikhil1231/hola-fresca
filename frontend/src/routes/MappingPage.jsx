@@ -174,8 +174,8 @@ export default function MappingPage() {
       )}
 
       {generate.error && (
-        <Alert color="red" variant="light">
-          {generate.error.message}
+        <Alert color="red" variant="light" title="Couldn't add ingredients">
+          {generate.error}
         </Alert>
       )}
 
@@ -193,10 +193,11 @@ export default function MappingPage() {
         </Button>
       </Group>
 
-      {generate.job && generate.job.status === 'done' && (
+      {generate.job?.status === 'done' && (
         <Text size="sm" c="dimmed" ta="center">
           Added {generate.job.added} for review, {generate.job.staples} pantry staples,{' '}
-          {generate.job.no_match} with no products found.
+          {generate.job.no_match} with no products found
+          {generate.job.errors > 0 && `, ${generate.job.errors} failed`}.
         </Text>
       )}
     </Stack>

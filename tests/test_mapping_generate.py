@@ -140,3 +140,41 @@ def test_generate_is_resumable(factory, tmp_path, monkeypatch):
     assert set(first).isdisjoint(runner.terms[len(first):])
     with factory() as s:
         assert s.query(IngredientMapping).count() == 4
+
+
+def _boom(*a, **k):
+    raise RuntimeError("OPENAI_API_KEY is not set")
+
+
+def test_missing_llm_still_files_pantry_lines(factory, tmp_path, monkeypatch):
+    """A missing API key must not throw away the work that needs no LLM."""
+    monkeypatch.setattr(live_search.storage, "write_raw", lambda *a, **k: None)
+    runner = FakeRunner()
+
+    job = gen.generate(
+        factory, count=10, complete=_boom, runner=runner, csv_path=_csv(tmp_path)
+    )
+
+    assert job.status == "done"
+    assert job.staples == 1        # the pantry line was filed for free
+    assert job.errors == 3         # the three that needed a proposal
+    assert job.added == 0
+
+    with factory() as s:
+        by_key = {m.ingredient_key: m for m in s.scalars(select(IngredientMapping)).all()}
+        assert by_key["name:water for the sauce"].pantry_staple == 1
+
+
+def test_failed_proposal_is_not_orphaned(factory, tmp_path, monkeypatch):
+    """Candidates cached + no mapping row would make the key invisible forever."""
+    monkeypatch.setattr(live_search.storage, "write_raw", lambda *a, **k: None)
+    gen.generate(factory, count=10, complete=_boom, runner=FakeRunner(), csv_path=_csv(tmp_path))
+
+    with factory() as s:
+        by_key = {m.ingredient_key: m for m in s.scalars(select(IngredientMapping)).all()}
+        # Searched fine, proposal failed -> visible and reviewable by hand.
+        assert by_key["name:macaroni"].status == "needs_review"
+        assert "proposal step failed" in by_key["name:macaroni"].llm_notes
+        # And it is not offered again as pending work (it has a mapping row now).
+        work = gen.pending_worklist(s, count=10, csv_path=_csv(tmp_path))
+        assert "name:macaroni" not in [k for _, k, _, _ in work]
