@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -40,6 +41,11 @@ function money(value) {
 export default function MappingReviewPage() {
   const { key } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  // The list's filter travels in the URL, so the arrows walk exactly the list
+  // that was being browsed and "back" returns to it.
+  const [searchParams] = useSearchParams()
+  const browseStatus = searchParams.get('status') ?? undefined
   const { data, isLoading, isError } = useMappingDetail(key)
   const save = useSaveDecision(key)
   const research = useSearchCandidates(key)
@@ -47,6 +53,8 @@ export default function MappingReviewPage() {
   const { data: queue } = useMappingList('proposed')
   // Every mapping, for the "same as" dropdown.
   const { data: allItems } = useMappingList()
+  // The filtered list being browsed, for prev/next.
+  const { data: siblings } = useMappingList(browseStatus)
   const alias = useSetAlias(key)
 
   const [picks, setPicks] = useState({})
@@ -89,6 +97,19 @@ export default function MappingReviewPage() {
     return (items[idx + 1] ?? remaining[0]).ingredient_key
   }, [queue, key])
 
+  // Position in the browsed list, for the prev/next arrows.
+  const nav = useMemo(() => {
+    const items = siblings?.items ?? []
+    const idx = items.findIndex((i) => i.ingredient_key === key)
+    if (idx === -1) return { idx: -1, total: items.length, prev: null, next: null }
+    return {
+      idx,
+      total: items.length,
+      prev: idx > 0 ? items[idx - 1].ingredient_key : null,
+      next: idx < items.length - 1 ? items[idx + 1].ingredient_key : null,
+    }
+  }, [siblings, key])
+
   const aliasOptions = useMemo(
     () =>
       (allItems?.items ?? [])
@@ -108,7 +129,7 @@ export default function MappingReviewPage() {
   if (isError || !data) {
     return (
       <Stack>
-        <Anchor component={Link} to="/mapping">
+        <Anchor component={Link} to={`/mapping${location.search}`}>
           ← Back to mappings
         </Anchor>
         <Alert color="red">This ingredient has no cached product candidates.</Alert>
@@ -116,6 +137,7 @@ export default function MappingReviewPage() {
     )
   }
 
+  const to = (k) => `/mapping/${encodeURIComponent(k)}${location.search}`
   const acceptedCount = Object.values(picks).filter((p) => p.accepted).length
   // When aliased, this ingredient inherits another's mapping — its own inputs
   // are inert, so everything below is disabled to make that obvious.
@@ -155,7 +177,7 @@ export default function MappingReviewPage() {
         // Advance straight to the next item in the queue so a review pass keeps
         // moving; fall back to the list once nothing is left to review.
         onSuccess: () =>
-          navigate(nextKey ? `/mapping/${encodeURIComponent(nextKey)}` : '/mapping'),
+          navigate(nextKey ? to(nextKey) : `/mapping${location.search}`),
       },
     )
   }
@@ -187,9 +209,34 @@ export default function MappingReviewPage() {
 
   return (
     <Stack gap="lg">
-      <Anchor component={Link} to="/mapping">
-        ← Back to mappings
-      </Anchor>
+      <Group justify="space-between">
+        <Anchor component={Link} to={`/mapping${location.search}`}>
+          ← Back to mappings
+          {browseStatus ? ` (${browseStatus.replace('_', ' ')})` : ''}
+        </Anchor>
+        {/* Flick through the list being browsed without going back to it. */}
+        <Group gap="xs">
+          <ActionIcon
+            variant="default"
+            aria-label="Previous ingredient"
+            disabled={!nav.prev}
+            onClick={() => nav.prev && navigate(to(nav.prev))}
+          >
+            ←
+          </ActionIcon>
+          <Text size="sm" c="dimmed" w={90} ta="center">
+            {nav.idx >= 0 ? `${nav.idx + 1} of ${nav.total}` : `${nav.total} items`}
+          </Text>
+          <ActionIcon
+            variant="default"
+            aria-label="Next ingredient"
+            disabled={!nav.next}
+            onClick={() => nav.next && navigate(to(nav.next))}
+          >
+            →
+          </ActionIcon>
+        </Group>
+      </Group>
 
       <Group justify="space-between" align="flex-start">
         <div>

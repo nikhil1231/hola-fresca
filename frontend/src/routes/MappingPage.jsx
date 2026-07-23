@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Anchor,
@@ -71,8 +71,14 @@ function money(value) {
 
 export default function MappingPage() {
   const navigate = useNavigate()
-  const [filter, setFilter] = useState('all')
+  // The filter lives in the URL so it survives navigating into an ingredient and
+  // back, and so a filtered view can be linked to directly.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const filter = searchParams.get('status') ?? 'all'
   const status = filter === 'all' ? undefined : filter
+  const setFilter = (value) =>
+    setSearchParams(value && value !== 'all' ? { status: value } : {}, { replace: true })
   const { data, isLoading } = useMappingList(status)
   const bulk = useBulkApprove()
   const generate = useGenerateMappings()
@@ -180,7 +186,11 @@ export default function MappingPage() {
                   key={item.ingredient_key}
                   style={{ cursor: 'pointer' }}
                   onClick={() =>
-                    navigate(`/mapping/${encodeURIComponent(item.ingredient_key)}`)
+                    // Carry the filter through so the detail page's arrows walk
+                    // the same list and "back" returns to this view.
+                    navigate(
+                      `/mapping/${encodeURIComponent(item.ingredient_key)}${location.search}`,
+                    )
                   }
                 >
                   <Table.Td>
