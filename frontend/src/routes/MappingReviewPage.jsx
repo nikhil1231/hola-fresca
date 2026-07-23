@@ -20,6 +20,8 @@ import {
   Title,
 } from '@mantine/core'
 
+import classes from './MappingReviewPage.module.css'
+
 import {
   useMappingDetail,
   useMappingList,
@@ -33,6 +35,13 @@ const MATCH_TYPES = [
   { value: 'substitute', label: 'substitute' },
   { value: 'form_differs', label: 'form differs' },
 ]
+
+const STATUS_BADGE_CLASSES = {
+  proposed: classes.status_proposed,
+  needs_review: classes.status_needs_review,
+  approved: classes.status_approved,
+  rejected: classes.status_rejected,
+}
 
 function money(value) {
   return value == null ? '—' : `£${value.toFixed(2)}`
@@ -188,19 +197,33 @@ export default function MappingReviewPage() {
   // so a quick approve never needs a scroll past the whole list.
   function actionButtons() {
     return (
-      <Group>
-        <Button variant="default" onClick={() => submit('rejected')} loading={save.isPending}>
+      <Group className={classes.decisionActions}>
+        <Button
+          className={`${classes.decisionButton} ${classes.rejectButton}`}
+          variant="default"
+          onClick={() => submit('rejected')}
+          loading={save.isPending}
+          data-darkreader-ignore
+        >
           Reject
         </Button>
         <Button
+          className={`${classes.decisionButton} ${classes.needsReviewButton}`}
           variant="light"
           color="yellow"
           onClick={() => submit('needs_review')}
           loading={save.isPending}
+          data-darkreader-ignore
         >
           Needs review
         </Button>
-        <Button color="teal" onClick={() => submit('approved')} loading={save.isPending}>
+        <Button
+          className={`${classes.decisionButton} ${classes.approveButton}`}
+          color="teal"
+          onClick={() => submit('approved')}
+          loading={save.isPending}
+          data-darkreader-ignore
+        >
           Approve
         </Button>
       </Group>
@@ -254,7 +277,12 @@ export default function MappingReviewPage() {
         </div>
         <Group align="center" gap="sm">
           {data.status && (
-            <Badge size="lg" variant="light">
+            <Badge
+              className={`${classes.reviewStatus} ${STATUS_BADGE_CLASSES[data.status] ?? ''}`}
+              size="lg"
+              variant="light"
+              data-darkreader-ignore
+            >
               {data.status.replace('_', ' ')}
             </Badge>
           )}

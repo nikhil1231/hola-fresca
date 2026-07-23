@@ -1,0 +1,104 @@
+.decisionActions {
+  color-scheme: only light;
+}
+
+.decisionButton,
+.reviewStatus {
+  forced-color-adjust: none;
+  color-scheme: only light;
+}
+
+.decisionButton {
+  min-width: 110px;
+  border-radius: var(--mantine-radius-md);
+  font-weight: 700;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.decisionButton :global(.mantine-Button-label),
+.reviewStatus :global(.mantine-Badge-label) {
+  color: inherit !important;
+}
+
+.rejectButton {
+  --button-bg: #ffffff !important;
+  --button-hover: #f8fafc !important;
+  --button-color: #334155 !important;
+  --button-bd: 1px solid #cbd5e1 !important;
+
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+.rejectButton:hover {
+  background-color: #f8fafc !important;
+  border-color: #94a3b8 !important;
+  color: #1e293b !important;
+}
+
+.needsReviewButton {
+  --button-bg: #fff3bf !important;
+  --button-hover: #ffe066 !important;
+  --button-color: #7c4d00 !important;
+  --button-bd: 1px solid #ffd43b !important;
+
+  background-color: #fff3bf !important;
+  border-color: #ffd43b !important;
+  color: #7c4d00 !important;
+}
+
+.needsReviewButton:hover {
+  background-color: #ffe066 !important;
+  border-color: #fab005 !important;
+  color: #5f3b00 !important;
+}
+
+.approveButton {
+  --button-bg: #12b886 !important;
+  --button-hover: #0ca678 !important;
+  --button-color: #ffffff !important;
+  --button-bd: 1px solid #12b886 !important;
+
+  background-color: #12b886 !important;
+  border-color: #12b886 !important;
+  color: #ffffff !important;
+}
+
+.approveButton:hover {
+  background-color: #0ca678 !important;
+  border-color: #0ca678 !important;
+  color: #ffffff !important;
+}
+
+.reviewStatus {
+  --review-status-bg: #14532d;
+  --review-status-color: #ecfdf5;
+
+  background-color: var(--review-status-bg) !important;
+  color: var(--review-status-color) !important;
+  border-color: transparent !important;
+}
+
+.status_proposed {
+  --review-status-bg: #14532d;
+  --review-status-color: #ecfdf5;
+}
+
+.status_needs_review {
+  --review-status-bg: #fff3bf;
+  --review-status-color: #7c4d00;
+}
+
+.status_approved {
+  --review-status-bg: #0f766e;
+  --review-status-color: #f0fdfa;
+}
+
+.status_rejected {
+  --review-status-bg: #fee2e2;
+  --review-status-color: #991b1b;
+}
