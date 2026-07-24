@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
@@ -107,7 +107,7 @@ export default function MappingReviewPage() {
   }, [queue, key])
 
   // Position in the browsed list, for the prev/next arrows.
-  const nav = useMemo(() => {
+  const liveNav = useMemo(() => {
     const items = siblings?.items ?? []
     const idx = items.findIndex((i) => i.ingredient_key === key)
     if (idx === -1) return { idx: -1, total: items.length, prev: null, next: null }
@@ -118,6 +118,15 @@ export default function MappingReviewPage() {
       next: idx < items.length - 1 ? items[idx + 1].ingredient_key : null,
     }
   }, [siblings, key])
+
+  // Aliasing an ingredient drops it from the (filtered) browsed list, so its
+  // position vanishes and both arrows would go dead. Remember the neighbours it
+  // had while it was still in the list so review can keep moving through it.
+  const lastNav = useRef(liveNav)
+  useEffect(() => {
+    if (liveNav.idx >= 0) lastNav.current = liveNav
+  }, [liveNav])
+  const nav = liveNav.idx >= 0 ? liveNav : lastNav.current
 
   const aliasOptions = useMemo(
     () =>
