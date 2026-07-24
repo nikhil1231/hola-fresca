@@ -275,6 +275,12 @@ class Product(Base):
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     in_stock: Mapped[bool | None] = mapped_column(Integer, nullable=True)
 
+    # Ocado's guaranteed minimum life on delivery, kept both verbatim ("2 WEEK")
+    # and as days for ordering/filtering. NULL means the retailer states no life
+    # for this product — typically ambient or non-food — not a short life.
+    shelf_life_raw: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    shelf_life_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Customer rating signals (from the retailer payload); a tie-break between
     # comparable products and a junk filter during ingredient mapping.
     avg_rating: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -32,6 +32,11 @@ _UNIT_PRICE_RE = re.compile(
     r"(?P<money>£\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?p)\s*(?:/|per\s+)(?P<basis>100g|kg|kilo|litre|liter|l|ml|item|each)",
     re.I,
 )
+# Ocado's guaranteed minimum life on delivery, as {"quantity": n, "unit": ...}.
+# Present only for products with a meaningful expiry (~98% of Fresh & Chilled,
+# almost none of Home & Garden), so a null means "not perishable or not stated",
+# never "zero days".
+_LIFE_UNIT_DAYS = {"DAY": 1, "WEEK": 7, "MONTH": 30, "YEAR": 365}
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,8 @@ class NormalizedProduct:
     unit_price_basis: str | None = None
     category: str | None = None
     in_stock: bool | None = None
+    shelf_life_raw: str | None = None
+    shelf_life_days: int | None = None
     avg_rating: float | None = None
     ratings_count: int | None = None
     image_url: str | None = None
@@ -132,6 +139,7 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
     pack_value, pack_unit = parse_pack_size(pack_raw)
     unit_price, unit_basis = _unit_price(payload)
     avg_rating, ratings_count = _rating(payload)
+    life_raw, life_days = parse_shelf_life(payload.get("guaranteedProductLife"))
 
     return NormalizedProduct(
         retailer=RETAILER,
@@ -146,6 +154,8 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
         unit_price_basis=unit_basis,
         category=_category(payload),
         in_stock=_in_stock(payload),
+        shelf_life_raw=life_raw,
+        shelf_life_days=life_days,
         avg_rating=avg_rating,
         ratings_count=ratings_count,
         image_url=_image_url(payload),
@@ -169,6 +179,26 @@ def parse_pack_size(raw: str | None) -> tuple[float | None, str | None]:
     if each:
         return float(each.group("count")), "each"
     return None, None
+
+
+def parse_shelf_life(raw: Any) -> tuple[str | None, int | None]:
+    """Return ("2 WEEK", 14) from Ocado's guaranteedProductLife object.
+
+    Months and years are approximated (30/365 days) — Ocado states them as a
+    guaranteed *minimum*, so the rounding only ever understates the real life.
+    """
+    if not isinstance(raw, dict):
+        return None, None
+    unit = str(raw.get("unit") or "").strip().upper()
+    quantity = raw.get("quantity")
+    try:
+        quantity = float(quantity)
+    except (TypeError, ValueError):
+        return None, None
+    per_unit = _LIFE_UNIT_DAYS.get(unit)
+    if per_unit is None or quantity <= 0:
+        return None, None
+    return f"{quantity:g} {unit}", int(round(quantity * per_unit))
 
 
 def parse_unit_price(raw: str | None) -> tuple[float | None, str | None]:

@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Product, ProductScrapeState, ProductSearchHit
+from app.db.session import ensure_columns
 from app.scraper.products import storage
 from app.scraper.products.ocado import (
     MAX_PRODUCTS_TO_DECORATE,
@@ -19,6 +20,7 @@ from app.scraper.products.ocado import (
     extract_product_ids,
     extract_product_objects,
     normalize_product,
+    parse_shelf_life,
     search_url,
 )
 from app.scraper.products.worklist import IngredientWorkItem, load_worklist
@@ -103,6 +105,42 @@ def normalize(
     return result
 
 
+# Columns added to an already-populated products table, name -> SQLite decl.
+_PRODUCT_COLUMNS = {
+    "shelf_life_raw": "VARCHAR(32)",
+    "shelf_life_days": "INTEGER",
+}
+
+
+def backfill_shelf_life(session_factory: sessionmaker[Session]) -> ProductStageResult:
+    """Re-derive shelf life from each cached product's stored raw payload.
+
+    The field was already being captured inside ``raw_json``, so this needs no
+    re-fetch. Idempotent: re-running it just recomputes the same values.
+    """
+    result = ProductStageResult()
+    with session_factory() as session:
+        ensure_columns(session, "products", _PRODUCT_COLUMNS)
+
+        products = session.scalars(
+            select(Product).where(Product.retailer == RETAILER, Product.raw_json.is_not(None))
+        )
+        for product in products:
+            result.products += 1
+            try:
+                payload = json.loads(product.raw_json)
+            except json.JSONDecodeError:
+                result.errors += 1
+                continue
+            raw, days = parse_shelf_life(payload.get("guaranteedProductLife"))
+            product.shelf_life_raw = raw
+            product.shelf_life_days = days
+            if days is not None:
+                result.normalized += 1
+        session.commit()
+    return result
+
+
 def status_counts(session_factory: sessionmaker[Session]) -> dict:
     with session_factory() as session:
         states = session.execute(
@@ -139,6 +177,11 @@ def status_counts(session_factory: sessionmaker[Session]) -> dict:
                 Product.unit_price_basis.is_not(None),
             )
         ) or 0
+        shelf_life = session.scalar(
+            select(func.count())
+            .select_from(Product)
+            .where(Product.retailer == RETAILER, Product.shelf_life_days.is_not(None))
+        ) or 0
     return {
         "states": {(kind, status): count for kind, status, count in states},
         "products": products,
@@ -146,6 +189,7 @@ def status_counts(session_factory: sessionmaker[Session]) -> dict:
         "hits": hits,
         "pack_parsed": pack_parsed,
         "unit_parsed": unit_parsed,
+        "shelf_life": shelf_life,
     }
 
 
@@ -404,6 +448,8 @@ def upsert_product(session: Session, product) -> Product:
     existing.unit_price_basis = product.unit_price_basis
     existing.category = product.category
     existing.in_stock = product.in_stock
+    existing.shelf_life_raw = product.shelf_life_raw
+    existing.shelf_life_days = product.shelf_life_days
     existing.avg_rating = product.avg_rating
     existing.ratings_count = product.ratings_count
     existing.image_url = product.image_url

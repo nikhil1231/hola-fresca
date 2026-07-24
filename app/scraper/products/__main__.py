@@ -34,6 +34,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_norm.add_argument("--limit", type=int, default=250)
     p_norm.add_argument("--force", action="store_true")
 
+    sub.add_parser(
+        "backfill-shelf-life",
+        help="re-derive shelf life from cached raw payloads (no re-fetch)",
+    )
     sub.add_parser("status", help="print product-cache status")
     return parser
 
@@ -68,6 +72,12 @@ def main(argv: list[str] | None = None) -> int:
             f"normalize: {res.normalized} products normalized, "
             f"{res.hits} search hits linked, {res.errors} errors"
         )
+    elif args.command == "backfill-shelf-life":
+        res = pipeline.backfill_shelf_life(session_factory)
+        print(
+            f"backfill-shelf-life: {res.normalized} of {res.products} products "
+            f"have a stated shelf life, {res.errors} errors"
+        )
     elif args.command == "status":
         counts = pipeline.status_counts(session_factory)
         print("retailer: ocado")
@@ -82,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  terms with hits : {counts['terms_with_hits']}")
         print(f"  pack parsed     : {counts['pack_parsed']} ({pack_pct:.1f}%)")
         print(f"  unit parsed     : {counts['unit_parsed']} ({unit_pct:.1f}%)")
+        life_pct = 100 * counts["shelf_life"] / max(products, 1)
+        print(f"  shelf life      : {counts['shelf_life']} ({life_pct:.1f}%)")
 
     return 0
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -25,6 +25,19 @@ def make_engine(db_path: Path | None = None) -> Engine:
 
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+
+
+def ensure_columns(session: Session, table: str, columns: dict[str, str]) -> None:
+    """Add any missing columns to an existing table, in place.
+
+    ``create_all`` only creates whole tables, so an already-populated database
+    never gains a newly declared column. Maps column name -> SQLite declaration.
+    """
+    existing = {row[1] for row in session.execute(text(f"PRAGMA table_info({table})"))}
+    for name, decl in columns.items():
+        if name not in existing:
+            session.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
+    session.commit()
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

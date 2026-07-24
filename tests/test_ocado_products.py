@@ -10,6 +10,7 @@ from app.scraper.products.ocado import (
     extract_product_ids,
     normalize_product,
     parse_pack_size,
+    parse_shelf_life,
     parse_unit_price,
 )
 from app.scraper.products.worklist import load_worklist
@@ -58,6 +59,34 @@ def test_ocado_fixture_parser_extracts_product_fields():
     assert normalized.url == "https://www.ocado.com/products/ocado-white-potatoes-552ecfc0"
 
 
+def test_parse_shelf_life_converts_units_to_days():
+    assert parse_shelf_life({"quantity": 3, "unit": "DAY"}) == ("3 DAY", 3)
+    assert parse_shelf_life({"quantity": 2, "unit": "WEEK"}) == ("2 WEEK", 14)
+    assert parse_shelf_life({"quantity": 2, "unit": "MONTH"}) == ("2 MONTH", 60)
+    assert parse_shelf_life({"quantity": 1, "unit": "YEAR"}) == ("1 YEAR", 365)
+
+
+def test_parse_shelf_life_rejects_missing_and_unusable_values():
+    # An absent field means "no stated life", not a zero-day life, so every one
+    # of these must stay null rather than collapsing to 0.
+    assert parse_shelf_life(None) == (None, None)
+    assert parse_shelf_life({}) == (None, None)
+    assert parse_shelf_life({"quantity": 0, "unit": "DAY"}) == (None, None)
+    assert parse_shelf_life({"quantity": 2, "unit": "FORTNIGHT"}) == (None, None)
+    assert parse_shelf_life({"quantity": "soon", "unit": "DAY"}) == (None, None)
+
+
+def test_normalize_product_reads_guaranteed_product_life():
+    product = {
+        "productId": "233a6dd5-cf2a-4e0d-ae2b-9cbb1f17a7a5",
+        "name": "Ocado Large Garlic",
+        "guaranteedProductLife": {"quantity": 2, "unit": "WEEK"},
+    }
+    normalized = normalize_product(product)
+    assert normalized.shelf_life_raw == "2 WEEK"
+    assert normalized.shelf_life_days == 14
+
+
 def test_product_url_falls_back_to_retailer_product_id():
     # Real Ocado payloads carry no url field; the UUID productId is not a valid
     # path (404), but /products/<retailerProductId> 301s to the canonical page.
@@ -92,6 +121,36 @@ def test_unit_price_parser_common_forms():
     assert parse_unit_price("£1.50 per kg") == (1.5, "kg")
     assert parse_unit_price("95p/100g") == (0.95, "100g")
     assert parse_unit_price("£2.20 per litre") == (2.2, "l")
+
+
+def test_backfill_shelf_life_reparses_stored_raw_json(tmp_path):
+    db_path = tmp_path / "products.db"
+    engine = make_engine(db_path)
+    init_db(engine)
+    factory = make_session_factory(engine)
+
+    with factory() as session:
+        session.add_all(
+            [
+                Product(
+                    retailer=RETAILER,
+                    sku="a",
+                    name="Ocado Large Garlic",
+                    raw_json=json.dumps({"guaranteedProductLife": {"quantity": 2, "unit": "WEEK"}}),
+                ),
+                Product(retailer=RETAILER, sku="b", name="Tinned Tomatoes", raw_json="{}"),
+                Product(retailer=RETAILER, sku="c", name="Broken", raw_json="not json"),
+            ]
+        )
+        session.commit()
+
+    result = pipeline.backfill_shelf_life(factory)
+
+    assert (result.products, result.normalized, result.errors) == (3, 1, 1)
+    with factory() as session:
+        by_sku = {p.sku: p for p in session.query(Product).all()}
+        assert (by_sku["a"].shelf_life_raw, by_sku["a"].shelf_life_days) == ("2 WEEK", 14)
+        assert by_sku["b"].shelf_life_days is None
 
 
 def test_product_upsert_and_search_hit_linking_are_restart_safe(tmp_path, monkeypatch):

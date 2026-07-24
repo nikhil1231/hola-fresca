@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.canonicalize import backfill_units, to_grams
@@ -20,6 +20,7 @@ from app.classify import (
     protein_energy_ratio,
 )
 from app.db.models import Recipe
+from app.db.session import ensure_columns
 
 # column name -> SQLite column declaration, added if not already present.
 _RECIPE_COLUMNS = {
@@ -45,20 +46,12 @@ class EnrichReport:
     recipes: int = 0
 
 
-def _ensure_columns(session: Session, table: str, columns: dict[str, str]) -> None:
-    existing = {row[1] for row in session.execute(text(f"PRAGMA table_info({table})"))}
-    for name, decl in columns.items():
-        if name not in existing:
-            session.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
-    session.commit()
-
-
 def enrich(session_factory: sessionmaker[Session]) -> EnrichReport:
     report = EnrichReport()
 
     with session_factory() as session:
-        _ensure_columns(session, "recipes", _RECIPE_COLUMNS)
-        _ensure_columns(session, "recipe_ingredients", _INGREDIENT_COLUMNS)
+        ensure_columns(session, "recipes", _RECIPE_COLUMNS)
+        ensure_columns(session, "recipe_ingredients", _INGREDIENT_COLUMNS)
 
         report.units_backfilled = backfill_units(session)
         session.commit()
