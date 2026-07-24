@@ -120,6 +120,8 @@ class MappingListItem(BaseModel):
     alias_of: str | None = None
     each_to_grams: float | None = None
     top_product_name: str | None = None
+    top_product_rating: float | None = None
+    top_product_ratings_count: int | None = None
 
 
 class MappingListOut(BaseModel):

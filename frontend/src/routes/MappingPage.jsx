@@ -69,6 +69,20 @@ function money(value) {
   return `£${value.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`
 }
 
+function Rating({ value, count }) {
+  if (value == null) return null
+  return (
+    <Text component="span" size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+      {' '}
+      <Text component="span" c="yellow.7">
+        ★
+      </Text>
+      {value.toFixed(1)}
+      {count != null && count > 0 ? ` (${count.toLocaleString('en-GB')})` : ''}
+    </Text>
+  )
+}
+
 export default function MappingPage() {
   const navigate = useNavigate()
   // The filter lives in the URL so it survives navigating into an ingredient and
@@ -178,6 +192,7 @@ export default function MappingPage() {
                 <Table.Th>Picked</Table.Th>
                 <Table.Th>Top product</Table.Th>
                 <Table.Th>Status</Table.Th>
+                <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -214,12 +229,31 @@ export default function MappingPage() {
                   <Table.Td>
                     <Text size="sm" c="dimmed" lineClamp={1}>
                       {item.top_product_name ?? '—'}
+                      {item.top_product_name && (
+                        <Rating
+                          value={item.top_product_rating}
+                          count={item.top_product_ratings_count}
+                        />
+                      )}
                     </Text>
                   </Table.Td>
                   <Table.Td>
                     <Badge color={STATUS_COLORS[item.status] ?? 'gray'} variant="light">
                       {item.status.replace('_', ' ')}
                     </Badge>
+                  </Table.Td>
+                  <Table.Td onClick={(e) => e.stopPropagation()}>
+                    {item.status === 'proposed' && (
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        color="teal"
+                        loading={bulk.isPending && bulk.variables?.[0] === item.ingredient_key}
+                        onClick={() => bulk.mutate([item.ingredient_key])}
+                      >
+                        Approve
+                      </Button>
+                    )}
                   </Table.Td>
                 </Table.Tr>
               ))}

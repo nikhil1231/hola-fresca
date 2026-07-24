@@ -61,6 +61,8 @@ class IngredientListItem:
     alias_of: str | None
     each_to_grams: float | None
     top_product_name: str | None
+    top_product_rating: float | None
+    top_product_ratings_count: int | None
 
 
 @dataclass
@@ -398,8 +400,13 @@ def list_items(
         accepted = sorted(mapping.products, key=lambda p: p.rank)
         top = accepted[0] if accepted else None
         top_name = None
+        top_rating = None
+        top_ratings_count = None
         if top is not None:
             top_name = top.product.name if top.product else top.sku
+            if top.product is not None:
+                top_rating = top.product.avg_rating
+                top_ratings_count = top.product.ratings_count
         items.append(
             IngredientListItem(
                 ingredient_key=mapping.ingredient_key,
@@ -414,6 +421,8 @@ def list_items(
                 alias_of=mapping.alias_of,
                 each_to_grams=mapping.each_to_grams,
                 top_product_name=top_name,
+                top_product_rating=top_rating,
+                top_product_ratings_count=top_ratings_count,
             )
         )
     return items
