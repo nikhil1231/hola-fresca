@@ -109,7 +109,9 @@ def main(argv: list[str] | None = None) -> int:
 
         rep = enrich(session_factory)
         print(
-            f"enrich: {rep.recipes} recipes; {rep.units_backfilled} units backfilled; "
+            f"enrich: {rep.recipes} recipes; "
+            f"{sum(rep.units_backfilled.values())} units backfilled "
+            f"({', '.join(f'{k} {v}' for k, v in rep.units_backfilled.items())}); "
             f"{rep.ingredients_gram_resolved}/{rep.ingredients_total} ingredient lines "
             f"resolved to grams "
             f"({100 * rep.ingredients_gram_resolved / max(rep.ingredients_total, 1):.0f}%)"

@@ -7,7 +7,7 @@ macro sanity, diet suitability). Idempotent and re-runnable.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
@@ -40,7 +40,7 @@ _INGREDIENT_COLUMNS = {
 
 @dataclass
 class EnrichReport:
-    units_backfilled: int = 0
+    units_backfilled: dict[str, int] = field(default_factory=dict)
     ingredients_gram_resolved: int = 0
     ingredients_total: int = 0
     recipes: int = 0

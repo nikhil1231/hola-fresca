@@ -17,6 +17,14 @@
     "carrot": 100,
     "medium tomato": 90,
     "tomato": 90,
+    "vine tomatoes": 90,
+    "tinned plum tomates": 390,
+    "celery stick": 40,
+    "vegetable stock pot": 12,
+    "cumin": 8,
+    "paprika": 8,
+    "yeast": 7,
+    "pepper": 0.5,
     "baby gem lettuce": 90,
     "iceberg lettuce": 400,
     "baby cucumber": 100,
@@ -117,7 +125,11 @@
     ["tortilla", 40],
     ["flatbread", 80],
     ["ciabatta", 100],
-    ["baguette", 130]
+    ["baguette", 130],
+    ["burger bun", 60],
+    ["brioche bun", 60],
+    ["pizza dough", 250],
+    ["tilapia", 130]
   ],
   "by_unit": {
     "sachet(s)": 8,
