@@ -192,6 +192,10 @@ def get_recipe(
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     steps = sorted(recipe.steps, key=lambda s: s.index)
+    ingredients = sorted(
+        recipe.ingredients,
+        key=lambda i: (i.position is None, i.position or 0, i.id),
+    )
     return RecipeDetail(
         id=recipe.id,
         name=recipe.name,
@@ -225,7 +229,7 @@ def get_recipe(
                 canonical_unit=i.canonical_unit,
                 image_url=image_url(i.image_path, 200),
             )
-            for i in recipe.ingredients
+            for i in ingredients
         ],
         steps=[StepOut(index=s.index, text=s.instructions_text) for s in steps],
         nutrition=[

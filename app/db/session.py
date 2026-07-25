@@ -25,6 +25,10 @@ def make_engine(db_path: Path | None = None) -> Engine:
 
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(recipe_ingredients)"))}
+        if "position" not in existing:
+            conn.execute(text("ALTER TABLE recipe_ingredients ADD COLUMN position INTEGER"))
 
 
 def ensure_columns(session: Session, table: str, columns: dict[str, str]) -> None:
@@ -38,6 +42,11 @@ def ensure_columns(session: Session, table: str, columns: dict[str, str]) -> Non
         if name not in existing:
             session.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
     session.commit()
+
+
+def ensure_runtime_schema(engine: Engine) -> None:
+    """Keep existing local SQLite DBs compatible with newly declared columns."""
+    init_db(engine)
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

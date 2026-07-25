@@ -11,12 +11,14 @@ from functools import lru_cache
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.session import make_engine, make_session_factory
+from app.db.session import ensure_runtime_schema, make_engine, make_session_factory
 
 
 @lru_cache(maxsize=1)
 def _session_factory() -> sessionmaker[Session]:
-    return make_session_factory(make_engine())
+    engine = make_engine()
+    ensure_runtime_schema(engine)
+    return make_session_factory(engine)
 
 
 def get_session() -> Iterator[Session]:

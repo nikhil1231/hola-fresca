@@ -407,11 +407,12 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
         scraped_at=datetime.now(timezone.utc),
     )
     row.ingredients = []
-    for i in recipe.ingredients:
+    for position, i in enumerate(recipe.ingredients, start=1):
         grams, canonical_unit = to_grams(i.name, i.amount, i.unit)
         row.ingredients.append(
             RecipeIngredient(
                 source_ingredient_id=i.source_ingredient_id,
+                position=position,
                 name=i.name,
                 raw_text=i.raw_text,
                 type=i.type,

@@ -144,6 +144,8 @@ class RecipeIngredient(Base):
     source_ingredient_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     name: Mapped[str] = mapped_column(Text)
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 1-based source order, used for deterministic recipe display and scaling.
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     type: Mapped[str | None] = mapped_column(Text, nullable=True)
     slug: Mapped[str | None] = mapped_column(Text, nullable=True)
     amount: Mapped[float | None] = mapped_column(Float, nullable=True)
