@@ -3,8 +3,16 @@
 
 async function getJSON(path) {
   const res = await fetch(path)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
+  if (res.ok) return res.json()
+
+  let detail = null
+  try {
+    const body = await res.json()
+    detail = body?.detail
+  } catch {
+    // Keep the status-only fallback when the server did not return JSON.
+  }
+  throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`)
 }
 
 // Filter params that are arrays (repeatable query params) vs scalars.

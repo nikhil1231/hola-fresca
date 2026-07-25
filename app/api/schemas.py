@@ -6,7 +6,7 @@ image URL.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RecipeCard(BaseModel):
@@ -21,8 +21,8 @@ class RecipeCard(BaseModel):
     difficulty: int | None = None
     avg_rating: float | None = None
     ratings_count: int | None = None
-    cuisines: list[str] = []
-    tags: list[str] = []
+    cuisines: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
 
 class PaginatedRecipes(BaseModel):
@@ -76,12 +76,12 @@ class RecipeDetail(BaseModel):
     avg_rating: float | None = None
     ratings_count: int | None = None
 
-    cuisines: list[str] = []
-    tags: list[str] = []
-    allergens: list[str] = []
-    ingredients: list[IngredientOut] = []
-    steps: list[StepOut] = []
-    nutrition: list[NutritionOut] = []
+    cuisines: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    allergens: list[str] = Field(default_factory=list)
+    ingredients: list[IngredientOut] = Field(default_factory=list)
+    steps: list[StepOut] = Field(default_factory=list)
+    nutrition: list[NutritionOut] = Field(default_factory=list)
 
 
 class FacetCount(BaseModel):
@@ -127,6 +127,19 @@ class MappingListItem(BaseModel):
 class MappingListOut(BaseModel):
     items: list[MappingListItem]
     counts: dict[str, int]
+    total: int = 0
+    page: int = 1
+    page_size: int = 100
+    has_more: bool = False
+
+
+class AliasOptionOut(BaseModel):
+    ingredient_key: str
+    name: str
+
+
+class AliasOptionsOut(BaseModel):
+    items: list[AliasOptionOut] = Field(default_factory=list)
 
 
 class MappingCandidateOut(BaseModel):
@@ -168,8 +181,8 @@ class MappingDetailOut(BaseModel):
     model: str | None = None
     llm_notes: str | None = None
     reviewer_notes: str | None = None
-    usage: dict = {}
-    candidates: list[MappingCandidateOut] = []
+    usage: dict = Field(default_factory=dict)
+    candidates: list[MappingCandidateOut] = Field(default_factory=list)
 
 
 class AcceptedIn(BaseModel):
@@ -181,7 +194,7 @@ class AcceptedIn(BaseModel):
 
 class DecisionIn(BaseModel):
     status: str
-    accepted: list[AcceptedIn] = []
+    accepted: list[AcceptedIn] = Field(default_factory=list)
     each_to_grams: float | None = None
     needs_substitution: bool = False
     pantry_staple: bool = False
@@ -205,7 +218,7 @@ class AliasOut(BaseModel):
 
 
 class AliasListOut(BaseModel):
-    items: list[AliasOut] = []
+    items: list[AliasOut] = Field(default_factory=list)
 
 
 class GenerateIn(BaseModel):
@@ -239,4 +252,4 @@ class JobOut(BaseModel):
 
 
 class BulkApproveIn(BaseModel):
-    keys: list[str]
+    keys: list[str] = Field(default_factory=list)

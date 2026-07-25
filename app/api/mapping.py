@@ -16,6 +16,8 @@ from app.api.deps import get_session
 from app.api.schemas import (
     AliasIn,
     AliasListOut,
+    AliasOptionOut,
+    AliasOptionsOut,
     AliasOut,
     BulkApproveIn,
     DecisionIn,
@@ -60,9 +62,14 @@ def _ic(session: Session, key: str):
 @router.get("/ingredients", response_model=MappingListOut)
 def list_ingredients(
     status: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=1000),
     session: Session = Depends(get_session),
 ) -> MappingListOut:
-    items = service.list_items(session, status=status)
+    offset = (page - 1) * page_size
+    items = service.list_items(session, status=status, q=q, limit=page_size, offset=offset)
+    total = service.count_items(session, status=status, q=q)
     counts = dict(
         session.execute(
             select(IngredientMapping.status, func.count()).group_by(IngredientMapping.status)
@@ -71,6 +78,25 @@ def list_ingredients(
     return MappingListOut(
         items=[MappingListItem(**vars(i)) for i in items],
         counts=counts,
+        total=total,
+        page=page,
+        page_size=page_size,
+        has_more=offset + len(items) < total,
+    )
+
+
+@router.get("/alias-options", response_model=AliasOptionsOut)
+def alias_options(
+    exclude: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    session: Session = Depends(get_session),
+) -> AliasOptionsOut:
+    return AliasOptionsOut(
+        items=[
+            AliasOptionOut(ingredient_key=k, name=n)
+            for k, n in service.list_alias_options(session, exclude_key=exclude, q=q, limit=limit)
+        ]
     )
 
 

@@ -79,6 +79,79 @@ def test_save_decision_then_list_and_detail(client):
     assert listing["items"][0]["num_accepted"] == 1
 
 
+
+
+def test_list_endpoint_paginates_searches_and_reports_total(client, factory):
+    with factory() as s:
+        seed_candidates(
+            s,
+            "name:beef mince",
+            "Beef Mince",
+            [{"sku": "b1", "name": "Ocado Beef Mince", "price": 4.0}],
+            line_count=100,
+        )
+
+    client.post(
+        f"/api/mapping/ingredients/{KEY_Q}",
+        json={"status": "proposed", "accepted": [{"sku": "p1", "rank": 1}]},
+    )
+    client.post(
+        "/api/mapping/ingredients/name%3Abeef%20mince",
+        json={"status": "approved", "accepted": [{"sku": "b1", "rank": 1}]},
+    )
+
+    page = client.get(
+        "/api/mapping/ingredients", params={"page_size": 1, "page": 1, "q": "mince"}
+    ).json()
+    assert page["total"] == 1
+    assert page["page"] == 1
+    assert page["page_size"] == 1
+    assert page["has_more"] is False
+    assert page["items"][0]["ingredient_key"] == "name:beef mince"
+
+
+def test_alias_options_are_lightweight_and_exclude_current(client, factory):
+    with factory() as s:
+        seed_candidates(
+            s,
+            "name:beef mince",
+            "Beef Mince",
+            [{"sku": "b1", "name": "Ocado Beef Mince", "price": 4.0}],
+            line_count=100,
+        )
+    client.post(
+        f"/api/mapping/ingredients/{KEY_Q}",
+        json={"status": "approved", "accepted": [{"sku": "p1", "rank": 1}]},
+    )
+    client.post(
+        "/api/mapping/ingredients/name%3Abeef%20mince",
+        json={"status": "approved", "accepted": [{"sku": "b1", "rank": 1}]},
+    )
+
+    body = client.get("/api/mapping/alias-options", params={"exclude": KEY}).json()
+    keys = {i["ingredient_key"] for i in body["items"]}
+    assert KEY not in keys
+    assert "name:beef mince" in keys
+
+
+def test_unknown_accepted_sku_rejected_by_api(client):
+    r = client.post(
+        f"/api/mapping/ingredients/{KEY_Q}",
+        json={"status": "approved", "accepted": [{"sku": "ghost", "rank": 1}]},
+    )
+    assert r.status_code == 400
+    assert "unknown accepted sku" in r.json()["detail"]
+
+
+def test_empty_non_pantry_approval_rejected_by_api(client):
+    r = client.post(
+        f"/api/mapping/ingredients/{KEY_Q}",
+        json={"status": "approved", "accepted": []},
+    )
+    assert r.status_code == 400
+    assert "at least one accepted product" in r.json()["detail"]
+
+
 def test_invalid_status_rejected(client):
     r = client.post(
         f"/api/mapping/ingredients/{KEY_Q}",

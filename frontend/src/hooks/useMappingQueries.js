@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import {
   bulkApprove,
   fetchAliases,
+  fetchAliasOptions,
   fetchJob,
   fetchMappingDetail,
   fetchMappingList,
@@ -15,10 +16,11 @@ import {
   startGenerate,
 } from '../api/mappingClient.js'
 
-export function useMappingList(status) {
+export function useMappingList(status, options = {}) {
+  const { page = 1, pageSize = 100, q = '' } = options
   return useQuery({
-    queryKey: ['mapping-list', status ?? 'all'],
-    queryFn: () => fetchMappingList(status),
+    queryKey: ['mapping-list', status ?? 'all', page, pageSize, q],
+    queryFn: () => fetchMappingList(status, { page, pageSize, q }),
   })
 }
 
@@ -38,6 +40,7 @@ export function useSaveDecision(key) {
       qc.setQueryData(['mapping-detail', key], data)
       qc.invalidateQueries({ queryKey: ['mapping-list'] })
       qc.invalidateQueries({ queryKey: ['mapping-stats'] })
+      qc.invalidateQueries({ queryKey: ['mapping-alias-options'] })
     },
   })
 }
@@ -48,6 +51,8 @@ export function useSearchCandidates(key) {
     mutationFn: (term) => searchMappingCandidates(key, term),
     onSuccess: (data) => {
       qc.setQueryData(['mapping-detail', key], data)
+      qc.invalidateQueries({ queryKey: ['mapping-list'] })
+      qc.invalidateQueries({ queryKey: ['mapping-stats'] })
     },
   })
 }
@@ -60,6 +65,14 @@ export function useAliases() {
   return useQuery({ queryKey: ['mapping-aliases'], queryFn: fetchAliases })
 }
 
+export function useAliasOptions(exclude) {
+  return useQuery({
+    queryKey: ['mapping-alias-options', exclude ?? 'none'],
+    queryFn: () => fetchAliasOptions({ exclude, limit: 1000 }),
+    enabled: exclude != null,
+  })
+}
+
 export function useSetAlias(key) {
   const qc = useQueryClient()
   return useMutation({
@@ -68,6 +81,7 @@ export function useSetAlias(key) {
       qc.setQueryData(['mapping-detail', key], data)
       qc.invalidateQueries({ queryKey: ['mapping-list'] })
       qc.invalidateQueries({ queryKey: ['mapping-aliases'] })
+      qc.invalidateQueries({ queryKey: ['mapping-alias-options'] })
       qc.invalidateQueries({ queryKey: ['mapping-stats'] })
     },
   })
@@ -97,6 +111,7 @@ export function useGenerateMappings() {
     if (!finished) return
     qc.invalidateQueries({ queryKey: ['mapping-list'] })
     qc.invalidateQueries({ queryKey: ['mapping-stats'] })
+    qc.invalidateQueries({ queryKey: ['mapping-alias-options'] })
     // Hold on to the finished job so its outcome (including a failure) stays on
     // screen; clearing jobId only stops the polling.
     setLastJob(job)
@@ -121,6 +136,9 @@ export function useBulkApprove() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (keys) => bulkApprove(keys),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mapping-list'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mapping-list'] })
+      qc.invalidateQueries({ queryKey: ['mapping-stats'] })
+    },
   })
 }

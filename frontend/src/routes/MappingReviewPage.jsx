@@ -23,6 +23,7 @@ import {
 import classes from './MappingReviewPage.module.css'
 
 import {
+  useAliasOptions,
   useMappingDetail,
   useMappingList,
   useSaveDecision,
@@ -55,15 +56,16 @@ export default function MappingReviewPage() {
   // that was being browsed and "back" returns to it.
   const [searchParams] = useSearchParams()
   const browseStatus = searchParams.get('status') ?? undefined
+  const browseQ = searchParams.get('q') ?? ''
   const { data, isLoading, isError } = useMappingDetail(key)
   const save = useSaveDecision(key)
   const research = useSearchCandidates(key)
   // The remaining review queue, so a decision can jump straight to the next one.
-  const { data: queue } = useMappingList('proposed')
-  // Every mapping, for the "same as" dropdown.
-  const { data: allItems } = useMappingList()
+  const { data: queue } = useMappingList('proposed', { pageSize: 1000 })
+  // Lightweight target list for the "same as" dropdown.
+  const { data: aliasTargets } = useAliasOptions(key)
   // The filtered list being browsed, for prev/next.
-  const { data: siblings } = useMappingList(browseStatus)
+  const { data: siblings } = useMappingList(browseStatus, { pageSize: 1000, q: browseQ })
   const alias = useSetAlias(key)
 
   const [picks, setPicks] = useState({})
@@ -130,11 +132,10 @@ export default function MappingReviewPage() {
 
   const aliasOptions = useMemo(
     () =>
-      (allItems?.items ?? [])
-        .filter((i) => i.ingredient_key !== key && !i.alias_of)
+      (aliasTargets?.items ?? [])
         .map((i) => ({ value: i.ingredient_key, label: i.name }))
         .sort((a, b) => a.label.localeCompare(b.label)),
-    [allItems, key],
+    [aliasTargets],
   )
 
   if (isLoading) {
@@ -299,6 +300,12 @@ export default function MappingReviewPage() {
         </Group>
       </Group>
 
+      {save.isError && (
+        <Alert color="red" variant="light" title="Couldn't save decision">
+          {save.error?.message}
+        </Alert>
+      )}
+
       <Paper withBorder radius="md" p="md">
         <Group align="flex-end" gap="sm">
           <Select
@@ -355,7 +362,7 @@ export default function MappingReviewPage() {
         }
         aria-disabled={isAlias}
       >
-       <Stack gap="lg">
+        <Stack gap="lg">
       <Paper withBorder radius="md" p="md">
         <Group align="flex-end" gap="sm">
           <TextInput

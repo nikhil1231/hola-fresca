@@ -1,8 +1,19 @@
-// Fetch wrappers for the ingredient→product mapping review API.
+// Fetch wrappers for the ingredient->product mapping review API.
+
+async function responseError(res) {
+  let detail = null
+  try {
+    const body = await res.json()
+    detail = body?.detail
+  } catch {
+    // Status-only fallback below.
+  }
+  return new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`)
+}
 
 async function getJSON(path) {
   const res = await fetch(path)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) throw await responseError(res)
   return res.json()
 }
 
@@ -12,13 +23,17 @@ async function postJSON(path, body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) throw await responseError(res)
   return res.json()
 }
 
-export function fetchMappingList(status) {
-  const q = status ? `?status=${encodeURIComponent(status)}` : ''
-  return getJSON(`/api/mapping/ingredients${q}`)
+export function fetchMappingList(status, { page = 1, pageSize = 100, q = '' } = {}) {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (q) params.set('q', q)
+  params.set('page', String(page))
+  params.set('page_size', String(pageSize))
+  return getJSON(`/api/mapping/ingredients?${params.toString()}`)
 }
 
 export function fetchMappingDetail(key) {
@@ -41,6 +56,14 @@ export function fetchMappingStats() {
 
 export function fetchAliases() {
   return getJSON('/api/mapping/aliases')
+}
+
+export function fetchAliasOptions({ exclude, q = '', limit = 200 } = {}) {
+  const params = new URLSearchParams()
+  if (exclude) params.set('exclude', exclude)
+  if (q) params.set('q', q)
+  params.set('limit', String(limit))
+  return getJSON(`/api/mapping/alias-options?${params.toString()}`)
 }
 
 // Pass null to clear the alias and return the ingredient to the review queue.

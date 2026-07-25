@@ -45,7 +45,7 @@ def test_save_decision_persists_accepted_and_status(factory):
         assert detail.spend_score == 500 * 2.5
 
 
-def test_save_decision_ignores_unknown_sku(factory):
+def test_save_decision_rejects_unknown_sku(factory):
     _seed(factory)
     with factory() as s:
         ic = gather_candidates(s, "name:chicken breast")
@@ -53,9 +53,51 @@ def test_save_decision_ignores_unknown_sku(factory):
             status="approved",
             accepted=[service.AcceptedInput(sku="ghost", rank=1)],
         )
-        service.save_decision(s, ic, decision)
+        try:
+            service.save_decision(s, ic, decision)
+        except ValueError as exc:
+            assert "unknown accepted sku" in str(exc)
+        else:
+            raise AssertionError("unknown accepted sku should be rejected")
+
+
+def test_save_decision_dedupes_repeated_sku(factory):
+    """A SKU sent twice is stored once, keeping its best rank (uq_mapping_product_sku)."""
+    _seed(factory)
+    with factory() as s:
+        ic = gather_candidates(s, "name:chicken breast")
+        service.save_decision(s, ic, service.DecisionInput(
+            status="approved",
+            accepted=[
+                service.AcceptedInput(sku="p1", rank=2, reason="second"),
+                service.AcceptedInput(sku="p1", rank=1, reason="first"),
+                service.AcceptedInput(sku="p2", rank=3),
+            ],
+        ))
+
+    with factory() as s:
+        ic = gather_candidates(s, "name:chicken breast")
+        accepted = [c for c in service.get_detail(s, ic).candidates if c.accepted]
+        assert [c.candidate.sku for c in accepted] == ["p1", "p2"]
+        assert [c.rank for c in accepted] == [1, 2]  # re-ranked contiguously
+
+
+def test_approved_requires_product_unless_pantry(factory):
+    _seed(factory)
+    with factory() as s:
+        ic = gather_candidates(s, "name:chicken breast")
+        try:
+            service.save_decision(s, ic, service.DecisionInput(status="approved", accepted=[]))
+        except ValueError as exc:
+            assert "at least one accepted product" in str(exc)
+        else:
+            raise AssertionError("empty non-pantry approval should be rejected")
+
+        service.save_decision(
+            s, ic, service.DecisionInput(status="approved", accepted=[], pantry_staple=True)
+        )
         detail = service.get_detail(s, ic)
-        assert all(not c.accepted for c in detail.candidates)
+        assert detail.status == "approved" and detail.pantry_staple is True
 
 
 def test_get_detail_overlays_all_candidates(factory):
@@ -93,6 +135,33 @@ def test_list_items_sorted_by_spend_desc(factory):
         items = service.list_items(s)
         # Beef (300 x 5.0) outranks salt (50 x 0.5).
         assert [i.ingredient_key for i in items] == ["name:beef", "name:salt"]
+
+
+def test_list_items_paginates_searches_and_hides_pantry_spend(factory):
+    with factory() as s:
+        seed_candidates(s, "name:salt", "Salt", [{"sku": "s1", "name": "Salt", "price": 0.5}], line_count=50)
+        seed_candidates(s, "name:beef", "Beef", [{"sku": "b1", "name": "Beef", "price": 5.0}], line_count=300)
+        seed_candidates(s, "name:beans", "Beans", [{"sku": "z1", "name": "Beans", "price": 1.0}], line_count=100)
+        service.save_decision(
+            s,
+            gather_candidates(s, "name:salt"),
+            service.DecisionInput(status="approved", accepted=[], pantry_staple=True),
+        )
+        for key in ("name:beef", "name:beans"):
+            ic = gather_candidates(s, key)
+            service.save_decision(
+                s,
+                ic,
+                service.DecisionInput(status="approved", accepted=[service.AcceptedInput(sku=ic.candidates[0].sku)]),
+            )
+
+    with factory() as s:
+        assert service.count_items(s, q="be") == 2
+        page = service.list_items(s, q="be", limit=1)
+        assert len(page) == 1 and page[0].ingredient_key == "name:beef"
+        pantry = next(i for i in service.list_items(s) if i.ingredient_key == "name:salt")
+        assert pantry.spend_score is None
+        assert pantry.top_product_name is None
 
 
 def test_pantry_staple_persists_and_shows_in_detail(factory):

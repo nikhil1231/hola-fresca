@@ -82,7 +82,7 @@ def test_chains_are_flattened_to_the_root(factory):
         service.save_decision(
             s,
             gather_candidates(s, third),
-            service.DecisionInput(status="approved", accepted=[]),
+            service.DecisionInput(status="proposed", accepted=[]),
         )
         service.set_alias(s, ALIAS, CANON)
         # Aliasing onto an alias should point at that alias's root instead.

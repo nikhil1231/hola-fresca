@@ -135,19 +135,9 @@ class Basket:
     staples: list[str] = field(default_factory=list)
 
 
-def _approved_mapping(
+def _best_product(
     session: Session, key: str, statuses: tuple[str, ...]
-) -> IngredientMapping | None:
-    return session.scalar(
-        select(IngredientMapping).where(
-            IngredientMapping.retailer == RETAILER,
-            IngredientMapping.ingredient_key == key,
-            IngredientMapping.status.in_(statuses),
-        )
-    )
-
-
-def _best_product(session: Session, key: str, statuses: tuple[str, ...]) -> IngredientMappingProduct | None:
+) -> tuple[IngredientMapping | None, IngredientMappingProduct | None]:
     mapping = session.scalar(
         select(IngredientMapping).where(
             IngredientMapping.retailer == RETAILER,
@@ -156,8 +146,16 @@ def _best_product(session: Session, key: str, statuses: tuple[str, ...]) -> Ingr
         )
     )
     if mapping is None or not mapping.products:
-        return None
-    return sorted(mapping.products, key=lambda p: p.rank)[0]
+        return mapping, None
+    return mapping, sorted(mapping.products, key=lambda p: p.rank)[0]
+
+
+def _pack_capacity_g(product: Product, mapping: IngredientMapping | None) -> float | None:
+    if product.pack_size_unit in ("g", "ml") and product.pack_size_value:
+        return product.pack_size_value
+    if product.pack_size_unit == "each" and product.pack_size_value and mapping and mapping.each_to_grams:
+        return product.pack_size_value * mapping.each_to_grams
+    return None
 
 
 def build_basket(
@@ -205,11 +203,10 @@ def build_basket(
         for key, grams in sorted(need_g.items(), key=lambda kv: kv[1], reverse=True):
             # Staples (salt, oil, sugar) are mapped and approved, but assumed
             # already in the cupboard — record them, don't shop for them.
-            mapping = _approved_mapping(session, key, statuses)
+            mapping, best = _best_product(session, key, statuses)
             if mapping is not None and mapping.pantry_staple and not include_staples:
                 basket.staples.append(name_by_key.get(key, key))
                 continue
-            best = _best_product(session, key, statuses)
             if best is None:
                 basket.unmapped.append(name_by_key.get(key, key))
                 continue
@@ -225,15 +222,15 @@ def build_basket(
             line.pack_size_value = product.pack_size_value
             line.pack_size_unit = product.pack_size_unit
             line.price = product.price
-            if product.pack_size_unit in ("g", "ml") and product.pack_size_value:
-                packs = max(1, math.ceil(grams / product.pack_size_value))
+            capacity_g = _pack_capacity_g(product, mapping)
+            if capacity_g:
+                packs = max(1, math.ceil(grams / capacity_g))
                 line.packs = packs
                 if product.price is not None:
                     line.line_cost = round(packs * product.price, 2)
                     basket.total += line.line_cost
-                line.leftover_g = round(packs * product.pack_size_value - grams, 1)
+                line.leftover_g = round(packs * capacity_g - grams, 1)
             else:
-                # Count-sold or unparsed pack: needs the planner's unit logic.
                 line.note = f"pack '{product.pack_size_raw}' needs unit handling"
             basket.lines.append(line)
         basket.total = round(basket.total, 2)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import IngredientMapping, IngredientMappingProduct
@@ -182,7 +182,19 @@ def save_decision(
     if decision.status not in VALID_STATUSES:
         raise ValueError(f"invalid status {decision.status!r}")
     valid_skus = {c.sku for c in ic.candidates}
-    accepted = [a for a in decision.accepted if a.sku in valid_skus]
+    unknown = sorted({a.sku for a in decision.accepted if a.sku not in valid_skus})
+    if unknown:
+        raise ValueError(f"unknown accepted sku(s): {', '.join(unknown)}")
+    # One SKU can only be accepted once per mapping (uq_mapping_product_sku).
+    # A payload repeating a SKU keeps its best-ranked entry rather than erroring.
+    accepted = []
+    seen_skus: set[str] = set()
+    for a in sorted(decision.accepted, key=lambda x: x.rank):
+        if a.sku not in seen_skus:
+            seen_skus.add(a.sku)
+            accepted.append(a)
+    if decision.status == "approved" and not decision.pantry_staple and not accepted:
+        raise ValueError("approved mappings need at least one accepted product unless pantry_staple is true")
     for i, a in enumerate(sorted(accepted, key=lambda x: x.rank), start=1):
         a.rank = i
 
@@ -195,7 +207,7 @@ def save_decision(
     mapping.needs_substitution = 1 if decision.needs_substitution else 0
     mapping.pantry_staple = 1 if decision.pantry_staple else 0
     mapping.reviewer_notes = decision.reviewer_notes
-    mapping.spend_score = _spend_score(ic, [a.sku for a in accepted])
+    mapping.spend_score = None if decision.pantry_staple else _spend_score(ic, [a.sku for a in accepted])
     session.commit()
     return mapping
 
@@ -295,14 +307,21 @@ def _name_of(session: Session, key: str, retailer: str = RETAILER) -> str | None
 
 def bulk_approve(session: Session, keys: list[str], retailer: str = RETAILER) -> int:
     n = 0
+    if not keys:
+        return 0
     for mapping in session.scalars(
         select(IngredientMapping).where(
             IngredientMapping.retailer == retailer,
             IngredientMapping.ingredient_key.in_(keys),
+            IngredientMapping.status == "proposed",
         )
     ):
+        if not mapping.pantry_staple and not mapping.products:
+            continue
         mapping.status = "approved"
         mapping.decided_by = "human"
+        if mapping.pantry_staple:
+            mapping.spend_score = None
         n += 1
     session.commit()
     return n
@@ -374,8 +393,31 @@ def _usage_dict(ic: IngredientCandidates) -> dict:
     }
 
 
+def _mapping_filters(stmt, *, status: str | None, q: str | None, retailer: str):
+    stmt = stmt.where(IngredientMapping.retailer == retailer)
+    if status:
+        stmt = stmt.where(IngredientMapping.status == status)
+    if q:
+        term = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(IngredientMapping.name.ilike(term), IngredientMapping.ingredient_key.ilike(term))
+        )
+    return stmt
+
+
+def count_items(
+    session: Session, *, status: str | None = None, q: str | None = None,
+    retailer: str = RETAILER,
+) -> int:
+    stmt = _mapping_filters(
+        select(func.count(IngredientMapping.id)), status=status, q=q, retailer=retailer
+    )
+    return session.scalar(stmt) or 0
+
+
 def list_items(
-    session: Session, *, status: str | None = None, retailer: str = RETAILER
+    session: Session, *, status: str | None = None, q: str | None = None,
+    limit: int | None = None, offset: int = 0, retailer: str = RETAILER
 ) -> list[IngredientListItem]:
     # Candidate counts per ingredient from the search cache.
     from app.db.models import ProductSearchHit
@@ -388,23 +430,26 @@ def list_items(
         ).all()
     )
 
-    stmt = select(IngredientMapping).where(IngredientMapping.retailer == retailer)
-    if status:
-        stmt = stmt.where(IngredientMapping.status == status)
+    stmt = _mapping_filters(select(IngredientMapping), status=status, q=q, retailer=retailer)
     stmt = stmt.order_by(
-        IngredientMapping.spend_score.is_(None), IngredientMapping.spend_score.desc()
+        IngredientMapping.spend_score.is_(None), IngredientMapping.spend_score.desc(),
+        IngredientMapping.line_count.desc(), IngredientMapping.name.asc(), IngredientMapping.id.asc(),
     )
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
 
     items: list[IngredientListItem] = []
     for mapping in session.scalars(stmt):
         accepted = sorted(mapping.products, key=lambda p: p.rank)
-        top = accepted[0] if accepted else None
+        top = accepted[0] if accepted and not mapping.pantry_staple else None
         top_name = None
         top_rating = None
         top_ratings_count = None
         if top is not None:
             top_name = top.product.name if top.product else top.sku
-            if top.product is not None:
+            if top.product is not None and (top.product.ratings_count or 0) > 0:
                 top_rating = top.product.avg_rating
                 top_ratings_count = top.product.ratings_count
         items.append(
@@ -413,9 +458,9 @@ def list_items(
                 name=mapping.name,
                 status=mapping.status,
                 line_count=mapping.line_count,
-                spend_score=mapping.spend_score,
+                spend_score=None if mapping.pantry_staple else mapping.spend_score,
                 num_candidates=cand_counts.get(mapping.ingredient_key, 0),
-                num_accepted=len(accepted),
+                num_accepted=0 if mapping.pantry_staple else len(accepted),
                 needs_substitution=bool(mapping.needs_substitution),
                 pantry_staple=bool(mapping.pantry_staple),
                 alias_of=mapping.alias_of,
@@ -426,3 +471,23 @@ def list_items(
             )
         )
     return items
+
+
+def list_alias_options(
+    session: Session, *, exclude_key: str | None = None, q: str | None = None,
+    limit: int = 200, retailer: str = RETAILER,
+) -> list[tuple[str, str]]:
+    stmt = select(IngredientMapping.ingredient_key, IngredientMapping.name).where(
+        IngredientMapping.retailer == retailer,
+        IngredientMapping.alias_of.is_(None),
+        IngredientMapping.status != "alias",
+    )
+    if exclude_key:
+        stmt = stmt.where(IngredientMapping.ingredient_key != exclude_key)
+    if q:
+        term = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(IngredientMapping.name.ilike(term), IngredientMapping.ingredient_key.ilike(term))
+        )
+    stmt = stmt.order_by(IngredientMapping.name.asc(), IngredientMapping.id.asc()).limit(limit)
+    return list(session.execute(stmt).all())

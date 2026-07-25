@@ -130,7 +130,8 @@ def main(argv: list[str] | None = None) -> int:
             detail = (
                 f"{line.packs}x {line.product_name} "
                 f"({line.pack_size_value:g}{line.pack_size_unit}) "
-                f"= £{line.line_cost:.2f}, {line.leftover_g:g}{line.pack_size_unit} left"
+                # leftover_g is always grams, even when the pack is sold by count.
+                f"= £{line.line_cost:.2f}, {line.leftover_g:g}g left"
                 if line.line_cost is not None
                 else f"{line.product_name or '—'} [{line.note}]"
             )

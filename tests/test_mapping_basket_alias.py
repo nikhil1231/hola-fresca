@@ -108,3 +108,65 @@ def test_pantry_staples_count_as_covered(factory, tmp_path):
         )
     rep = coverage.coverage_report(factory, csv_path=_csv(tmp_path))
     assert rep.lines_resolved == rep.lines_total == 2
+
+
+def test_count_sold_pack_uses_each_to_grams_for_capacity(factory, tmp_path):
+    key = "name:lime"
+    sid = "sid-lime"
+    csv_path = tmp_path / "lime.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "rank", "ingredient_key", "source_ingredient_ids", "name", "recipe_count",
+                "recipe_pct", "line_count", "metric_unit", "metric_known_pct",
+                "median_metric_amount", "mean_metric_amount", "p25_metric_amount",
+                "p75_metric_amount", "common_native_amounts", "name_variants",
+            ],
+        )
+        w.writeheader()
+        w.writerow({
+            "rank": 1, "ingredient_key": key, "source_ingredient_ids": sid, "name": "Lime",
+            "recipe_count": 1, "recipe_pct": 0, "line_count": 1, "metric_unit": "g",
+            "metric_known_pct": 100, "median_metric_amount": 180, "mean_metric_amount": 180,
+            "p25_metric_amount": 180, "p75_metric_amount": 180, "common_native_amounts": "",
+            "name_variants": "",
+        })
+
+    with factory() as s:
+        seed_candidates(
+            s,
+            key,
+            "Lime",
+            [{
+                "sku": "lime2", "name": "Ocado Limes Twin Pack", "price": 0.75,
+                "pack_value": 2, "pack_unit": "each",
+            }],
+            line_count=1,
+        )
+        service.save_decision(
+            s,
+            gather_candidates(s, key),
+            service.DecisionInput(
+                status="approved",
+                accepted=[service.AcceptedInput(sku="lime2", rank=1)],
+                each_to_grams=65,
+            ),
+        )
+        recipe = Recipe(
+            source="hellofresh", source_id="lime-recipe", url="", name="Lime Bowl", curated=1,
+            ingredients=[
+                RecipeIngredient(name="Lime", source_ingredient_id=sid, amount=180, unit="grams", amount_g=180),
+            ],
+        )
+        s.add(recipe)
+        s.commit()
+        rid = recipe.id
+
+    basket = coverage.build_basket(factory, [rid], csv_path=csv_path)
+    assert len(basket.lines) == 1
+    line = basket.lines[0]
+    assert line.packs == 2
+    assert line.line_cost == 1.5
+    assert line.leftover_g == 80
+    assert line.note is None

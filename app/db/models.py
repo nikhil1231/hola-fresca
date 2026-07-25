@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -337,6 +337,10 @@ class IngredientMapping(Base):
     __tablename__ = "ingredient_mappings"
     __table_args__ = (
         UniqueConstraint("retailer", "ingredient_key", name="uq_ingredient_map_retailer_key"),
+        CheckConstraint(
+            "status in ('proposed', 'approved', 'rejected', 'needs_review', 'no_match', 'alias')",
+            name="ck_ingredient_mapping_status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -388,6 +392,14 @@ class IngredientMappingProduct(Base):
     """A candidate product for an ingredient mapping, with the accept decision."""
 
     __tablename__ = "ingredient_mapping_products"
+    __table_args__ = (
+        UniqueConstraint("mapping_id", "sku", name="uq_mapping_product_sku"),
+        UniqueConstraint("mapping_id", "rank", name="uq_mapping_product_rank"),
+        CheckConstraint(
+            "match_type in ('exact', 'substitute', 'form_differs')",
+            name="ck_mapping_product_match_type",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     mapping_id: Mapped[int] = mapped_column(
