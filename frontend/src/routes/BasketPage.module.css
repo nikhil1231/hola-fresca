@@ -1,0 +1,65 @@
+.titleIcon,
+.sectionIcon {
+  color: var(--mantine-color-fresh-7);
+  flex: 0 0 auto;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  border: 1px solid var(--mantine-color-gray-2);
+  border-radius: var(--mantine-radius-md);
+  padding: 14px;
+  background: var(--mantine-color-body);
+}
+
+.spend {
+  border-color: var(--mantine-color-fresh-3);
+  background: var(--mantine-color-fresh-0);
+}
+
+.statValue {
+  font-size: 1.4rem;
+  line-height: 1.2;
+}
+
+.section {
+  border-top: 1px solid var(--mantine-color-gray-2);
+  padding-top: 18px;
+}
+
+.sectionTitle {
+  font-size: 1.05rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.bucketGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bucket,
+.emptyState {
+  border: 1px dashed var(--mantine-color-gray-3);
+  border-radius: var(--mantine-radius-md);
+  padding: 16px;
+  background: var(--mantine-color-gray-0);
+}
+
+.emptyState {
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 48em) {
+  .statsGrid,
+  .bucketGrid {
+    grid-template-columns: 1fr;
+  }
+}

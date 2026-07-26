@@ -9,6 +9,7 @@ import './index.css'
 
 import { theme } from './theme.js'
 import App from './App.jsx'
+import BasketPage from './routes/BasketPage.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
 import CuisinesPage from './routes/CuisinesPage.jsx'
 import DashboardPage from './routes/DashboardPage.jsx'
@@ -33,6 +34,7 @@ createRoot(document.getElementById('root')).render(
             <Route element={<App />}>
               <Route index element={<BrowsePage />} />
               <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="basket" element={<BasketPage />} />
               <Route path="cuisines" element={<CuisinesPage />} />
               <Route path="recipes/:id" element={<RecipeDetailPage />} />
               <Route path="mapping" element={<MappingPage />} />

@@ -40,6 +40,13 @@
   background: rgba(0, 0, 0, 0.6);
 }
 
+.marginalBadge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  box-shadow: var(--mantine-shadow-sm);
+}
+
 .planControls {
   position: absolute;
   top: 8px;

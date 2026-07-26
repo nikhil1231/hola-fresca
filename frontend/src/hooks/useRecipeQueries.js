@@ -4,6 +4,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import {
   fetchAuditJob,
   fetchFacets,
+  fetchPlannerBasket,
+  fetchPlannerSuggestions,
   fetchRecipe,
   fetchRecipes,
   flagRecipe,
@@ -13,13 +15,43 @@ import {
 const PAGE_SIZE = 24
 
 // Paginated recipe list as an infinite query keyed on the active filters.
-export function useRecipes(filters) {
+export function useRecipes(filters, { enabled = true } = {}) {
   return useInfiniteQuery({
     queryKey: ['recipes', filters],
     queryFn: ({ pageParam = 1 }) => fetchRecipes(filters, pageParam, PAGE_SIZE),
     initialPageParam: 1,
     getNextPageParam: (lastPage) =>
       lastPage.has_more ? lastPage.page + 1 : undefined,
+    enabled,
+  })
+}
+
+export function useRecipeSuggestions(
+  filters,
+  selections,
+  { candidatePortions = 4, enabled = true } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: ['planner-suggestions', filters, selections, candidatePortions],
+    queryFn: ({ pageParam = 1 }) =>
+      fetchPlannerSuggestions({
+        selections,
+        filters,
+        candidatePortions,
+        page: pageParam,
+        pageSize: PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more ? lastPage.page + 1 : undefined,
+    enabled,
+  })
+}
+
+export function usePlannerBasket(selections) {
+  return useQuery({
+    queryKey: ['planner-basket', selections],
+    queryFn: () => fetchPlannerBasket(selections),
   })
 }
 

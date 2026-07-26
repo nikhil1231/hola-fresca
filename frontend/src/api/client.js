@@ -1,10 +1,7 @@
 // Thin fetch wrappers around the recipe API. All requests go through Vite's
 // /api proxy to the FastAPI backend.
 
-async function getJSON(path) {
-  const res = await fetch(path)
-  if (res.ok) return res.json()
-
+async function responseError(res) {
   let detail = null
   try {
     const body = await res.json()
@@ -12,7 +9,24 @@ async function getJSON(path) {
   } catch {
     // Keep the status-only fallback when the server did not return JSON.
   }
-  throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`)
+  return new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`)
+}
+
+async function getJSON(path) {
+  const res = await fetch(path)
+  if (res.ok) return res.json()
+
+  throw await responseError(res)
+}
+
+async function postJSON(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await responseError(res)
+  return res.json()
 }
 
 // Filter params that are arrays (repeatable query params) vs scalars.
@@ -38,6 +52,26 @@ export function fetchRecipes(filters, page, pageSize = 24) {
   params.set('page', String(page))
   params.set('page_size', String(pageSize))
   return getJSON(`/api/recipes?${params.toString()}`)
+}
+
+export function fetchPlannerBasket(selections) {
+  return postJSON('/api/planner/basket', { selections })
+}
+
+export function fetchPlannerSuggestions({
+  selections,
+  filters = {},
+  candidatePortions = 4,
+  page = 1,
+  pageSize = 24,
+}) {
+  return postJSON('/api/planner/suggestions', {
+    selections,
+    filters,
+    candidate_portions: candidatePortions,
+    page,
+    page_size: pageSize,
+  })
 }
 
 export function fetchRecipe(id) {

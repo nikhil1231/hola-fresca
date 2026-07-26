@@ -25,6 +25,12 @@ function round(value) {
   return value == null ? null : Math.round(value)
 }
 
+function formatMarginalScore(value) {
+  if (value == null) return null
+  const absolute = Math.abs(value).toFixed(2)
+  return `${value < 0 ? '-' : '+'}£${absolute}`
+}
+
 function proteinDensityLevel(value) {
   if (value == null) return 0
 
@@ -147,6 +153,7 @@ function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove })
 
 export default function RecipeCard({
   recipe,
+  marginalScore = null,
   plannerEntry = null,
   plannerControlsVisible = false,
   plannerDisabled = false,
@@ -154,6 +161,7 @@ export default function RecipeCard({
   onPortionsChange,
   onRemoveFromPlan,
 }) {
+  const marginalLabel = formatMarginalScore(marginalScore)
   const controlClass = [
     classes.planControls,
     plannerEntry ? classes.planControlsSelected : '',
@@ -179,6 +187,11 @@ export default function RecipeCard({
                 <IconStarFilled size={11} />
                 {recipe.avg_rating != null ? recipe.avg_rating.toFixed(1) : '-'}
               </Group>
+            </Badge>
+          )}
+          {marginalLabel && (
+            <Badge className={classes.marginalBadge} variant="filled" color="fresh" radius="sm">
+              {marginalLabel}
             </Badge>
           )}
         </Card.Section>

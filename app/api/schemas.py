@@ -153,6 +153,91 @@ class FacetsOut(BaseModel):
     sorts: list[FacetCount]
 
 
+# --- Planner basket + suggestions ------------------------------------------
+
+class PlannerSelectionIn(BaseModel):
+    recipe_id: int
+    portions: int = Field(ge=1, le=20)
+
+
+class PlannerFiltersIn(BaseModel):
+    q: str | None = None
+    cuisine: list[str] = Field(default_factory=list)
+    diet: list[str] = Field(default_factory=list)
+    tag: list[str] = Field(default_factory=list)
+    protein: list[str] = Field(default_factory=list)
+    max_time: int | None = None
+    min_protein: float | None = None
+    min_protein_ratio: float | None = None
+    max_kcal: float | None = None
+    difficulty: int | None = None
+    exclude: list[str] = Field(default_factory=list)
+
+
+class BasketIn(BaseModel):
+    selections: list[PlannerSelectionIn] = Field(default_factory=list)
+
+
+class BasketPackChoiceOut(BaseModel):
+    sku: str
+    product_name: str
+    pack_size_raw: str | None = None
+    capacity_g: float
+    price: float
+    count: int
+    cost: float
+    retailer: str
+    external: bool = False
+
+
+class BasketLineOut(BaseModel):
+    key: str
+    name: str
+    need_g: float
+    capacity_g: float | None = None
+    leftover_g: float | None = None
+    cost: float
+    waste_gbp: float
+    score: float
+    packs: int
+    trace: bool = False
+    external: bool = False
+    note: str | None = None
+    choices: list[BasketPackChoiceOut] = Field(default_factory=list)
+
+
+class BasketOut(BaseModel):
+    lines: list[BasketLineOut] = Field(default_factory=list)
+    staples: list[str] = Field(default_factory=list)
+    unmapped: list[str] = Field(default_factory=list)
+    unpriceable: list[str] = Field(default_factory=list)
+    untracked_lines: int = 0
+    cost: float
+    waste_gbp: float
+    score: float
+
+
+class SuggestionsIn(BasketIn):
+    candidate_portions: int = Field(default=4, ge=1, le=20)
+    filters: PlannerFiltersIn = Field(default_factory=PlannerFiltersIn)
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=24, ge=1, le=60)
+
+
+class RecipeSuggestionCard(RecipeCard):
+    marginal_score: float
+    standalone_score: float
+    shared_ingredient_count: int
+
+
+class PlannerSuggestionsOut(BaseModel):
+    items: list[RecipeSuggestionCard]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
 # --- Ingredient → product mapping review -----------------------------------
 
 class MappingListItem(BaseModel):

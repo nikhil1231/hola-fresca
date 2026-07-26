@@ -33,6 +33,13 @@ export function formatWeekLabel(weekStart) {
   }).format(date)
 }
 
+export function toPlannerSelections(entries) {
+  return entries.map((entry) => ({
+    recipe_id: entry.recipe.id,
+    portions: entry.portions,
+  }))
+}
+
 function recipeSnapshot(recipe) {
   return {
     id: recipe.id,

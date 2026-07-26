@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
   Alert,
   Box,
@@ -20,8 +20,13 @@ import FilterPanel from '../components/FilterPanel.jsx'
 import { DEFAULT_FACETS } from '../data/defaultFacets.js'
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useFilters, countActiveFilters } from '../hooks/useFilters.js'
-import { useFacets, useRecipes } from '../hooks/useRecipeQueries.js'
-import { MAX_RECIPES_PER_WEEK, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
+import { useFacets, useRecipes, useRecipeSuggestions } from '../hooks/useRecipeQueries.js'
+import {
+  DEFAULT_PORTIONS,
+  MAX_RECIPES_PER_WEEK,
+  toPlannerSelections,
+  useWeeklyPlan,
+} from '../hooks/useWeeklyPlan.js'
 
 const GRID_COLS = { base: 1, xs: 2, sm: 2, md: 3, lg: 4 }
 
@@ -36,6 +41,23 @@ export default function BrowsePage() {
     setRecipePortions,
   } = useWeeklyPlan()
   const { data: facets } = useFacets()
+  const upcomingRecipes = getWeekRecipes(upcomingWeekStart)
+  const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
+  const plannerSelections = useMemo(() => toPlannerSelections(upcomingRecipes), [upcomingRecipes])
+  const bestFitRequested = filters.sort === 'best_fit'
+  const bestFitActive = bestFitRequested && upcomingRecipes.length > 0
+  const suggestionFilters = useMemo(() => {
+    const { sort: _sort, ...rest } = filters
+    return rest
+  }, [filters])
+  const recipesQuery = useRecipes(bestFitActive ? suggestionFilters : filters, {
+    enabled: !bestFitActive,
+  })
+  const suggestionsQuery = useRecipeSuggestions(suggestionFilters, plannerSelections, {
+    candidatePortions: DEFAULT_PORTIONS,
+    enabled: bestFitActive,
+  })
+  const activeQuery = bestFitActive ? suggestionsQuery : recipesQuery
   const {
     data,
     isLoading,
@@ -43,8 +65,12 @@ export default function BrowsePage() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useRecipes(filters)
+  } = activeQuery
   const [drawerOpen, drawer] = useDisclosure(false)
+
+  useEffect(() => {
+    if (bestFitRequested && upcomingRecipes.length === 0) setScalar('sort', 'popular')
+  }, [bestFitRequested, setScalar, upcomingRecipes.length])
 
   const { ref: sentinelRef, entry } = useIntersection({ threshold: 0, rootMargin: '400px' })
   useEffect(() => {
@@ -55,8 +81,12 @@ export default function BrowsePage() {
   const total = data?.pages[0]?.total ?? 0
   const activeCount = countActiveFilters(filters)
   const filterFacets = facets ?? DEFAULT_FACETS
-  const upcomingRecipes = getWeekRecipes(upcomingWeekStart)
-  const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
+  const sortOptions = [
+    ...filterFacets.sorts.map((s) => ({ value: s.value, label: s.label })),
+    ...(upcomingRecipes.length > 0
+      ? [{ value: 'best_fit', label: 'Best fit for this week' }]
+      : []),
+  ]
 
   const panel = (
     <FilterPanel
@@ -94,11 +124,11 @@ export default function BrowsePage() {
           <Select
             value={filters.sort ?? 'popular'}
             onChange={(v) => setScalar('sort', v)}
-            data={filterFacets.sorts.map((s) => ({ value: s.value, label: s.label }))}
+            data={sortOptions}
             allowDeselect={false}
             radius="md"
             size="sm"
-            w={180}
+            w={{ base: 190, sm: 220 }}
             aria-label="Sort recipes"
           />
         </Group>
@@ -132,6 +162,7 @@ export default function BrowsePage() {
                   <RecipeCard
                     key={recipe.id}
                     recipe={recipe}
+                    marginalScore={bestFitActive ? recipe.marginal_score : null}
                     plannerEntry={plannerEntry}
                     plannerDisabled={!plannerEntry && upcomingWeekFull}
                     onAddToPlan={() => addRecipeToWeek(recipe, upcomingWeekStart)}

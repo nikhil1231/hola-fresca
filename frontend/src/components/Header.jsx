@@ -59,6 +59,9 @@ export default function Header() {
               <NavLink to="/dashboard" className={navClass}>
                 Dashboard
               </NavLink>
+              <NavLink to="/basket" className={navClass}>
+                Basket
+              </NavLink>
               <NavLink to="/cuisines" className={navClass}>
                 Cuisines
               </NavLink>
