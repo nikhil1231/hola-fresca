@@ -33,7 +33,13 @@ import classes from './RecipeDetailPage.module.css'
 const DIFFICULTY = { 1: 'Easy', 2: 'Medium', 3: 'Hard' }
 const SERVINGS = [0.5, 1, 2, 3, 4, 6, 8]
 const SERVINGS_LABELS = { 0.5: '½', 1: '1', 2: '2', 3: '3', 4: '4', 6: '6', 8: '8' }
-const METRIC_UNITS = ['grams', 'milliliter(s)', 'tbsp', 'tsp', 'pinch']
+const METRIC_UNITS = ['grams', 'milliliter(s)']
+// Spoon measures are how these are actually measured at the hob, so they show
+// natively rather than as the gram conversion the mapping layer needs.
+const SPOON_UNITS = ['tbsp', 'tsp', 'pinch']
+const FRACTIONS = { 0.25: '¼', 0.5: '½', 0.75: '¾' }
+// Past a handful of spoons nobody counts them out, so fall back to the weight.
+const MAX_SPOONS = 8
 
 // Round a scaled quantity to a sensible precision for display.
 function roundNice(v) {
@@ -53,11 +59,12 @@ function scaledQuantity(ing, factor) {
   if (ing.amount_g != null) {
     parts.push(`${roundNice(ing.amount_g * factor)}${ing.canonical_unit || 'g'}`)
   }
-  const nativeIsCount = ing.unit && !METRIC_UNITS.includes(ing.unit)
+  const nativeIsCount =
+    ing.unit && !METRIC_UNITS.includes(ing.unit) && !SPOON_UNITS.includes(ing.unit)
   if (ing.amount != null && nativeIsCount) {
     const n = roundCount(ing.amount * factor)
-    const unit = ing.unit.replace(/\(s\)$/, n === 1 ? '' : 's')
-    parts.push(parts.length ? `(${n} ${unit})` : `${n} ${unit}`)
+    const label = `${formatCount(n)} ${unitLabel(ing.unit, n)}`
+    parts.push(parts.length ? `(${label})` : label)
   } else if (ing.amount_g == null && ing.amount != null) {
     parts.push(String(Math.round(ing.amount * factor * 100) / 100))
   }
@@ -65,10 +72,27 @@ function scaledQuantity(ing, factor) {
 }
 
 function MacroStat({ label, value, unit }) {
+function formatCount(v) {
+  const whole = Math.floor(v)
+  const frac = FRACTIONS[v - whole]
+  if (!frac) return String(v)
+  return whole ? `${whole}${frac}` : frac
+}
+
+// Source units carry their own plural suffix, e.g. "bunch(es)" or "unit(s)".
+function unitLabel(unit, n) {
+  if (unit === 'pinch') return n > 1 ? 'pinches' : 'pinch'
+  return unit.replace(/\((e?s)\)$/, n > 1 ? '$1' : '')
+}
+
   return (
     <Paper withBorder radius="md" p="sm" className={classes.macro}>
       <Text fz="xl" fw={700}>
         {value == null ? '—' : `${Math.round(value)}`}
+  if (ing.amount && SPOON_UNITS.includes(ing.unit)) {
+    const n = Math.max(roundCount(ing.amount * factor), 0.25)
+    if (n <= MAX_SPOONS) return `${formatCount(n)} ${unitLabel(ing.unit, n)}`
+  }
         <Text span fz="sm" c="dimmed" fw={500}>
           {unit}
         </Text>
