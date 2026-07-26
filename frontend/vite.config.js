@@ -45,6 +45,7 @@ const pageFiles = {
     'frontend/src/routes/RecipeDetailPage.module.css',
     'frontend/src/hooks/useRecipeQueries.js',
     'frontend/src/api/client.js',
+    'app/audit.py',
   ],
   mapping: [
     'frontend/src/routes/MappingPage.jsx',

@@ -44,6 +44,25 @@ export function fetchRecipe(id) {
   return getJSON(`/api/recipes/${id}`)
 }
 
+// Flags the macros as suspicious and starts a background audit; poll the
+// returned job_id with fetchAuditJob until it is no longer 'running'.
+export async function flagRecipe(id) {
+  const res = await fetch(`/api/recipes/${id}/flag`, { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export function fetchAuditJob(jobId) {
+  return getJSON(`/api/recipes/audit-jobs/${encodeURIComponent(jobId)}`)
+}
+
+// Puts the source's original numbers back.
+export async function revertRecipeEdits(id) {
+  const res = await fetch(`/api/recipes/${id}/revert`, { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
 export function fetchFacets() {
   return getJSON('/api/facets')
 }

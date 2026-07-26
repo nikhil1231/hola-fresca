@@ -1,6 +1,14 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { fetchFacets, fetchRecipe, fetchRecipes } from '../api/client.js'
+import {
+  fetchAuditJob,
+  fetchFacets,
+  fetchRecipe,
+  fetchRecipes,
+  flagRecipe,
+  revertRecipeEdits,
+} from '../api/client.js'
 
 const PAGE_SIZE = 24
 
@@ -20,6 +28,56 @@ export function useRecipe(id) {
     queryKey: ['recipe', id],
     queryFn: () => fetchRecipe(id),
     enabled: id != null,
+  })
+}
+
+// Flags the macros and polls the audit job it starts. The recipe is refetched
+// when the job finishes, so any correction shows up without a reload.
+export function useAuditRecipe(id) {
+  const qc = useQueryClient()
+  const [jobId, setJobId] = useState(null)
+  const [lastJob, setLastJob] = useState(null)
+
+  const start = useMutation({
+    mutationFn: () => flagRecipe(id),
+    onSuccess: (job) => setJobId(job.job_id),
+  })
+
+  const { data: job } = useQuery({
+    queryKey: ['recipe-audit-job', jobId],
+    queryFn: () => fetchAuditJob(jobId),
+    enabled: jobId != null,
+    refetchInterval: (q) => (q.state.data?.status === 'running' ? 1000 : false),
+  })
+
+  const finished = job != null && job.status !== 'running'
+  useEffect(() => {
+    if (!finished) return
+    qc.invalidateQueries({ queryKey: ['recipe', id] })
+    // Keep the outcome on screen after polling stops.
+    setLastJob(job)
+    setJobId(null)
+  }, [finished, job, id, qc])
+
+  const current = job ?? lastJob
+  return {
+    run: () => {
+      setLastJob(null)
+      start.mutate()
+    },
+    job: current,
+    // Cover the gap between the POST resolving and the first poll.
+    running: start.isPending || (jobId != null && current?.status !== 'failed'),
+    error: start.error?.message ?? current?.error ?? null,
+    dismiss: () => setLastJob(null),
+  }
+}
+
+export function useRevertRecipeEdits(id) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => revertRecipeEdits(id),
+    onSuccess: (data) => qc.setQueryData(['recipe', id], data),
   })
 }
 

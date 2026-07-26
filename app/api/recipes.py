@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api import facets as facet_cfg
 from app.api.deps import get_session
 from app.api.schemas import (
+    AuditJobOut,
     FacetCount,
     FacetsOut,
     IngredientOut,
@@ -19,6 +20,7 @@ from app.api.schemas import (
     PaginatedRecipes,
     RecipeCard,
     RecipeDetail,
+    RecipeEditOut,
     StepOut,
 )
 from app.db.models import Recipe, RecipeAllergen, RecipeCuisine, RecipeIngredient, RecipeTag
@@ -236,7 +238,70 @@ def get_recipe(
             NutritionOut(name=n.name, amount=n.amount, unit=n.unit)
             for n in recipe.nutrition
         ],
+        macros_suspect=bool(recipe.macros_suspect),
+        flagged_suspicious=bool(recipe.flagged_suspicious),
+        audited_at=recipe.audited_at,
+        edits=[
+            RecipeEditOut(
+                field=e.field,
+                old_value=e.old_value,
+                new_value=e.new_value,
+                status=e.status,
+                source=e.source,
+                reason=e.reason,
+                model=e.model,
+                created_at=e.created_at,
+            )
+            for e in sorted(recipe.edits, key=lambda e: (e.created_at, e.id))
+            if e.status == "applied"
+        ],
     )
+
+
+# --------------------------------------------------------------------------
+# Macro audit
+# --------------------------------------------------------------------------
+
+@router.post("/recipes/{recipe_id}/flag", response_model=AuditJobOut)
+def flag_recipe(recipe_id: int, session: Session = Depends(get_session)) -> AuditJobOut:
+    """Flag the numbers as suspicious and start a background audit.
+
+    Returns a job handle to poll: the arithmetic checks are instant but the
+    composition check is a model call.
+    """
+    from app.api.deps import _session_factory
+    from app import audit as audit_mod
+
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or not recipe.curated:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    audit_mod.flag_recipe(session, recipe_id)
+    job = audit_mod.start_background(_session_factory(), recipe_id)
+    return AuditJobOut(**job.as_dict())
+
+
+@router.get("/recipes/audit-jobs/{job_id}", response_model=AuditJobOut)
+def get_audit_job(job_id: str) -> AuditJobOut:
+    from app import audit as audit_mod
+
+    job = audit_mod.REGISTRY.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown job")
+    return AuditJobOut(**job.as_dict())
+
+
+@router.post("/recipes/{recipe_id}/revert", response_model=RecipeDetail)
+def revert_recipe_edits(
+    recipe_id: int, session: Session = Depends(get_session)
+) -> RecipeDetail:
+    """Put the source's original numbers back and mark the edits reverted."""
+    from app import audit as audit_mod
+
+    try:
+        audit_mod.revert_recipe(session, recipe_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return get_recipe(recipe_id, session)
 
 
 @router.get("/facets", response_model=FacetsOut)

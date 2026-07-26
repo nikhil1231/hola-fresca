@@ -6,6 +6,8 @@ image URL.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -82,6 +84,52 @@ class RecipeDetail(BaseModel):
     ingredients: list[IngredientOut] = Field(default_factory=list)
     steps: list[StepOut] = Field(default_factory=list)
     nutrition: list[NutritionOut] = Field(default_factory=list)
+
+    # Audit state. `macros_suspect` is the computed heuristic; `flagged_suspicious`
+    # is a person having asked for a second look. Kept apart on purpose.
+    macros_suspect: bool = False
+    flagged_suspicious: bool = False
+    audited_at: datetime | None = None
+    edits: list["RecipeEditOut"] = Field(default_factory=list)
+
+
+class RecipeEditOut(BaseModel):
+    """A corrected number, and the one it replaced."""
+
+    field: str
+    old_value: float | None = None
+    new_value: float | None = None
+    status: str
+    source: str
+    reason: str | None = None
+    model: str | None = None
+    created_at: datetime | None = None
+
+
+class AuditFindingOut(BaseModel):
+    field: str
+    old_value: float | None = None
+    new_value: float | None = None
+    reason: str
+    source: str
+
+
+class AuditResultOut(BaseModel):
+    recipe_id: int
+    verdict: str
+    used_llm: bool = False
+    checked: list[str] = Field(default_factory=list)
+    findings: list[AuditFindingOut] = Field(default_factory=list)
+    # Missing or placeholder ingredient quantities, reported whatever the verdict.
+    ingredient_gaps: list[str] = Field(default_factory=list)
+
+
+class AuditJobOut(BaseModel):
+    job_id: str
+    recipe_id: int
+    status: str
+    error: str | None = None
+    result: AuditResultOut | None = None
 
 
 class FacetCount(BaseModel):

@@ -23,12 +23,24 @@ def make_engine(db_path: Path | None = None) -> Engine:
     return engine
 
 
+# Columns declared after a database was first created. ``create_all`` only makes
+# whole tables, so anything added to an existing table has to be listed here —
+# these run on every startup because the API reads them, so waiting for the next
+# enrich pass would break it in the meantime.
+_RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
+    "recipe_ingredients": {"position": "INTEGER"},
+    "recipes": {"flagged_suspicious": "INTEGER DEFAULT 0", "audited_at": "DATETIME"},
+}
+
+
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
-        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(recipe_ingredients)"))}
-        if "position" not in existing:
-            conn.execute(text("ALTER TABLE recipe_ingredients ADD COLUMN position INTEGER"))
+        for table, columns in _RUNTIME_COLUMNS.items():
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            for name, decl in columns.items():
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
 
 
 def ensure_columns(session: Session, table: str, columns: dict[str, str]) -> None:

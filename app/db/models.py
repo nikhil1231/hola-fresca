@@ -108,10 +108,19 @@ class Recipe(Base):
     # re-run with different rules.
     curated: Mapped[bool] = mapped_column(Integer, default=0, index=True)
 
+    # Raised by hand from the recipe page ("these macros look wrong"), distinct
+    # from the computed ``macros_suspect`` heuristic: this one records that a
+    # person asked for a second look, and survives the audit that answers it.
+    flagged_suspicious: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    audited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     scraped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     ingredients: Mapped[list["RecipeIngredient"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan"
+    )
+    edits: Mapped[list["RecipeEdit"]] = relationship(
         back_populates="recipe", cascade="all, delete-orphan"
     )
     steps: Mapped[list["RecipeStep"]] = relationship(
@@ -161,6 +170,54 @@ class RecipeIngredient(Base):
     canonical_ingredient_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     recipe: Mapped[Recipe] = relationship(back_populates="ingredients")
+
+
+class RecipeEdit(Base):
+    """One corrected value on a recipe, with the value it replaced.
+
+    The source's own numbers are sometimes wrong (macros that fail Atwater, an
+    ingredient amount that reads as 2 g of noodles), and an audit pass fixes them.
+    Each correction is recorded here rather than only being applied, so nothing is
+    ever lost: ``old_value`` on the earliest applied edit for a field is the
+    pristine source value, which is what :func:`app.audit.revert_recipe` restores.
+
+    Applied edits are also projected onto the ``recipes`` row. That is deliberate.
+    Leaving the row untouched and merging on read would mean every consumer — the
+    browse filters, the facet counts, the planner's macro scoring — had to
+    remember to merge, and any that forgot would silently keep using the bad
+    number. Here the row is a cache of "source + applied edits" and this table is
+    the audit trail.
+
+    ``field`` is a recipe column ('energy_kcal') or an ingredient-scoped path
+    ('ingredient:<id>.amount_g'). All audited values are numeric.
+    """
+
+    __tablename__ = "recipe_edits"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('applied', 'proposed', 'rejected', 'reverted')",
+            name="ck_recipe_edit_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), index=True
+    )
+    field: Mapped[str] = mapped_column(String(64), index=True)
+    old_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    new_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(16), default="applied", index=True)
+    source: Mapped[str] = mapped_column(String(16), default="llm")  # llm | human | check
+    # Which check or model produced it, and why — shown in the UI next to the
+    # corrected number so a surprising figure can be traced.
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    recipe: Mapped[Recipe] = relationship(back_populates="edits")
 
 
 class RecipeStep(Base):

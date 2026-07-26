@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -9,6 +10,8 @@ import {
   Grid,
   Group,
   Image,
+  Loader,
+  Menu,
   Paper,
   SegmentedControl,
   SimpleGrid,
@@ -17,18 +20,34 @@ import {
   Text,
   ThemeIcon,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import {
+  IconAlertTriangle,
+  IconArrowBackUp,
   IconArrowLeft,
   IconChefHat,
   IconClock,
+  IconDots,
   IconExternalLink,
+  IconFlag,
   IconStarFilled,
   IconUsers,
 } from '@tabler/icons-react'
 
-import { useRecipe } from '../hooks/useRecipeQueries.js'
+import {
+  useAuditRecipe,
+  useRecipe,
+  useRevertRecipeEdits,
+} from '../hooks/useRecipeQueries.js'
 import classes from './RecipeDetailPage.module.css'
+
+const MACRO_LABELS = {
+  energy_kcal: 'Energy',
+  protein_g: 'Protein',
+  carbs_g: 'Carbs',
+  fat_g: 'Fat',
+}
 
 const DIFFICULTY = { 1: 'Easy', 2: 'Medium', 3: 'Hard' }
 const SERVINGS = [0.5, 1, 2, 3, 4, 6, 8]
@@ -52,10 +71,27 @@ function roundCount(v) {
   return Math.round(v * 4) / 4
 }
 
+function formatCount(v) {
+  const whole = Math.floor(v)
+  const frac = FRACTIONS[v - whole]
+  if (!frac) return String(v)
+  return whole ? `${whole}${frac}` : frac
+}
+
+// Source units carry their own plural suffix, e.g. "bunch(es)" or "unit(s)".
+function unitLabel(unit, n) {
+  if (unit === 'pinch') return n > 1 ? 'pinches' : 'pinch'
+  return unit.replace(/\((e?s)\)$/, n > 1 ? '$1' : '')
+}
+
 // Format one ingredient at the chosen scale: grams primary, native count in
 // parentheses when the source unit is a count/container (e.g. "375g (1.5 carton)").
 function scaledQuantity(ing, factor) {
   const parts = []
+  if (ing.amount && SPOON_UNITS.includes(ing.unit)) {
+    const n = Math.max(roundCount(ing.amount * factor), 0.25)
+    if (n <= MAX_SPOONS) return `${formatCount(n)} ${unitLabel(ing.unit, n)}`
+  }
   if (ing.amount_g != null) {
     parts.push(`${roundNice(ing.amount_g * factor)}${ing.canonical_unit || 'g'}`)
   }
@@ -71,36 +107,156 @@ function scaledQuantity(ing, factor) {
   return parts.join(' ')
 }
 
-function MacroStat({ label, value, unit }) {
-function formatCount(v) {
-  const whole = Math.floor(v)
-  const frac = FRACTIONS[v - whole]
-  if (!frac) return String(v)
-  return whole ? `${whole}${frac}` : frac
-}
-
-// Source units carry their own plural suffix, e.g. "bunch(es)" or "unit(s)".
-function unitLabel(unit, n) {
-  if (unit === 'pinch') return n > 1 ? 'pinches' : 'pinch'
-  return unit.replace(/\((e?s)\)$/, n > 1 ? '$1' : '')
-}
-
+function MacroStat({ label, value, unit, corrected }) {
   return (
     <Paper withBorder radius="md" p="sm" className={classes.macro}>
       <Text fz="xl" fw={700}>
         {value == null ? '—' : `${Math.round(value)}`}
-  if (ing.amount && SPOON_UNITS.includes(ing.unit)) {
-    const n = Math.max(roundCount(ing.amount * factor), 0.25)
-    if (n <= MAX_SPOONS) return `${formatCount(n)} ${unitLabel(ing.unit, n)}`
-  }
         <Text span fz="sm" c="dimmed" fw={500}>
           {unit}
         </Text>
       </Text>
-      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-        {label}
-      </Text>
+      <Group gap={6} justify="center" wrap="nowrap">
+        <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+          {label}
+        </Text>
+        {corrected != null && (
+          <Badge size="xs" variant="light" color="orange">
+            was {Math.round(corrected)}
+          </Badge>
+        )}
+      </Group>
     </Paper>
+  )
+}
+
+// The macro numbers come from HelloFresh and are sometimes wrong. Reporting that
+// is a rare, deliberate act, so it lives behind a quiet menu rather than a
+// permanent orange button that reads as a warning about the recipe itself.
+function MacroMenu({ audit, revert, hasEdits }) {
+  return (
+    <Menu shadow="md" position="bottom-end" withinPortal>
+      <Menu.Target>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          aria-label="Nutrition data options"
+        >
+          {audit.running ? <Loader size={12} /> : <IconDots size={16} />}
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>Nutrition data</Menu.Label>
+        <Menu.Item
+          leftSection={<IconFlag size={14} />}
+          onClick={audit.run}
+          disabled={audit.running}
+        >
+          {hasEdits ? 'Re-check these numbers' : 'Report wrong macros'}
+        </Menu.Item>
+        {hasEdits && (
+          <Menu.Item
+            leftSection={<IconArrowBackUp size={14} />}
+            onClick={() => revert.mutate()}
+            disabled={revert.isPending}
+          >
+            Restore original numbers
+          </Menu.Item>
+        )}
+      </Menu.Dropdown>
+    </Menu>
+  )
+}
+
+// Outcomes of a check, and the standing record of any correction. Split from the
+// menu so the trigger can sit inline with the macro caption while the detail
+// appears below the numbers it concerns.
+function MacroNotes({ audit, edits }) {
+  const result = audit.job?.result
+
+  if (!audit.running && !audit.error && !result && edits.length === 0) return null
+
+  return (
+    <Stack gap="xs">
+      {audit.running && (
+        <Text size="xs" c="dimmed">
+          Checking the arithmetic, then the ingredients if it can't be settled that way…
+        </Text>
+      )}
+
+      {audit.error && (
+        <Alert color="red" variant="light" onClose={audit.dismiss} withCloseButton>
+          {audit.error}
+        </Alert>
+      )}
+
+      {result?.verdict === 'ok' && (
+        <Alert
+          color="green"
+          variant="light"
+          icon={<IconFlag size={16} />}
+          onClose={audit.dismiss}
+          withCloseButton
+        >
+          Checked {result.checked.join(' and ')} — the macros hold up.
+        </Alert>
+      )}
+
+      {result?.verdict === 'inconclusive' && (
+        <Alert color="yellow" variant="light" onClose={audit.dismiss} withCloseButton>
+          Something looks off, but nothing here can say which number is wrong, so the
+          figures were left alone rather than guessed at.
+        </Alert>
+      )}
+
+      {/* Shown even when the macros pass: they cross-check against each other, which
+          says nothing about whether the quantities are right — and the quantities are
+          what the shopping basket is built from. */}
+      {result?.ingredient_gaps?.length > 0 && (
+        <Alert
+          color="orange"
+          variant="light"
+          icon={<IconAlertTriangle size={16} />}
+          title="The ingredient quantities are wrong"
+        >
+          <Stack gap={4}>
+            {result.ingredient_gaps.map((gap) => (
+              <Text key={gap} size="xs">
+                {gap}
+              </Text>
+            ))}
+            <Text size="xs" c="dimmed">
+              Macros can't be verified from the ingredients until these are fixed, and the
+              shopping basket will be wrong for this recipe.
+            </Text>
+          </Stack>
+        </Alert>
+      )}
+
+      {/* A standing note rather than an alert: the correction is settled, and the
+          tiles already carry a "was N" badge. */}
+      {edits.length > 0 && (
+        <Paper withBorder radius="md" p="xs" bg="var(--mantine-color-default)">
+          <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={4}>
+            Corrected
+          </Text>
+          <Stack gap={2}>
+            {edits.map((e, i) => (
+              <Text key={`${e.field}-${i}`} size="xs" c="dimmed">
+                <Text span fw={600} c="var(--mantine-color-text)">
+                  {MACRO_LABELS[e.field] ?? e.field}
+                </Text>{' '}
+                {e.old_value == null ? 'was missing' : Math.round(e.old_value)}
+                {' → '}
+                {e.new_value == null ? '—' : Math.round(e.new_value)} · {e.reason}
+                {e.source === 'llm' ? ' (from ingredient composition)' : ' (arithmetic)'}
+              </Text>
+            ))}
+          </Stack>
+        </Paper>
+      )}
+    </Stack>
   )
 }
 
@@ -109,6 +265,10 @@ export default function RecipeDetailPage() {
   const navigate = useNavigate()
   const { data: recipe, isLoading, isError } = useRecipe(id)
   const [servingsOverride, setServingsOverride] = useState(null)
+  // Keyed on the route param, so these sit above the loading/error returns below
+  // and are never called conditionally.
+  const audit = useAuditRecipe(id)
+  const revert = useRevertRecipeEdits(id)
 
   if (isLoading) {
     return (
@@ -137,6 +297,14 @@ export default function RecipeDetailPage() {
   const baseYield = recipe.base_yield || 2
   const servings = servingsOverride ?? baseYield
   const factor = servings / baseYield
+
+  // What each corrected macro used to say. Edits arrive oldest-first, so the
+  // first entry for a field holds the original source value even if it has since
+  // been corrected more than once.
+  const originalMacros = {}
+  for (const edit of recipe.edits ?? []) {
+    if (!(edit.field in originalMacros)) originalMacros[edit.field] = edit.old_value
+  }
 
   return (
     <Stack gap="xl">
@@ -219,17 +387,46 @@ export default function RecipeDetailPage() {
       </Grid>
 
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
-        <MacroStat label="Energy" value={recipe.energy_kcal} unit=" kcal" />
-        <MacroStat label="Protein" value={recipe.protein_g} unit="g" />
-        <MacroStat label="Carbs" value={recipe.carbs_g} unit="g" />
-        <MacroStat label="Fat" value={recipe.fat_g} unit="g" />
+        <MacroStat
+          label="Energy"
+          value={recipe.energy_kcal}
+          unit=" kcal"
+          corrected={originalMacros.energy_kcal}
+        />
+        <MacroStat
+          label="Protein"
+          value={recipe.protein_g}
+          unit="g"
+          corrected={originalMacros.protein_g}
+        />
+        <MacroStat label="Carbs" value={recipe.carbs_g} unit="g" corrected={originalMacros.carbs_g} />
+        <MacroStat label="Fat" value={recipe.fat_g} unit="g" corrected={originalMacros.fat_g} />
       </SimpleGrid>
-      <Text size="xs" c="dimmed" mt={-12}>
-        Per serving{recipe.serving_size_g ? ` · ~${Math.round(recipe.serving_size_g)}g` : ''}
-        {recipe.protein_energy_ratio != null
-          ? ` · ${recipe.protein_energy_ratio}g protein / 100 kcal`
-          : ''}
-      </Text>
+      <Group justify="space-between" align="center" wrap="nowrap" mt={-12}>
+        <Group gap={6} wrap="nowrap">
+          <Text size="xs" c="dimmed">
+            Per serving{recipe.serving_size_g ? ` · ~${Math.round(recipe.serving_size_g)}g` : ''}
+            {recipe.protein_energy_ratio != null
+              ? ` · ${recipe.protein_energy_ratio}g protein / 100 kcal`
+              : ''}
+          </Text>
+          {recipe.macros_suspect && (
+            <Tooltip
+              label="These four numbers don't add up against each other"
+              withArrow
+              multiline
+              w={220}
+            >
+              <ThemeIcon variant="transparent" color="orange" size="xs">
+                <IconAlertTriangle size={14} />
+              </ThemeIcon>
+            </Tooltip>
+          )}
+        </Group>
+        <MacroMenu audit={audit} revert={revert} hasEdits={(recipe.edits ?? []).length > 0} />
+      </Group>
+
+      <MacroNotes audit={audit} edits={recipe.edits ?? []} />
 
       <Divider />
 
