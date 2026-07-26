@@ -29,6 +29,10 @@ from app.api.schemas import (
     MappingDetailOut,
     MappingListItem,
     MappingListOut,
+    ManualProductIn,
+    ManualProductListOut,
+    ManualProductOut,
+    ManualResolveIn,
 )
 from app.db.models import IngredientMapping
 from app.mapping import service
@@ -264,3 +268,90 @@ def get_job(job_id: str) -> JobOut:
 def bulk_approve(body: BulkApproveIn, session: Session = Depends(get_session)) -> dict:
     n = service.bulk_approve(session, body.keys)
     return {"approved": n}
+
+
+# --------------------------------------------------------------------------
+# Manually sourced products
+# --------------------------------------------------------------------------
+
+def _manual_out(item) -> ManualProductOut:
+    return ManualProductOut(
+        **{k: v for k, v in vars(item).items() if k != "used_by"},
+        used_by=[{"ingredient_key": k, "name": n} for k, n in item.used_by],
+    )
+
+
+@router.get("/manual-products", response_model=ManualProductListOut)
+def list_manual_products(session: Session = Depends(get_session)) -> ManualProductListOut:
+    from app.mapping import manual
+
+    return ManualProductListOut(items=[_manual_out(i) for i in manual.list_products(session)])
+
+
+@router.post("/manual-products", response_model=ManualProductListOut)
+def save_manual_product(
+    body: ManualProductIn, session: Session = Depends(get_session)
+) -> ManualProductListOut:
+    """Create or update a manual product (keyed on its name)."""
+    from app.mapping import manual
+
+    try:
+        manual.upsert_product(session, manual.ManualProductInput(**body.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return list_manual_products(session)
+
+
+@router.delete("/manual-products/{sku:path}", response_model=ManualProductListOut)
+def delete_manual_product(sku: str, session: Session = Depends(get_session)) -> ManualProductListOut:
+    from app.mapping import manual
+
+    try:
+        manual.delete_product(session, sku)
+    except ValueError as exc:
+        # In-use is the common case and is the reviewer's to resolve, not an error
+        # in the request itself.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return list_manual_products(session)
+
+
+@router.post("/ingredients/{key}/manual", response_model=MappingDetailOut)
+def resolve_with_manual_product(
+    key: str, body: ManualResolveIn, session: Session = Depends(get_session)
+) -> MappingDetailOut:
+    """"Ocado does not sell this" — record what you buy instead and approve it."""
+    from app.mapping import manual
+
+    payload = body.model_dump()
+    match_type = payload.pop("match_type")
+    each_to_grams = payload.pop("each_to_grams")
+    reviewer_notes = payload.pop("reviewer_notes")
+    try:
+        manual.resolve_ingredient(
+            session,
+            key,
+            manual.ManualProductInput(**payload),
+            match_type=match_type,
+            each_to_grams=each_to_grams,
+            reviewer_notes=reviewer_notes,
+            usage=_usage_stats().get(key),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_ingredient(key, session)
+
+
+@router.post("/ingredients/{key}/manual/{sku:path}", response_model=MappingDetailOut)
+def attach_manual_product(
+    key: str, sku: str, session: Session = Depends(get_session)
+) -> MappingDetailOut:
+    """Offer an existing manual product as a candidate for another ingredient."""
+    from app.mapping import manual
+
+    try:
+        manual.attach(session, key, sku)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    session.commit()
+    return get_ingredient(key, session)

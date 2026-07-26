@@ -9,6 +9,8 @@ const PAGE_LAST_UPDATED =
 function pageMetaForPath(pathname) {
   if (pathname === '/cuisines') return PAGE_LAST_UPDATED.cuisines
   if (pathname === '/mapping/aliases') return PAGE_LAST_UPDATED.mappingAliases
+  if (pathname === '/mapping/manual') return PAGE_LAST_UPDATED.mappingManual
+  // Must stay below the exact sub-page paths above, which it would swallow.
   if (pathname.startsWith('/mapping/')) return PAGE_LAST_UPDATED.mappingReview
   if (pathname === '/mapping') return PAGE_LAST_UPDATED.mapping
   if (pathname.startsWith('/recipes/')) return PAGE_LAST_UPDATED.recipeDetail

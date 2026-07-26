@@ -3,13 +3,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
 import {
+  attachManualProduct,
   bulkApprove,
+  deleteManualProduct,
   fetchAliases,
   fetchAliasOptions,
   fetchJob,
+  fetchManualProducts,
   fetchMappingDetail,
   fetchMappingList,
   fetchMappingStats,
+  resolveWithManualProduct,
+  saveManualProduct,
   saveMappingDecision,
   searchMappingCandidates,
   setMappingAlias,
@@ -130,6 +135,55 @@ export function useGenerateMappings() {
     running: start.isPending || (jobId != null && current?.status !== 'failed'),
     error: start.error?.message ?? current?.error ?? null,
   }
+}
+
+export function useManualProducts() {
+  return useQuery({ queryKey: ['manual-products'], queryFn: fetchManualProducts })
+}
+
+export function useSaveManualProduct() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => saveManualProduct(body),
+    onSuccess: (data) => {
+      qc.setQueryData(['manual-products'], data)
+      // A price or pack-size change moves every basket that uses it.
+      qc.invalidateQueries({ queryKey: ['mapping-detail'] })
+    },
+  })
+}
+
+export function useDeleteManualProduct() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sku) => deleteManualProduct(sku),
+    onSuccess: (data) => qc.setQueryData(['manual-products'], data),
+  })
+}
+
+// "Ocado doesn't sell this": records what you buy instead and approves it.
+export function useResolveWithManualProduct(key) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => resolveWithManualProduct(key, body),
+    onSuccess: (data) => {
+      qc.setQueryData(['mapping-detail', key], data)
+      qc.invalidateQueries({ queryKey: ['manual-products'] })
+      qc.invalidateQueries({ queryKey: ['mapping-list'] })
+      qc.invalidateQueries({ queryKey: ['mapping-stats'] })
+    },
+  })
+}
+
+export function useAttachManualProduct(key) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sku) => attachManualProduct(key, sku),
+    onSuccess: (data) => {
+      qc.setQueryData(['mapping-detail', key], data)
+      qc.invalidateQueries({ queryKey: ['manual-products'] })
+    },
+  })
 }
 
 export function useBulkApprove() {

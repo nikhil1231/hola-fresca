@@ -85,3 +85,35 @@ export function fetchJob(jobId) {
 export function bulkApprove(keys) {
   return postJSON('/api/mapping/bulk-approve', { keys })
 }
+
+// --- Manually sourced products (things Ocado does not sell) -------------------
+
+export function fetchManualProducts() {
+  return getJSON('/api/mapping/manual-products')
+}
+
+// Keyed on name: posting an existing name updates that product in place.
+export function saveManualProduct(body) {
+  return postJSON('/api/mapping/manual-products', body)
+}
+
+export async function deleteManualProduct(sku) {
+  const res = await fetch(`/api/mapping/manual-products/${encodeURIComponent(sku)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw await responseError(res)
+  return res.json()
+}
+
+// Creates the product and approves it as this ingredient's mapping in one step.
+export function resolveWithManualProduct(key, body) {
+  return postJSON(`/api/mapping/ingredients/${encodeURIComponent(key)}/manual`, body)
+}
+
+// Offers an existing manual product as a candidate for another ingredient.
+export function attachManualProduct(key, sku) {
+  return postJSON(
+    `/api/mapping/ingredients/${encodeURIComponent(key)}/manual/${encodeURIComponent(sku)}`,
+    {},
+  )
+}

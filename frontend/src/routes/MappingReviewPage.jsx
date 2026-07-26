@@ -14,6 +14,7 @@ import {
   Select,
   Stack,
   Table,
+  Tabs,
   Text,
   TextInput,
   Textarea,
@@ -21,11 +22,13 @@ import {
 } from '@mantine/core'
 
 import classes from './MappingReviewPage.module.css'
+import ManualProductForm from '../components/ManualProductForm.jsx'
 
 import {
   useAliasOptions,
   useMappingDetail,
   useMappingList,
+  useResolveWithManualProduct,
   useSaveDecision,
   useSearchCandidates,
   useSetAlias,
@@ -74,6 +77,9 @@ export default function MappingReviewPage() {
   const [pantryStaple, setPantryStaple] = useState(false)
   const [notes, setNotes] = useState('')
   const [term, setTerm] = useState('')
+  const [retailerTab, setRetailerTab] = useState('ocado')
+  const [sourcingManually, setSourcingManually] = useState(false)
+  const resolveManual = useResolveWithManualProduct(key)
 
   // Seed local editing state once the detail loads.
   useEffect(() => {
@@ -202,6 +208,13 @@ export default function MappingReviewPage() {
   }
 
   const u = data.usage ?? {}
+
+  // Candidates split by who sells them. Only the *display* is filtered — picks
+  // are keyed by sku and submit() walks the full list, so accepting a manual
+  // product and then switching back to Ocado never silently drops it.
+  const ocadoCandidates = data.candidates.filter((c) => c.retailer !== 'manual')
+  const manualCandidates = data.candidates.filter((c) => c.retailer === 'manual')
+  const visibleCandidates = retailerTab === 'manual' ? manualCandidates : ocadoCandidates
 
   // Rendered twice — under the header and at the foot of the candidate table —
   // so a quick approve never needs a scroll past the whole list.
@@ -422,8 +435,53 @@ export default function MappingReviewPage() {
       {data.candidates.length === 0 && (
         <Alert color="yellow" variant="light" title="No product candidates">
           Ocado returned nothing for this ingredient's name — common for HelloFresh-specific wording
-          ("21 Day Aged British Sirloin Steaks"). Reword the search above to find real products.
+          ("21 Day Aged British Sirloin Steaks"). Reword the search above to find real products, or
+          record what you buy instead below.
         </Alert>
+      )}
+
+      <Group justify="space-between" align="flex-end">
+        <Tabs value={retailerTab} onChange={(v) => setRetailerTab(v ?? 'ocado')}>
+          <Tabs.List>
+            <Tabs.Tab value="ocado">Ocado ({ocadoCandidates.length})</Tabs.Tab>
+            <Tabs.Tab value="manual">Manual ({manualCandidates.length})</Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
+        <Button
+          variant={sourcingManually ? 'filled' : 'light'}
+          size="xs"
+          onClick={() => setSourcingManually((v) => !v)}
+        >
+          {sourcingManually ? 'Cancel' : 'Source this manually'}
+        </Button>
+      </Group>
+
+      {sourcingManually && (
+        <Paper withBorder radius="md" p="md">
+          <Text fw={600} mb={4}>
+            Buy this somewhere else
+          </Text>
+          <Text size="sm" c="dimmed" mb="sm">
+            Records the product, accepts it as this ingredient's first choice, and approves the
+            mapping. It stays costed in the basket but is listed apart from the online order.
+            Leaving the ingredient unmapped instead would price it at zero and bias the planner
+            towards recipes that use it.
+          </Text>
+          <ManualProductForm
+            initial={{ name: data.name }}
+            submitLabel="Save and approve"
+            pending={resolveManual.isPending}
+            error={resolveManual.error?.message}
+            onSubmit={(body) =>
+              resolveManual.mutate(body, {
+                onSuccess: () => {
+                  setSourcingManually(false)
+                  setRetailerTab('manual')
+                },
+              })
+            }
+          />
+        </Paper>
       )}
 
       <Paper withBorder radius="md">
@@ -442,7 +500,7 @@ export default function MappingReviewPage() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {data.candidates.map((c) => {
+              {visibleCandidates.map((c) => {
                 const pick = picks[c.sku] ?? {}
                 return (
                   <Table.Tr key={c.sku} bg={pick.accepted ? 'teal.0' : undefined}>
@@ -506,6 +564,17 @@ export default function MappingReviewPage() {
                   </Table.Tr>
                 )
               })}
+              {visibleCandidates.length === 0 && (
+                <Table.Tr>
+                  <Table.Td colSpan={8}>
+                    <Text size="sm" c="dimmed" ta="center" py="md">
+                      {retailerTab === 'manual'
+                        ? 'No hand-entered products for this ingredient yet.'
+                        : 'No Ocado candidates for this ingredient.'}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>

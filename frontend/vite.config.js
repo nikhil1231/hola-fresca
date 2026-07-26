@@ -57,9 +57,16 @@ const pageFiles = {
     'frontend/src/hooks/useMappingQueries.js',
     'frontend/src/api/mappingClient.js',
   ],
+  mappingManual: [
+    'frontend/src/routes/MappingManualPage.jsx',
+    'frontend/src/components/ManualProductForm.jsx',
+    'frontend/src/hooks/useMappingQueries.js',
+    'frontend/src/api/mappingClient.js',
+  ],
   mappingReview: [
     'frontend/src/routes/MappingReviewPage.jsx',
     'frontend/src/routes/MappingReviewPage.module.css',
+    'frontend/src/components/ManualProductForm.jsx',
     'frontend/src/hooks/useMappingQueries.js',
     'frontend/src/api/mappingClient.js',
   ],

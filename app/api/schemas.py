@@ -206,6 +206,8 @@ class MappingCandidateOut(BaseModel):
     url: str | None = None
     result_rank: int
     search_term: str | None = None
+    # 'ocado' or 'manual'; the review UI tabs on this.
+    retailer: str = "ocado"
     # Decision overlay
     accepted: bool = False
     rank: int | None = None
@@ -301,3 +303,48 @@ class JobOut(BaseModel):
 
 class BulkApproveIn(BaseModel):
     keys: list[str] = Field(default_factory=list)
+
+
+class ManualProductIn(BaseModel):
+    """A product sourced by hand, for an ingredient no retailer sells."""
+
+    name: str
+    price: float
+    pack_size_value: float
+    pack_size_unit: str = "g"
+    brand: str | None = None
+    # Left unset, the model assumes it keeps — see manual.DEFAULT_SHELF_LIFE_DAYS.
+    shelf_life_days: int | None = None
+    source_note: str | None = None
+    url: str | None = None
+
+
+class ManualResolveIn(ManualProductIn):
+    """Create the product and approve it as this ingredient's mapping in one go."""
+
+    match_type: str = "exact"
+    each_to_grams: float | None = None
+    reviewer_notes: str | None = None
+
+
+class ManualProductUsageOut(BaseModel):
+    ingredient_key: str
+    name: str
+
+
+class ManualProductOut(BaseModel):
+    sku: str
+    name: str
+    brand: str | None = None
+    pack_size_raw: str | None = None
+    pack_size_value: float | None = None
+    pack_size_unit: str | None = None
+    price: float | None = None
+    shelf_life_days: int | None = None
+    source_note: str | None = None
+    url: str | None = None
+    used_by: list[ManualProductUsageOut] = Field(default_factory=list)
+
+
+class ManualProductListOut(BaseModel):
+    items: list[ManualProductOut] = Field(default_factory=list)

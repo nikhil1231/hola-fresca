@@ -164,9 +164,14 @@ export default function MappingPage() {
           Confirm which Ocado products each ingredient maps to. Sorted by spend impact - review the
           top rows carefully; the obvious tail can be bulk-approved.
         </Text>
-        <Anchor component={Link} to="/mapping/aliases" size="sm">
-          Manage aliases {'\u2192'}
-        </Anchor>
+        <Group gap="lg">
+          <Anchor component={Link} to="/mapping/aliases" size="sm">
+            Manage aliases {'\u2192'}
+          </Anchor>
+          <Anchor component={Link} to="/mapping/manual" size="sm">
+            Manually sourced products {'\u2192'}
+          </Anchor>
+        </Group>
       </div>
 
       <Paper withBorder radius="md" p="md">

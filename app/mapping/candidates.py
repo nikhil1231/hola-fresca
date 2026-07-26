@@ -49,6 +49,9 @@ class Candidate:
     url: str | None
     result_rank: int
     search_term: str | None = None
+    # Who sells it. 'manual' marks a hand-entered product for something no
+    # retailer stocks, which the shopping list has to separate out.
+    retailer: str = RETAILER
 
 
 @dataclass
@@ -143,6 +146,7 @@ def gather_candidates(
                 url=product.url,
                 result_rank=hit.result_rank,
                 search_term=hit.search_term,
+                retailer=product.retailer,
             )
         )
     return IngredientCandidates(
