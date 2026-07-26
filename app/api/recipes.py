@@ -151,9 +151,11 @@ def list_recipes(
     max_kcal: float | None = None,
     difficulty: int | None = None,
     exclude: list[str] = Query(default_factory=list),
+    exclude_id: list[int] = Query(default_factory=list),
     sort: str = facet_cfg.DEFAULT_SORT,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=24, ge=1, le=MAX_PAGE_SIZE),
+    offset: int | None = Query(default=None, ge=0),
     session: Session = Depends(get_session),
 ) -> PaginatedRecipes:
     filters = dict(
@@ -162,26 +164,36 @@ def list_recipes(
         difficulty=difficulty, exclude=exclude,
     )
 
-    total = session.scalar(
-        _apply_filters(select(func.count(Recipe.id)), **filters)
-    ) or 0
+    total_stmt = _apply_filters(select(func.count(Recipe.id)), **filters)
+    if exclude_id:
+        total_stmt = total_stmt.where(Recipe.id.not_in(exclude_id))
+    total = session.scalar(total_stmt) or 0
 
     order = _SORT_COLUMNS.get(sort, _SORT_COLUMNS[facet_cfg.DEFAULT_SORT])
+    effective_offset = offset if offset is not None else (page - 1) * page_size
     stmt = (
         _apply_filters(select(Recipe), **filters)
         .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
+    )
+    if exclude_id:
+        stmt = stmt.where(Recipe.id.not_in(exclude_id))
+    stmt = (
+        stmt
         .order_by(order, Recipe.id)
-        .offset((page - 1) * page_size)
+        .offset(effective_offset)
         .limit(page_size)
     )
     rows = session.scalars(stmt).all()
     items = [_to_card(r) for r in rows]
+    next_offset = effective_offset + len(items)
+    has_more = next_offset < total
     return PaginatedRecipes(
         items=items,
         total=total,
         page=page,
         page_size=page_size,
-        has_more=(page - 1) * page_size + len(items) < total,
+        has_more=has_more,
+        next_offset=next_offset if has_more else None,
     )
 
 

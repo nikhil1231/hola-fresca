@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.db.models import Recipe
+from app.db.models import Recipe, RecipeIngredient
 from app.db.session import init_db, make_engine, make_session_factory
 from app.scraper.curate import CurationRules, curate
 
@@ -31,6 +31,10 @@ def _recipe(**kw) -> Recipe:
         source_created_at=datetime(2025, 1, 1),
     )
     base.update(kw)
+    base.setdefault(
+        "ingredients",
+        [RecipeIngredient(name="Rice", amount=100, unit="g", amount_g=100)],
+    )
     return Recipe(**base)
 
 
@@ -127,3 +131,36 @@ def test_recency_can_be_disabled(factory):
     rep = curate(factory, rules=CurationRules(recent_days=0, dedup_by_name=False))
     assert rep.curated == 0
     assert rep.kept_recent == 0
+
+
+def test_cuts_complete_recipes_with_all_zero_quantities(factory):
+    _seed(
+        factory,
+        [
+            _recipe(source_id="ok", name="Cookable"),
+            _recipe(
+                source_id="zero",
+                name="Zero Amounts",
+                ingredients=[
+                    RecipeIngredient(name="Rice", amount=0, unit="g", amount_g=0),
+                    RecipeIngredient(name="Pepper", amount=0, unit="g", amount_g=0),
+                ],
+            ),
+            _recipe(
+                source_id="mixed",
+                name="Mixed Amounts",
+                ingredients=[
+                    RecipeIngredient(name="Rice", amount=0, unit="g", amount_g=0),
+                    RecipeIngredient(name="Pepper", amount=1, unit="each", amount_g=None),
+                ],
+            ),
+        ],
+    )
+
+    rep = curate(factory, rules=CurationRules(dedup_by_name=False))
+
+    assert rep.curated == 2
+    assert rep.cut_zero_quantities == 1
+    with factory() as s:
+        active = {r.source_id for r in s.query(Recipe).filter(Recipe.curated == 1)}
+    assert active == {"ok", "mixed"}

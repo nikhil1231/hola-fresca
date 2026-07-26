@@ -57,10 +57,7 @@ export default function Header() {
                 Browse
               </NavLink>
               <NavLink to="/dashboard" className={navClass}>
-                Dashboard
-              </NavLink>
-              <NavLink to="/basket" className={navClass}>
-                Basket
+                Week
               </NavLink>
               <NavLink to="/cuisines" className={navClass}>
                 Cuisines

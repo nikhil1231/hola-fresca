@@ -16,6 +16,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
+from statistics import median
 from typing import Iterable, Sequence
 
 from app.planner import waste as waste_mod
@@ -202,6 +203,13 @@ class Selection:
     servings: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class BasketContribution:
+    recipe_id: int
+    recipe_name: str
+    grams: float
+
+
 @dataclass
 class BasketLine:
     key: str
@@ -209,6 +217,7 @@ class BasketLine:
     need_g: float
     cover: Cover | None = None
     note: str | None = None
+    contributions: tuple[BasketContribution, ...] = ()
 
     @property
     def cost(self) -> float:
@@ -275,7 +284,12 @@ class Basket:
 
 def aggregate_needs(
     index: PlanIndex, selections: Iterable[Selection]
-) -> tuple[dict[str, float], dict[str, str], int]:
+) -> tuple[
+    dict[str, float],
+    dict[str, str],
+    int,
+    dict[str, dict[int, BasketContribution]],
+]:
     """Total grams needed per canonical ingredient across the week.
 
     Recipe amounts are stored at the recipe's base yield, so cooking for more
@@ -284,6 +298,7 @@ def aggregate_needs(
     """
     needs: dict[str, float] = defaultdict(float)
     names: dict[str, str] = {}
+    contributions: dict[str, dict[int, BasketContribution]] = defaultdict(dict)
     untracked = 0
     for selection in selections:
         recipe = index.recipes.get(selection.recipe_id)
@@ -293,9 +308,16 @@ def aggregate_needs(
         factor = servings / recipe.base_yield if recipe.base_yield else 1.0
         untracked += recipe.untracked_lines
         for need in recipe.needs:
-            needs[need.key] += need.grams * factor
+            grams = need.grams * factor
+            needs[need.key] += grams
             names.setdefault(need.key, need.display_name)
-    return needs, names, untracked
+            existing = contributions[need.key].get(recipe.id)
+            contributions[need.key][recipe.id] = BasketContribution(
+                recipe_id=recipe.id,
+                recipe_name=recipe.name,
+                grams=(existing.grams if existing else 0.0) + grams,
+            )
+    return needs, names, untracked, contributions
 
 
 def build_basket(
@@ -305,7 +327,7 @@ def build_basket(
     include_staples: bool = False,
 ) -> Basket:
     """Price a week's recipes: one pack decision per canonical ingredient."""
-    needs, names, untracked = aggregate_needs(index, selections)
+    needs, names, untracked, contributions = aggregate_needs(index, selections)
     basket = Basket(untracked_lines=untracked)
 
     for key, grams in needs.items():
@@ -321,7 +343,20 @@ def build_basket(
             basket.unpriceable.append(label)
             continue
         cover = cover_need(index, ingredient, grams)
-        line = BasketLine(key=key, name=label, need_g=round(grams, 1), cover=cover)
+        line = BasketLine(
+            key=key,
+            name=label,
+            need_g=round(grams, 1),
+            cover=cover,
+            contributions=tuple(
+                BasketContribution(
+                    recipe_id=c.recipe_id,
+                    recipe_name=c.recipe_name,
+                    grams=round(c.grams, 1),
+                )
+                for c in sorted(contributions.get(key, {}).values(), key=lambda c: c.recipe_id)
+            ),
+        )
         if cover is None:
             line.note = "no pack covers this demand"
         basket.lines.append(line)
@@ -331,3 +366,21 @@ def build_basket(
     basket.unmapped.sort()
     basket.unpriceable.sort()
     return basket
+
+
+def basket_gap_count(basket: Basket) -> int:
+    """Unknown demand lines that should not rank as free."""
+    return len(basket.unmapped) + len(basket.unpriceable) + basket.untracked_lines
+
+
+def median_priced_line_cost(index: PlanIndex) -> float:
+    costs: list[float] = []
+    for recipe in index.recipes.values():
+        for need in recipe.needs:
+            ingredient = index.ingredient(need.key)
+            if ingredient is None or ingredient.pantry_staple or not ingredient.shoppable:
+                continue
+            cover = cover_need(index, ingredient, need.grams)
+            if cover is not None and cover.cost > 0:
+                costs.append(cover.cost)
+    return float(median(costs)) if costs else 0.0

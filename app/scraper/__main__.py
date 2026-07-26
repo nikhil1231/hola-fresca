@@ -141,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
             "  cut: "
             f"{rep.cut_incomplete} incomplete, {rep.cut_bundle} bundles, "
             f"{rep.cut_low_kcal} low-kcal, {rep.cut_suspect} bad-macros, "
+            f"{rep.cut_zero_quantities} zero-quantity, "
             f"{rep.cut_addon} add-ons, {rep.cut_unrated} under-rated, "
             f"{rep.cut_low_stars} low-stars, {rep.cut_old} too-old, "
             f"{rep.cut_dup} duplicate versions"

@@ -1,7 +1,7 @@
 .card {
   color: inherit;
   text-decoration: none;
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -11,6 +11,16 @@
 .card:hover {
   transform: translateY(-3px);
   box-shadow: var(--mantine-shadow-md);
+}
+
+.cardSelected {
+  border-color: var(--mantine-color-fresh-6);
+  box-shadow: 0 0 0 1px var(--mantine-color-fresh-6);
+}
+
+.cardHighlighted {
+  border-color: var(--mantine-color-yellow-6);
+  box-shadow: 0 0 0 1px var(--mantine-color-yellow-6);
 }
 
 .mainLink {
@@ -45,6 +55,7 @@
   right: 8px;
   bottom: 8px;
   box-shadow: var(--mantine-shadow-sm);
+  max-width: calc(100% - 16px);
 }
 
 .planControls {
@@ -69,6 +80,12 @@
   box-shadow: var(--mantine-shadow-sm);
 }
 
+.plannerControlGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .portionStepper {
   display: inline-flex;
   align-items: center;
@@ -79,6 +96,21 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: var(--mantine-shadow-sm);
+}
+
+.removeButton {
+  box-shadow: var(--mantine-shadow-sm);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.card:hover .removeButton,
+.card:focus-within .removeButton {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
 }
 
 .portionCount {
@@ -177,5 +209,11 @@
   .planControls {
     opacity: 1;
     transform: translateY(0);
+  }
+
+  .removeButton {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
   }
 }

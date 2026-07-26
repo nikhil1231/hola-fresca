@@ -33,6 +33,7 @@ class PaginatedRecipes(BaseModel):
     page: int
     page_size: int
     has_more: bool
+    next_offset: int | None = None
 
 
 class IngredientOut(BaseModel):
@@ -182,12 +183,19 @@ class BasketPackChoiceOut(BaseModel):
     sku: str
     product_name: str
     pack_size_raw: str | None = None
+    url: str | None = None
     capacity_g: float
     price: float
     count: int
     cost: float
     retailer: str
     external: bool = False
+
+
+class BasketContributionOut(BaseModel):
+    recipe_id: int
+    recipe_name: str
+    grams: float
 
 
 class BasketLineOut(BaseModel):
@@ -204,6 +212,7 @@ class BasketLineOut(BaseModel):
     external: bool = False
     note: str | None = None
     choices: list[BasketPackChoiceOut] = Field(default_factory=list)
+    contributions: list[BasketContributionOut] = Field(default_factory=list)
 
 
 class BasketOut(BaseModel):
@@ -222,12 +231,16 @@ class SuggestionsIn(BasketIn):
     filters: PlannerFiltersIn = Field(default_factory=PlannerFiltersIn)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=24, ge=1, le=60)
+    offset: int | None = Field(default=None, ge=0)
 
 
 class RecipeSuggestionCard(RecipeCard):
-    marginal_score: float
-    standalone_score: float
+    marginal_score: float | None = None
+    standalone_score: float | None = None
+    ranking_score: float | None = None
+    unpriced_gap_count: int = 0
     shared_ingredient_count: int
+    basket_available: bool = True
 
 
 class PlannerSuggestionsOut(BaseModel):
@@ -236,6 +249,7 @@ class PlannerSuggestionsOut(BaseModel):
     page: int
     page_size: int
     has_more: bool
+    next_offset: int | None = None
 
 
 # --- Ingredient → product mapping review -----------------------------------

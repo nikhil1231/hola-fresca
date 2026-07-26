@@ -47,10 +47,12 @@ export function buildRecipeParams(filters = {}) {
   return params
 }
 
-export function fetchRecipes(filters, page, pageSize = 24) {
+export function fetchRecipes(filters, page, pageSize = 24, { offset, excludeIds = [] } = {}) {
   const params = buildRecipeParams(filters)
   params.set('page', String(page))
   params.set('page_size', String(pageSize))
+  if (offset != null) params.set('offset', String(offset))
+  for (const id of excludeIds) params.append('exclude_id', String(id))
   return getJSON(`/api/recipes?${params.toString()}`)
 }
 
@@ -64,6 +66,7 @@ export function fetchPlannerSuggestions({
   candidatePortions = 4,
   page = 1,
   pageSize = 24,
+  offset = null,
 }) {
   return postJSON('/api/planner/suggestions', {
     selections,
@@ -71,6 +74,7 @@ export function fetchPlannerSuggestions({
     candidate_portions: candidatePortions,
     page,
     page_size: pageSize,
+    offset,
   })
 }
 

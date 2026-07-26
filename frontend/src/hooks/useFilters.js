@@ -6,7 +6,7 @@ const ARRAY_KEYS = ['cuisine', 'diet', 'tag', 'protein', 'exclude']
 // Keys stored as single numeric params.
 const NUMBER_KEYS = ['max_time', 'min_protein', 'min_protein_ratio', 'max_kcal', 'difficulty']
 
-export const DEFAULT_SORT = 'popular'
+export const DEFAULT_SORT = 'best_fit'
 
 // Parse the URL search params into a plain filters object used by the API layer.
 export function parseFilters(searchParams) {

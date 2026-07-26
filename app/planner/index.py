@@ -49,6 +49,7 @@ class Pack:
     rank: int
     match_type: str
     pack_size_raw: str | None = None
+    url: str | None = None
     # Who sells it. Anything other than the shop being planned for has to be
     # bought separately, so the basket lists it under its own heading.
     retailer: str = RETAILER
@@ -180,6 +181,7 @@ def _build_pack(mp: IngredientMappingProduct, each_to_grams: float | None) -> Pa
         rank=mp.rank,
         match_type=mp.match_type,
         pack_size_raw=product.pack_size_raw,
+        url=product.url,
         retailer=product.retailer,
     )
 

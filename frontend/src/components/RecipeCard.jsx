@@ -7,6 +7,7 @@ import {
   IconMinus,
   IconPlus,
   IconStarFilled,
+  IconTrash,
 } from '@tabler/icons-react'
 
 import { MAX_PORTIONS, MIN_PORTIONS } from '../hooks/useWeeklyPlan.js'
@@ -29,6 +30,13 @@ function formatMarginalScore(value) {
   if (value == null) return null
   const absolute = Math.abs(value).toFixed(2)
   return `${value < 0 ? '-' : '+'}£${absolute}`
+}
+
+function formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable) {
+  if (!basketAvailable) return 'No basket data'
+  const marginal = formatMarginalScore(marginalScore)
+  if (!marginal) return null
+  return unpricedGapCount > 0 ? `${marginal} + ${unpricedGapCount} unpriced` : marginal
 }
 
 function proteinDensityLevel(value) {
@@ -104,47 +112,67 @@ function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove })
   }
 
   const portions = entry.portions
-  const minusLabel = portions <= MIN_PORTIONS ? 'Remove recipe' : 'Decrease portions'
+  const minusLabel = 'Decrease portions'
 
   return (
-    <div className={classes.portionStepper} aria-label={`${portions} portions selected`}>
-      <Tooltip label={minusLabel} withArrow>
+    <div className={classes.plannerControlGroup}>
+      <div className={classes.portionStepper} aria-label={`${portions} portions selected`}>
+        <Tooltip label={minusLabel} withArrow>
+          <ActionIcon
+            component="button"
+            type="button"
+            size="sm"
+            radius="xl"
+            variant="subtle"
+            color="gray"
+            disabled={portions <= MIN_PORTIONS}
+            aria-label={minusLabel}
+            onClick={(event) => {
+              stopCardNavigation(event)
+              onPortionsChange?.(portions - 1)
+            }}
+          >
+            <IconMinus size={16} />
+          </ActionIcon>
+        </Tooltip>
+        <Text span fw={700} size="sm" className={classes.portionCount}>
+          {portions}
+        </Text>
+        <Tooltip label="Increase portions" withArrow>
+          <ActionIcon
+            component="button"
+            type="button"
+            size="sm"
+            radius="xl"
+            variant="subtle"
+            color="fresh"
+            disabled={portions >= MAX_PORTIONS}
+            aria-label="Increase portions"
+            onClick={(event) => {
+              stopCardNavigation(event)
+              onPortionsChange?.(portions + 1)
+            }}
+          >
+            <IconPlus size={16} />
+          </ActionIcon>
+        </Tooltip>
+      </div>
+      <Tooltip label="Remove recipe" withArrow>
         <ActionIcon
           component="button"
           type="button"
-          size="sm"
+          color="red"
           radius="xl"
-          variant="subtle"
-          color="gray"
-          aria-label={minusLabel}
+          size="lg"
+          variant="filled"
+          className={classes.removeButton}
+          aria-label="Remove recipe"
           onClick={(event) => {
             stopCardNavigation(event)
-            if (portions <= MIN_PORTIONS) onRemove?.()
-            else onPortionsChange?.(portions - 1)
+            onRemove?.()
           }}
         >
-          <IconMinus size={16} />
-        </ActionIcon>
-      </Tooltip>
-      <Text span fw={700} size="sm" className={classes.portionCount}>
-        {portions}
-      </Text>
-      <Tooltip label="Increase portions" withArrow>
-        <ActionIcon
-          component="button"
-          type="button"
-          size="sm"
-          radius="xl"
-          variant="subtle"
-          color="fresh"
-          disabled={portions >= MAX_PORTIONS}
-          aria-label="Increase portions"
-          onClick={(event) => {
-            stopCardNavigation(event)
-            onPortionsChange?.(portions + 1)
-          }}
-        >
-          <IconPlus size={16} />
+          <IconTrash size={17} />
         </ActionIcon>
       </Tooltip>
     </div>
@@ -153,7 +181,10 @@ function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove })
 
 export default function RecipeCard({
   recipe,
+  basketAvailable = true,
+  highlighted = false,
   marginalScore = null,
+  unpricedGapCount = 0,
   plannerEntry = null,
   plannerControlsVisible = false,
   plannerDisabled = false,
@@ -161,7 +192,14 @@ export default function RecipeCard({
   onPortionsChange,
   onRemoveFromPlan,
 }) {
-  const marginalLabel = formatMarginalScore(marginalScore)
+  const basketBadge = formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable)
+  const cardClass = [
+    classes.card,
+    plannerEntry ? classes.cardSelected : '',
+    highlighted ? classes.cardHighlighted : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   const controlClass = [
     classes.planControls,
     plannerEntry ? classes.planControlsSelected : '',
@@ -171,7 +209,7 @@ export default function RecipeCard({
     .join(' ')
 
   return (
-    <Card padding="0" radius="md" withBorder className={classes.card}>
+    <Card padding="0" radius="md" withBorder className={cardClass}>
       <Link to={`/recipes/${recipe.id}`} className={classes.mainLink}>
         <Card.Section className={classes.imageWrap}>
           <Image
@@ -189,9 +227,14 @@ export default function RecipeCard({
               </Group>
             </Badge>
           )}
-          {marginalLabel && (
-            <Badge className={classes.marginalBadge} variant="filled" color="fresh" radius="sm">
-              {marginalLabel}
+          {basketBadge && (
+            <Badge
+              className={classes.marginalBadge}
+              variant="filled"
+              color={basketAvailable ? 'fresh' : 'gray'}
+              radius="sm"
+            >
+              {basketBadge}
             </Badge>
           )}
         </Card.Section>

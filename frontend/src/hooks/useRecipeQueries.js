@@ -15,13 +15,22 @@ import {
 const PAGE_SIZE = 24
 
 // Paginated recipe list as an infinite query keyed on the active filters.
-export function useRecipes(filters, { enabled = true } = {}) {
+export function useRecipes(
+  filters,
+  { enabled = true, pageSize = PAGE_SIZE, firstPageSize = pageSize, excludeIds = [] } = {},
+) {
   return useInfiniteQuery({
-    queryKey: ['recipes', filters],
-    queryFn: ({ pageParam = 1 }) => fetchRecipes(filters, pageParam, PAGE_SIZE),
-    initialPageParam: 1,
+    queryKey: ['recipes', filters, pageSize, firstPageSize, excludeIds],
+    queryFn: ({ pageParam = { offset: 0, page: 1, pageSize: firstPageSize } }) =>
+      fetchRecipes(filters, pageParam.page, pageParam.pageSize, {
+        offset: pageParam.offset,
+        excludeIds,
+      }),
+    initialPageParam: { offset: 0, page: 1, pageSize: firstPageSize },
     getNextPageParam: (lastPage) =>
-      lastPage.has_more ? lastPage.page + 1 : undefined,
+      lastPage.has_more
+        ? { offset: lastPage.next_offset, page: lastPage.page + 1, pageSize }
+        : undefined,
     enabled,
   })
 }
@@ -29,21 +38,31 @@ export function useRecipes(filters, { enabled = true } = {}) {
 export function useRecipeSuggestions(
   filters,
   selections,
-  { candidatePortions = 4, enabled = true } = {},
+  { candidatePortions = 4, enabled = true, pageSize = PAGE_SIZE, firstPageSize = pageSize } = {},
 ) {
   return useInfiniteQuery({
-    queryKey: ['planner-suggestions', filters, selections, candidatePortions],
-    queryFn: ({ pageParam = 1 }) =>
+    queryKey: [
+      'planner-suggestions',
+      filters,
+      selections,
+      candidatePortions,
+      pageSize,
+      firstPageSize,
+    ],
+    queryFn: ({ pageParam = { offset: 0, page: 1, pageSize: firstPageSize } }) =>
       fetchPlannerSuggestions({
         selections,
         filters,
         candidatePortions,
-        page: pageParam,
-        pageSize: PAGE_SIZE,
+        page: pageParam.page,
+        pageSize: pageParam.pageSize,
+        offset: pageParam.offset,
       }),
-    initialPageParam: 1,
+    initialPageParam: { offset: 0, page: 1, pageSize: firstPageSize },
     getNextPageParam: (lastPage) =>
-      lastPage.has_more ? lastPage.page + 1 : undefined,
+      lastPage.has_more
+        ? { offset: lastPage.next_offset, page: lastPage.page + 1, pageSize }
+        : undefined,
     enabled,
   })
 }

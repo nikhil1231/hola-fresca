@@ -59,6 +59,7 @@ class CurationReport:
     cut_old: int = 0
     cut_low_stars: int = 0
     cut_suspect: int = 0
+    cut_zero_quantities: int = 0
     cut_dup: int = 0
     kept_recent: int = 0
 
@@ -71,6 +72,14 @@ def _is_recent(recipe: Recipe, days: int) -> bool:
     if days <= 0 or recipe.source_created_at is None:
         return False
     return (datetime.utcnow() - recipe.source_created_at) <= timedelta(days=days)
+
+
+def _has_nonzero_ingredient_amount(recipe: Recipe) -> bool:
+    return any(
+        (line.amount_g is not None and line.amount_g > 0)
+        or (line.amount is not None and line.amount > 0)
+        for line in recipe.ingredients
+    )
 
 
 def curate(
@@ -98,6 +107,9 @@ def curate(
                 continue
             if r.macros_suspect:
                 report.cut_suspect += 1
+                continue
+            if not _has_nonzero_ingredient_amount(r):
+                report.cut_zero_quantities += 1
                 continue
             if rules.drop_addons and r.is_addon:
                 report.cut_addon += 1

@@ -4,6 +4,25 @@
   flex: 0 0 auto;
 }
 
+.weekLayout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.recipesPanel,
+.basketPanel {
+  min-width: 0;
+  color: var(--mantine-color-text);
+  background: var(--mantine-color-body);
+}
+
+.recipesPanel {
+  position: sticky;
+  top: 88px;
+}
+
 .statsGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -11,7 +30,7 @@
 }
 
 .stat {
-  border: 1px solid var(--mantine-color-gray-2);
+  border: 1px solid var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-md);
   padding: 14px;
   background: var(--mantine-color-body);
@@ -19,7 +38,6 @@
 
 .spend {
   border-color: var(--mantine-color-fresh-3);
-  background: var(--mantine-color-fresh-0);
 }
 
 .statValue {
@@ -28,7 +46,7 @@
 }
 
 .section {
-  border-top: 1px solid var(--mantine-color-gray-2);
+  border-top: 1px solid var(--mantine-color-default-border);
   padding-top: 18px;
 }
 
@@ -36,6 +54,127 @@
   font-size: 1.05rem;
   line-height: 1.2;
   letter-spacing: 0;
+}
+
+.lineTable {
+  table-layout: fixed;
+  width: 100%;
+  color: var(--mantine-color-text);
+  background: var(--mantine-color-body);
+}
+
+.colIngredient {
+  width: 42%;
+}
+
+.colNeed {
+  width: 10%;
+}
+
+.colPacks {
+  width: 20%;
+}
+
+.colLeft {
+  width: 10%;
+}
+
+.colCost,
+.colWaste {
+  width: 9%;
+}
+
+.expandableRow {
+  cursor: pointer;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.expandableRow:focus-visible {
+  outline: 2px solid var(--mantine-color-fresh-5);
+  outline-offset: -2px;
+}
+
+.highlightedRow {
+  background: color-mix(in srgb, var(--mantine-color-fresh-1) 55%, transparent);
+  box-shadow: inset 3px 0 0 var(--mantine-color-fresh-6);
+}
+
+.chevron {
+  color: var(--mantine-color-gray-6);
+  flex: 0 0 auto;
+  transition: transform 180ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.expansionRow td {
+  border-top: 0;
+}
+
+.expansionCell {
+  padding: 0 !important;
+}
+
+.expansionShell {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-4px);
+  transition: max-height 220ms ease, opacity 180ms ease, transform 220ms ease;
+}
+
+.expansionShellOpen {
+  max-height: 320px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.choiceList {
+  display: grid;
+  border-top: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-default) 28%, transparent);
+}
+
+.choiceItem {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 42%)
+    minmax(0, 10%)
+    minmax(0, 20%)
+    minmax(0, 10%)
+    minmax(0, 9%)
+    minmax(0, 9%);
+  align-items: center;
+  min-height: 48px;
+  padding: 10px 0;
+  color: inherit;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.choiceItem + .choiceItem {
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.choiceItem > * {
+  min-width: 0;
+  padding-inline: var(--mantine-spacing-sm);
+}
+
+.choiceProduct {
+  padding-left: calc(var(--mantine-spacing-sm) + 34px);
+  min-width: 0;
+}
+
+.productLink {
+  color: var(--mantine-color-fresh-7);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.productLink:hover {
+  text-decoration: underline;
 }
 
 .bucketGrid {
@@ -46,10 +185,10 @@
 
 .bucket,
 .emptyState {
-  border: 1px dashed var(--mantine-color-gray-3);
+  border: 1px dashed var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-md);
   padding: 16px;
-  background: var(--mantine-color-gray-0);
+  background: var(--mantine-color-body);
 }
 
 .emptyState {
@@ -58,6 +197,14 @@
 }
 
 @media (max-width: 48em) {
+  .weekLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .recipesPanel {
+    position: static;
+  }
+
   .statsGrid,
   .bucketGrid {
     grid-template-columns: 1fr;

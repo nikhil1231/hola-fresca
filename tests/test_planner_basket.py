@@ -234,6 +234,9 @@ def test_servings_scale_demand_off_the_base_yield(seeded):
     doubled = B.build_basket(index, [B.Selection(rid, servings=4)])
     assert doubled.lines[0].need_g == pytest.approx(base.lines[0].need_g * 2)
     assert doubled.cost > base.cost
+    assert doubled.lines[0].contributions[0].grams == pytest.approx(
+        base.lines[0].contributions[0].grams * 2
+    )
 
 
 def test_repeated_recipes_sum_into_shared_packs(seeded):
@@ -246,6 +249,7 @@ def test_repeated_recipes_sum_into_shared_packs(seeded):
     once = B.build_basket(index, [B.Selection(rid)])
     twice = B.build_basket(index, [B.Selection(rid), B.Selection(rid)])
     assert twice.lines[0].need_g == pytest.approx(600)
+    assert twice.lines[0].contributions[0].grams == pytest.approx(600)
     # 600 g needs two bags, not the four a per-recipe basket would have bought.
     assert twice.lines[0].cover.packs == 2
 
