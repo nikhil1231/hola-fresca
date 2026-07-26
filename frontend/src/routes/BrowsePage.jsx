@@ -21,11 +21,20 @@ import { DEFAULT_FACETS } from '../data/defaultFacets.js'
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useFilters, countActiveFilters } from '../hooks/useFilters.js'
 import { useFacets, useRecipes } from '../hooks/useRecipeQueries.js'
+import { MAX_RECIPES_PER_WEEK, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 
 const GRID_COLS = { base: 1, xs: 2, sm: 2, md: 3, lg: 4 }
 
 export default function BrowsePage() {
   const { filters, setScalar, setArray, toggleArrayValue, clearAll } = useFilters()
+  const {
+    upcomingWeekStart,
+    getWeekRecipes,
+    getRecipeEntry,
+    addRecipeToWeek,
+    removeRecipeFromWeek,
+    setRecipePortions,
+  } = useWeeklyPlan()
   const { data: facets } = useFacets()
   const {
     data,
@@ -46,6 +55,8 @@ export default function BrowsePage() {
   const total = data?.pages[0]?.total ?? 0
   const activeCount = countActiveFilters(filters)
   const filterFacets = facets ?? DEFAULT_FACETS
+  const upcomingRecipes = getWeekRecipes(upcomingWeekStart)
+  const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
 
   const panel = (
     <FilterPanel
@@ -115,9 +126,22 @@ export default function BrowsePage() {
         ) : (
           <>
             <SimpleGrid cols={GRID_COLS} spacing="lg">
-              {recipes.map((recipe) => (
-                <RecipeCard key={recipe.id} recipe={recipe} />
-              ))}
+              {recipes.map((recipe) => {
+                const plannerEntry = getRecipeEntry(recipe.id, upcomingWeekStart)
+                return (
+                  <RecipeCard
+                    key={recipe.id}
+                    recipe={recipe}
+                    plannerEntry={plannerEntry}
+                    plannerDisabled={!plannerEntry && upcomingWeekFull}
+                    onAddToPlan={() => addRecipeToWeek(recipe, upcomingWeekStart)}
+                    onRemoveFromPlan={() => removeRecipeFromWeek(upcomingWeekStart, recipe.id)}
+                    onPortionsChange={(portions) =>
+                      setRecipePortions(upcomingWeekStart, recipe.id, portions)
+                    }
+                  />
+                )
+              })}
             </SimpleGrid>
             <Box ref={sentinelRef} h={1} />
             {isFetchingNextPage && (

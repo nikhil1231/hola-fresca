@@ -5,11 +5,20 @@
   height: 100%;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .card:hover {
   transform: translateY(-3px);
   box-shadow: var(--mantine-shadow-md);
+}
+
+.mainLink {
+  color: inherit;
+  text-decoration: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .imageWrap {
@@ -29,6 +38,47 @@
   top: 8px;
   right: 8px;
   background: rgba(0, 0, 0, 0.6);
+}
+
+.planControls {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.card:hover .planControls,
+.card:focus-within .planControls,
+.planControlsSelected,
+.planControlsVisible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.addButton {
+  box-shadow: var(--mantine-shadow-sm);
+}
+
+.portionStepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 34px;
+  padding: 3px;
+  border: 1px solid var(--mantine-color-gray-2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--mantine-shadow-sm);
+}
+
+.portionCount {
+  min-width: 22px;
+  color: var(--mantine-color-dark-8);
+  text-align: center;
+  line-height: 1;
 }
 
 .cuisine {
@@ -114,4 +164,11 @@
 
 .densitySegmentActive {
   background: var(--mantine-color-fresh-6);
+}
+
+@media (hover: none) {
+  .planControls {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

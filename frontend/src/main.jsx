@@ -11,6 +11,7 @@ import { theme } from './theme.js'
 import App from './App.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
 import CuisinesPage from './routes/CuisinesPage.jsx'
+import DashboardPage from './routes/DashboardPage.jsx'
 import RecipeDetailPage from './routes/RecipeDetailPage.jsx'
 import MappingAliasesPage from './routes/MappingAliasesPage.jsx'
 import MappingPage from './routes/MappingPage.jsx'
@@ -30,6 +31,7 @@ createRoot(document.getElementById('root')).render(
           <Routes>
             <Route element={<App />}>
               <Route index element={<BrowsePage />} />
+              <Route path="dashboard" element={<DashboardPage />} />
               <Route path="cuisines" element={<CuisinesPage />} />
               <Route path="recipes/:id" element={<RecipeDetailPage />} />
               <Route path="mapping" element={<MappingPage />} />
