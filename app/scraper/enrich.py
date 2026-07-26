@@ -12,7 +12,12 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from app.canonicalize import backfill_units, to_grams
+from app.canonicalize import (
+    backfill_units,
+    repair_contradicted_units,
+    repair_trace_amounts,
+    to_grams,
+)
 from app.classify import (
     diet_flags,
     macros_implausible_for_veg,
@@ -31,6 +36,9 @@ _RECIPE_COLUMNS = {
     "is_dairy_free": "INTEGER DEFAULT 0",
     "is_gluten_free": "INTEGER DEFAULT 0",
     "is_low_carb": "INTEGER DEFAULT 0",
+    # Audit state; see app.audit. Separate from the computed macros_suspect above.
+    "flagged_suspicious": "INTEGER DEFAULT 0",
+    "audited_at": "DATETIME",
 }
 _INGREDIENT_COLUMNS = {
     "amount_g": "REAL",
@@ -41,6 +49,8 @@ _INGREDIENT_COLUMNS = {
 @dataclass
 class EnrichReport:
     units_backfilled: dict[str, int] = field(default_factory=dict)
+    units_repaired: dict[str, int] = field(default_factory=dict)
+    amounts_repaired: dict[str, int] = field(default_factory=dict)
     ingredients_gram_resolved: int = 0
     ingredients_total: int = 0
     recipes: int = 0
@@ -54,6 +64,13 @@ def enrich(session_factory: sessionmaker[Session]) -> EnrichReport:
         ensure_columns(session, "recipe_ingredients", _INGREDIENT_COLUMNS)
 
         report.units_backfilled = backfill_units(session)
+        # Runs after the backfill so it can also overrule units the backfill just
+        # adopted from a mixed-unit corpus; amount_g below is computed from the
+        # repaired units.
+        report.units_repaired = repair_contradicted_units(session)
+        # Last, because it only handles what re-reading the unit could not: a
+        # placeholder weight for an ingredient the corpus never counts.
+        report.amounts_repaired = repair_trace_amounts(session)
         session.commit()
 
         recipes = session.scalars(

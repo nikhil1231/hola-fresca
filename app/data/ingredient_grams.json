@@ -1,135 +1,324 @@
 {
   "_comment": "Approximate grams per one native unit of an ingredient, used to canonicalise count/container units (unit(s), carton(s), sachet(s), ...) to grams. Standard culinary weights. Resolution: exact by_name -> first substring in by_keyword -> generic by_unit -> null. See app/canonicalize.py.",
   "by_name": {
-    "garlic clove": 5,
-    "lime": 65,
-    "lemon": 90,
-    "orange": 130,
-    "red onion": 110,
-    "onion": 110,
-    "echalion shallot": 40,
-    "shallot": 40,
-    "spring onion": 15,
-    "bell pepper": 160,
-    "green pepper": 160,
-    "yellow pepper": 160,
-    "red pepper": 160,
-    "carrot": 100,
-    "medium tomato": 90,
-    "tomato": 90,
-    "vine tomatoes": 90,
-    "tinned plum tomates": 390,
-    "celery stick": 40,
-    "vegetable stock pot": 12,
-    "cumin": 8,
-    "paprika": 8,
-    "yeast": 7,
-    "pepper": 0.5,
-    "baby gem lettuce": 90,
-    "iceberg lettuce": 400,
-    "baby cucumber": 100,
-    "cucumber": 300,
-    "courgette": 200,
-    "sweet potato": 250,
-    "baking potato": 220,
-    "potato": 180,
-    "aubergine": 250,
-    "leek": 150,
-    "ginger": 30,
-    "pak choi": 120,
-    "avocado": 200,
-    "red chilli": 15,
-    "green chilli": 15,
-    "chilli": 15,
-    "broccoli": 350,
-    "cauliflower": 550,
-    "butternut squash": 550,
-    "parsnip": 120,
-    "fennel": 250,
-    "red cabbage": 500,
-    "beetroot": 120,
-    "corn on the cob": 150,
+    "almonds": 30,
     "apple": 150,
-    "pear": 170,
-    "plum": 60,
-    "mango": 200,
-    "kiwi": 75,
-    "pomegranate": 280,
-    "lemongrass": 15,
-    "egg": 55,
-    "portobello mushrooms": 80,
-    "ciabatta": 100,
-    "burger buns": 60,
-    "brioche hot dog buns": 60,
+    "aubergine": 250,
+    "avocado": 200,
+    "baby cucumber": 100,
+    "baby gem lettuce": 90,
+    "baby leaves": 60,
+    "baking potato": 220,
     "bao buns": 40,
-    "naan": 90,
-    "plain naans": 90,
-    "pizza bases": 150,
-    "filo pastry sheets": 15,
-    "puff pastry sheet": 320,
-    "mozzarella": 125,
-    "croutons": 30,
-    "peanut butter": 30,
-    "steamed basmati rice": 250,
-    "fish pie mix": 240,
-    "pineapple rings": 220,
-    "tomato passata": 390,
+    "beansprouts": 150,
+    "beef stock pot": 28,
+    "beetroot": 120,
+    "bell pepper": 160,
     "black beans": 240,
-    "chickpeas": 240,
-    "lentils": 250,
-    "red kidney beans": 240,
-    "mixed beans": 240,
+    "boursin": 150,
+    "braeburn apple": 150,
+    "brioche hot dog buns": 60,
+    "broccoli": 350,
+    "burger buns": 60,
     "butter beans": 240,
-    "cannellini beans": 240
+    "butternut squash": 550,
+    "cannellini beans": 240,
+    "carrot": 100,
+    "cauliflower": 550,
+    "celeriac": 500,
+    "celery stick": 40,
+    "chickpeas": 240,
+    "chilli": 15,
+    "chinese rice vinegar": 15,
+    "chinese soy sauce": 15,
+    "chorizo slices": 50,
+    "ciabatta": 100,
+    "cinnamon stick": 3,
+    "corn on the cob": 150,
+    "courgette": 200,
+    "croutons": 30,
+    "cucumber": 300,
+    "cumin": 8,
+    "curry spice": 10,
+    "echalion shallot": 40,
+    "egg": 55,
+    "eggs": 60,
+    "fennel": 250,
+    "filo pastry sheets": 15,
+    "fish pie mix": 240,
+    "foccacia": 200,
+    "fresh peas": 100,
+    "garlic clove": 5,
+    "ginger": 30,
+    "greek style yoghurt": 150,
+    "green chilli": 15,
+    "green pepper": 160,
+    "habanero sauce": 15,
+    "iceberg lettuce": 400,
+    "intense tomato": 80,
+    "jalape o chilli": 15,
+    "kaffir lime leaf": 0.5,
+    "ketchup": 30,
+    "kiwi": 75,
+    "kumato tomato": 80,
+    "leek": 150,
+    "lemon": 90,
+    "lemongrass": 15,
+    "lentils": 250,
+    "lilliput capers": 25,
+    "lime": 65,
+    "linda mccartney vegetarian meatballs": 200,
+    "mango": 200,
+    "maris piper potatoes": 500,
+    "medium tomato": 90,
+    "middle eastern style spice mix": 10,
+    "mixed beans": 240,
+    "mozzarella": 125,
+    "muscovado sugar": 15,
+    "mustard": 10,
+    "naan": 90,
+    "new potatoes": 500,
+    "onion": 110,
+    "orange": 130,
+    "organic sweetcorn": 150,
+    "pak choi": 120,
+    "paprika": 8,
+    "parsnip": 120,
+    "peanut butter": 30,
+    "pear": 170,
+    "pepper": 0.5,
+    "pineapple rings": 220,
+    "pitta bread": 60,
+    "pizza bases": 150,
+    "plain naans": 90,
+    "plum": 60,
+    "plum tomatoes": 80,
+    "pomegranate": 280,
+    "portobello mushrooms": 80,
+    "potato": 180,
+    "puff pastry sheet": 320,
+    "red cabbage": 500,
+    "red chilli": 15,
+    "red kidney beans": 240,
+    "red onion": 110,
+    "red pepper": 160,
+    "romanesco": 400,
+    "seville orange honey dressing": 30,
+    "shallot": 40,
+    "small sweet potato": 150,
+    "sour cream": 150,
+    "spring onion": 15,
+    "steamed basmati rice": 250,
+    "swede": 500,
+    "sweet potato": 250,
+    "sweetheart cabbage": 500,
+    "tabasco": 5,
+    "tinned plum tomates": 390,
+    "tomato": 90,
+    "tomato passata": 390,
+    "turmeric": 8,
+    "unconventional plant based burgers": 226,
+    "vegetable gyozas": 200,
+    "vegetable spring rolls": 200,
+    "vegetable stock pot": 12,
+    "vine tomatoes": 90,
+    "vivera plant quarter pounder burger": 113,
+    "wholemeal bap": 70,
+    "wild mushrooms": 100,
+    "yeast": 7,
+    "yellow bean sauce": 60,
+    "yellow courgette": 200,
+    "yellow pepper": 160
   },
   "by_keyword": [
-    ["chicken breast", 160],
-    ["chicken thigh", 130],
-    ["whole british chicken", 1400],
-    ["chicken", 160],
-    ["pork loin", 150],
-    ["pork", 150],
-    ["sausage", 60],
-    ["sirloin steak", 200],
-    ["rump steak", 200],
-    ["fillet steak", 220],
-    ["lamb steak", 150],
-    ["lamb", 150],
-    ["turkey steak", 150],
-    ["turkey", 150],
-    ["venison", 150],
-    ["duck breast", 180],
-    ["duck leg", 180],
-    ["duck", 180],
-    ["steak", 200],
-    ["cod fillet", 130],
-    ["salmon fillet", 130],
-    ["sea bass", 100],
-    ["sea bream", 100],
-    ["basa fillet", 130],
-    ["coley", 130],
-    ["fillet", 120],
-    ["bacon", 25],
-    ["serrano ham", 15],
-    ["passata", 390],
-    ["chopped tomatoes", 390],
-    ["kidney beans", 240],
-    ["black beans", 240],
-    ["butter beans", 240],
-    ["cannellini", 240],
-    ["mixed beans", 240],
-    ["chickpeas", 240],
-    ["lentils", 250],
-    ["mozzarella", 125],
-    ["naan", 90],
-    ["tortilla", 40],
-    ["flatbread", 80],
-    ["ciabatta", 100],
-    ["baguette", 130],
-    ["burger bun", 60],
-    ["brioche bun", 60],
-    ["pizza dough", 250],
-    ["tilapia", 130]
+    [
+      "chicken breast",
+      160
+    ],
+    [
+      "chicken thigh",
+      130
+    ],
+    [
+      "whole british chicken",
+      1400
+    ],
+    [
+      "chicken",
+      160
+    ],
+    [
+      "pork loin",
+      150
+    ],
+    [
+      "pork",
+      150
+    ],
+    [
+      "sausage",
+      60
+    ],
+    [
+      "sirloin steak",
+      200
+    ],
+    [
+      "rump steak",
+      200
+    ],
+    [
+      "fillet steak",
+      220
+    ],
+    [
+      "lamb steak",
+      150
+    ],
+    [
+      "lamb",
+      150
+    ],
+    [
+      "turkey steak",
+      150
+    ],
+    [
+      "turkey",
+      150
+    ],
+    [
+      "venison",
+      150
+    ],
+    [
+      "duck breast",
+      180
+    ],
+    [
+      "duck leg",
+      180
+    ],
+    [
+      "duck",
+      180
+    ],
+    [
+      "steak",
+      200
+    ],
+    [
+      "cod fillet",
+      130
+    ],
+    [
+      "salmon fillet",
+      130
+    ],
+    [
+      "sea bass",
+      100
+    ],
+    [
+      "sea bream",
+      100
+    ],
+    [
+      "basa fillet",
+      130
+    ],
+    [
+      "coley",
+      130
+    ],
+    [
+      "fillet",
+      120
+    ],
+    [
+      "bacon",
+      25
+    ],
+    [
+      "serrano ham",
+      15
+    ],
+    [
+      "passata",
+      390
+    ],
+    [
+      "chopped tomatoes",
+      390
+    ],
+    [
+      "kidney beans",
+      240
+    ],
+    [
+      "black beans",
+      240
+    ],
+    [
+      "butter beans",
+      240
+    ],
+    [
+      "cannellini",
+      240
+    ],
+    [
+      "mixed beans",
+      240
+    ],
+    [
+      "chickpeas",
+      240
+    ],
+    [
+      "lentils",
+      250
+    ],
+    [
+      "mozzarella",
+      125
+    ],
+    [
+      "naan",
+      90
+    ],
+    [
+      "tortilla",
+      40
+    ],
+    [
+      "flatbread",
+      80
+    ],
+    [
+      "ciabatta",
+      100
+    ],
+    [
+      "baguette",
+      130
+    ],
+    [
+      "burger bun",
+      60
+    ],
+    [
+      "brioche bun",
+      60
+    ],
+    [
+      "pizza dough",
+      250
+    ],
+    [
+      "tilapia",
+      130
+    ]
   ],
   "by_unit": {
     "sachet(s)": 8,

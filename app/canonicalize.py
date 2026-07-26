@@ -33,6 +33,9 @@ _REFERENCE_PATH = Path(__file__).parent / "data" / "ingredient_grams.json"
 _METRIC = {"grams": "g", "milliliter(s)": "ml"}
 # Standard kitchen conversions (approx; density ~1 so treated as g/ml).
 _SPOON = {"tbsp": 15.0, "tsp": 5.0, "pinch": 0.5}
+# Units that state a weight or volume outright. A tiny amount under one of these
+# is only believable for things really used by the gram; see _contradicts_magnitude.
+_MASS_UNITS = frozenset(_METRIC)
 
 # Amount at or above this reads as a gram weight rather than a count; see
 # backfill_units tier 3. The observed corpus gap is wide: counts top out around
@@ -95,6 +98,71 @@ def _modal_units(pairs) -> dict[str, str]:
     return {key: c.most_common(1)[0][0] for key, c in counts.items()}
 
 
+def _contradicts_magnitude(unit: str | None, amount: float | None) -> bool:
+    """True when a weight/volume unit is implausible for how small the amount is.
+
+    "2 grams" of a thing sold in nests is not two grams of it.
+    """
+    return bool(
+        unit in _MASS_UNITS and amount is not None and 0 < amount < _GRAMS_THRESHOLD
+    )
+
+
+# How far a re-read amount may stray from the ingredient's typical weight before
+# it is rejected. Wide, because one ingredient legitimately varies with serving
+# size, but narrow enough to catch "1 balsamic vinegar" becoming a 250 ml bottle.
+_PLAUSIBLE_LOW, _PLAUSIBLE_HIGH = 0.25, 3.0
+
+
+def _countable_units_by_name(rows) -> dict[str, list[str]]:
+    """Every countable unit each name is attested with, most common first."""
+    counts: dict[str, Counter] = defaultdict(Counter)
+    for name, unit, _ in rows:
+        if name and unit and unit not in _MASS_UNITS:
+            counts[_normalize(name)][unit] += 1
+    return {key: [u for u, _ in c.most_common()] for key, c in counts.items()}
+
+
+def _typical_grams_by_name(rows) -> dict[str, float]:
+    """Median weight each name is given when the source states one outright.
+
+    This is the yardstick for re-reading a unit: whatever "2" means for Egg
+    Noodle Nest, the answer should land near the 187 g the corpus reports when it
+    bothers to say grams.
+    """
+    amounts: dict[str, list[float]] = defaultdict(list)
+    for name, unit, amount in rows:
+        if name and unit in _MASS_UNITS and amount is not None and amount >= _GRAMS_THRESHOLD:
+            amounts[_normalize(name)].append(amount)
+    return {key: sorted(v)[len(v) // 2] for key, v in amounts.items()}
+
+
+def _reread_unit(
+    name: str,
+    amount: float | None,
+    candidates: list[str],
+    typical_g: float | None,
+) -> str | None:
+    """Pick the countable unit that best explains ``amount`` for ``name``.
+
+    Returns None unless some candidate converts to a weight near what the corpus
+    says this ingredient usually weighs — so an ingredient with no trustworthy
+    reference, or whose only countable unit is a whole bottle, is left alone.
+    """
+    if amount is None or typical_g is None:
+        return None
+    low, high = typical_g * _PLAUSIBLE_LOW, typical_g * _PLAUSIBLE_HIGH
+    best, best_gap = None, None
+    for unit in candidates:
+        grams, _ = to_grams(name, amount, unit)
+        if grams is None or not low <= grams <= high:
+            continue
+        gap = abs(grams - typical_g)
+        if best_gap is None or gap < best_gap:
+            best, best_gap = unit, gap
+    return best
+
+
 def backfill_units(session: Session) -> dict[str, int]:
     """Fill empty ingredient units from the corpus, in descending confidence.
 
@@ -109,18 +177,27 @@ def backfill_units(session: Session) -> dict[str, int]:
     3. ``by_magnitude`` — for names that carry no unit anywhere, read the amount:
        at or above ``_GRAMS_THRESHOLD`` it is a gram weight, below it a count or
        container. No recipe calls for 15 peppers, and none for 1g of chicken.
+
+    A modal unit that the amount's own magnitude contradicts is then overruled by
+    ``count_veto``: the source mixes units for one ingredient, so the mode can be
+    ``grams`` while this particular line is a count. See
+    :func:`repair_contradicted_units` for the reasoning and the guard.
     """
     rows = session.execute(
         select(
             RecipeIngredient.source_ingredient_id,
             RecipeIngredient.name,
             RecipeIngredient.unit,
+            RecipeIngredient.amount,
         )
     ).all()
-    by_id = _modal_units((iid, unit) for iid, _, unit in rows)
-    by_name = _modal_units((_normalize(name), unit) for _, name, unit in rows if name)
+    by_id = _modal_units((iid, unit) for iid, _, unit, _ in rows)
+    by_name = _modal_units((_normalize(name), unit) for _, name, unit, _ in rows if name)
+    name_rows = [(name, unit, amount) for _, name, unit, amount in rows]
+    countable_by_name = _countable_units_by_name(name_rows)
+    typical_by_name = _typical_grams_by_name(name_rows)
 
-    filled = {"by_id": 0, "by_name": 0, "by_magnitude": 0}
+    filled = {"by_id": 0, "by_name": 0, "by_magnitude": 0, "count_veto": 0}
     empties = session.scalars(
         select(RecipeIngredient).where(
             (RecipeIngredient.unit.is_(None)) | (RecipeIngredient.unit == ""),
@@ -135,8 +212,117 @@ def backfill_units(session: Session) -> dict[str, int]:
         if unit is None and ing.amount is not None:
             unit = "grams" if ing.amount >= _GRAMS_THRESHOLD else _COUNT_UNIT
             tier = "by_magnitude"
+        if _contradicts_magnitude(unit, ing.amount):
+            key = _normalize(ing.name)
+            reread = _reread_unit(
+                ing.name, ing.amount, countable_by_name.get(key, []), typical_by_name.get(key)
+            )
+            if reread:
+                unit, tier = reread, "count_veto"
         if unit:
             ing.unit = unit
             filled[tier] += 1
     session.flush()
     return filled
+
+
+# A trace weight is only re-read when the corpus states a real weight for that
+# ingredient this many times, so the median stands on actual evidence.
+_MIN_GRAM_EVIDENCE = 20
+# The largest multiple of a portion a trace amount is allowed to mean. "3" reads
+# as three portions; beyond that the number is noise, not a quantity.
+_MAX_PORTION_MULTIPLE = 3.0
+
+
+def repair_trace_amounts(session: Session) -> dict[str, int]:
+    """Re-read a placeholder gram weight as a multiple of a typical portion.
+
+    Some lines survive :func:`repair_contradicted_units` still wrong, because the
+    ingredient has no countable unit anywhere to re-read them against: Green Beans
+    is ``grams`` on all 1,278 of its lines, so an unlabelled "1" stays 1 g. But the
+    corpus does say what green beans usually weigh — 150 g — and "1" plainly means
+    one portion of them.
+
+    So the amount is rewritten as ``multiplier x median``. Only ingredients with
+    ``_MIN_GRAM_EVIDENCE`` real stated weights qualify, which is what keeps a
+    genuine 5 g of sesame seeds intact, and the multiplier is capped so a stray
+    large number cannot invent a kilogram.
+
+    Idempotent: a repaired line is no longer a trace amount, so a second run skips
+    it. The raw payload remains the source of record if it ever needs rebuilding.
+    """
+    rows = session.execute(
+        select(RecipeIngredient.name, RecipeIngredient.unit, RecipeIngredient.amount)
+    ).all()
+    typical = _typical_grams_by_name(rows)
+    support: dict[str, int] = defaultdict(int)
+    for name, unit, amount in rows:
+        if name and unit in _MASS_UNITS and amount is not None and amount >= _GRAMS_THRESHOLD:
+            support[_normalize(name)] += 1
+
+    suspects = session.scalars(
+        select(RecipeIngredient).where(
+            RecipeIngredient.unit.in_(sorted(_MASS_UNITS)),
+            RecipeIngredient.amount > 0,
+            RecipeIngredient.amount < _GRAMS_THRESHOLD,
+        )
+    )
+    stats = {"examined": 0, "repaired": 0}
+    for ing in suspects:
+        stats["examined"] += 1
+        key = _normalize(ing.name)
+        portion = typical.get(key)
+        if portion is None or support.get(key, 0) < _MIN_GRAM_EVIDENCE:
+            continue
+        if ing.amount is None or ing.amount > _MAX_PORTION_MULTIPLE:
+            continue
+        ing.amount = round(ing.amount * portion, 1)
+        stats["repaired"] += 1
+    session.flush()
+    return stats
+
+
+def repair_contradicted_units(session: Session) -> dict[str, int]:
+    """Correct already-stored units that the amount's own magnitude contradicts.
+
+    ``backfill_units`` adopts the modal unit for an ingredient, which goes wrong
+    when the source mixes units for the same one: Egg Noodle Nest is ``grams`` on
+    608 lines and ``nest(s)`` on 10, so an unlabelled "2" became 2 g rather than 2
+    nests — and then a whole pack gets bought to satisfy 2 g of demand.
+
+    A replacement unit is only accepted when it converts to roughly what the
+    corpus says the ingredient usually weighs. Two guards fall out of that, and
+    both matter: 5 g of sesame seeds is left alone because sesame seeds are never
+    counted, and "1 Balsamic Vinegar" is left alone because the only countable
+    unit it has is ``pack(s)`` and no recipe uses a 250 ml bottle of it.
+
+    Callers must recompute ``amount_g`` afterwards; :func:`app.scraper.enrich`
+    does this for the whole corpus on every run.
+    """
+    rows = session.execute(
+        select(RecipeIngredient.name, RecipeIngredient.unit, RecipeIngredient.amount)
+    ).all()
+    countable_by_name = _countable_units_by_name(rows)
+    typical_by_name = _typical_grams_by_name(rows)
+
+    suspects = session.scalars(
+        select(RecipeIngredient).where(
+            RecipeIngredient.unit.in_(sorted(_MASS_UNITS)),
+            RecipeIngredient.amount > 0,
+            RecipeIngredient.amount < _GRAMS_THRESHOLD,
+        )
+    )
+    stats = {"examined": 0, "repaired": 0}
+    for ing in suspects:
+        stats["examined"] += 1
+        if not _contradicts_magnitude(ing.unit, ing.amount):
+            continue
+        key = _normalize(ing.name)
+        reread = _reread_unit(
+            ing.name, ing.amount, countable_by_name.get(key, []), typical_by_name.get(key)
+        )
+        if reread:
+            ing.unit = reread
+            stats["repaired"] += 1
+    session.flush()
+    return stats

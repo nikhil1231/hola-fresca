@@ -4,7 +4,12 @@ from __future__ import annotations
 import pytest
 
 from app import config as app_config
-from app.canonicalize import backfill_units, to_grams
+from app.canonicalize import (
+    backfill_units,
+    repair_contradicted_units,
+    repair_trace_amounts,
+    to_grams,
+)
 from app.db.models import Recipe, RecipeIngredient
 from app.db.session import init_db, make_engine, make_session_factory
 
@@ -86,13 +91,141 @@ def test_backfill_units_falls_back_to_name(tmp_path, monkeypatch):
 
         updated = backfill_units(s)
         s.commit()
-        assert updated == {"by_id": 0, "by_name": 1, "by_magnitude": 1}
+        assert updated == {"by_id": 0, "by_name": 1, "by_magnitude": 1, "count_veto": 0}
 
         rows = {(i.name, i.unit) for i in s.query(RecipeIngredient).all()}
         # Adopted from the sibling id carrying the same name.
         assert ("Smoked Paprika", "sachet(s)") in rows
         # No unit anywhere and a small amount, so it reads as a count.
         assert ("Red Pepper", "unit(s)") in rows
+
+
+def _repair_fixture(tmp_path, monkeypatch, lines):
+    monkeypatch.setattr(app_config, "DB_PATH", tmp_path / "r.db")
+    engine = make_engine(tmp_path / "r.db")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    with factory() as s:
+        r = Recipe(source="hellofresh", source_id="x", url="u", name="R")
+        r.ingredients = [
+            RecipeIngredient(source_ingredient_id=f"i{n}", name=name, amount=amount, unit=unit)
+            for n, (name, amount, unit) in enumerate(lines)
+        ]
+        s.add(r)
+        s.commit()
+        stats = repair_contradicted_units(s)
+        s.commit()
+        return s, stats
+
+
+def test_repair_rereads_a_count_the_source_labelled_as_grams(tmp_path, monkeypatch):
+    """"2 grams" of a thing sold in nests means two nests.
+
+    The corpus states 125 g elsewhere for the same name, so 2 nests (120 g) is
+    the reading that agrees with it.
+    """
+    s, stats = _repair_fixture(tmp_path, monkeypatch, [
+        ("Egg Noodle Nest", 125, "grams"),    # a line the source labelled properly
+        ("Egg Noodle Nest", 3, "nest(s)"),    # ...and one that names the count unit
+        ("Egg Noodle Nest", 2, "grams"),      # the unlabelled one, mis-backfilled
+    ])
+    assert stats["repaired"] == 1
+    units = {(i.amount, i.unit) for i in s.query(RecipeIngredient).all()}
+    assert (2, "nest(s)") in units
+    assert (125, "grams") in units  # the real weight is untouched
+
+
+def test_repair_leaves_genuinely_small_weights_alone(tmp_path, monkeypatch):
+    """5 g of sesame seeds is real: nothing in the corpus ever counts them."""
+    s, stats = _repair_fixture(tmp_path, monkeypatch, [
+        ("Roasted White Sesame Seeds", 20, "grams"),
+        ("Roasted White Sesame Seeds", 5, "grams"),
+    ])
+    assert stats["repaired"] == 0
+    assert all(i.unit == "grams" for i in s.query(RecipeIngredient).all())
+
+
+def test_repair_rejects_a_count_unit_that_means_a_whole_bottle(tmp_path, monkeypatch):
+    """"1 Balsamic Vinegar" is not a 250 ml bottle, so leave the line as it is.
+
+    Its only countable unit is ``pack(s)``, which converts to far more than the
+    corpus ever uses in one recipe — the guard that stops a plausible-looking
+    re-read from inventing a huge quantity.
+    """
+    s, stats = _repair_fixture(tmp_path, monkeypatch, [
+        ("Balsamic Vinegar", 15, "milliliter(s)"),
+        ("Balsamic Vinegar", 1, "pack(s)"),
+        ("Balsamic Vinegar", 1, "milliliter(s)"),
+    ])
+    assert stats["repaired"] == 0
+
+
+def test_repair_needs_a_trustworthy_reference_weight(tmp_path, monkeypatch):
+    """With no stated weight for the name, there is nothing to check against."""
+    s, stats = _repair_fixture(tmp_path, monkeypatch, [
+        ("Mystery Item", 1, "sachet(s)"),
+        ("Mystery Item", 2, "grams"),
+    ])
+    assert stats["repaired"] == 0
+
+
+def _trace_fixture(tmp_path, monkeypatch, lines):
+    monkeypatch.setattr(app_config, "DB_PATH", tmp_path / "t.db")
+    engine = make_engine(tmp_path / "t.db")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    with factory() as s:
+        r = Recipe(source="hellofresh", source_id="x", url="u", name="R")
+        r.ingredients = [
+            RecipeIngredient(source_ingredient_id=f"i{n}", name=name, amount=amount, unit=unit)
+            for n, (name, amount, unit) in enumerate(lines)
+        ]
+        s.add(r)
+        s.commit()
+        stats = repair_trace_amounts(s)
+        s.commit()
+        return s, stats
+
+
+def test_trace_amount_reads_as_one_typical_portion(tmp_path, monkeypatch):
+    """"Green Beans, 1 g" means one portion, and the corpus says that is 150 g.
+
+    No countable unit exists for green beans anywhere, so the unit repair cannot
+    reach this line; its own median weight is the only evidence available.
+    """
+    lines = [("Green Beans", 150, "grams")] * 20 + [("Green Beans", 1, "grams")]
+    s, stats = _trace_fixture(tmp_path, monkeypatch, lines)
+    assert stats["repaired"] == 1
+    amounts = sorted(i.amount for i in s.query(RecipeIngredient).all())
+    assert amounts[0] == 150  # the 1 g line became a full portion
+    assert all(a == 150 for a in amounts)
+
+
+def test_trace_amount_scales_a_fractional_portion(tmp_path, monkeypatch):
+    lines = [("Green Beans", 150, "grams")] * 20 + [("Green Beans", 0.5, "grams")]
+    s, _ = _trace_fixture(tmp_path, monkeypatch, lines)
+    assert sorted(i.amount for i in s.query(RecipeIngredient).all())[0] == 75
+
+
+def test_trace_repair_needs_real_evidence_for_the_portion(tmp_path, monkeypatch):
+    """Two supporting lines is not a norm, so the placeholder is left as it is."""
+    lines = [("Green Beans", 150, "grams")] * 2 + [("Green Beans", 1, "grams")]
+    s, stats = _trace_fixture(tmp_path, monkeypatch, lines)
+    assert stats["repaired"] == 0
+
+
+def test_trace_repair_refuses_an_absurd_multiplier(tmp_path, monkeypatch):
+    """A stray 4 must not become four portions of anything."""
+    lines = [("Green Beans", 150, "grams")] * 20 + [("Green Beans", 4, "grams")]
+    s, stats = _trace_fixture(tmp_path, monkeypatch, lines)
+    assert stats["repaired"] == 0
+
+
+def test_trace_repair_is_idempotent(tmp_path, monkeypatch):
+    lines = [("Green Beans", 150, "grams")] * 20 + [("Green Beans", 1, "grams")]
+    s, _ = _trace_fixture(tmp_path, monkeypatch, lines)
+    again = repair_trace_amounts(s)
+    assert again["repaired"] == 0
 
 
 def test_to_grams_rejects_implausible_counts():
