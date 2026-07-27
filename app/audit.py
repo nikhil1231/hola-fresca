@@ -32,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app import config
-from app.canonicalize import _MASS_UNITS, _normalize, _typical_grams_by_name
+from app.canonicalize import _MASS_UNITS, normalize_name, _typical_grams_by_name
 from app.classify import macros_suspect, protein_energy_ratio
 from app.db.models import Recipe, RecipeEdit, RecipeIngredient
 from app.mapping.openai_client import Completer
@@ -320,7 +320,7 @@ def typical_weights(session: Session, recipe: Recipe) -> dict[str, float]:
         )
     ).all()
     supported = Counter(
-        _normalize(name)
+        normalize_name(name)
         for name, unit, amount in rows
         if name and unit in _MASS_UNITS and amount is not None and amount >= 10
     )
@@ -359,7 +359,7 @@ def composition_blockers(recipe: Recipe, typical: dict[str, float] | None = None
         # A deliberate spoon or count measurement is not a placeholder.
         if ing.unit not in _MASS_UNITS:
             continue
-        norm = typical.get(_normalize(ing.name))
+        norm = typical.get(normalize_name(ing.name))
         if norm and ing.amount_g < norm * IMPLAUSIBLY_SMALL_RATIO:
             # Quote the source's own figure, and what it is being judged against.
             suspect.append(

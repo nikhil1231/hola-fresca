@@ -1,0 +1,65 @@
+{
+  "_comment": "How much a wrong quantity matters to the finished dish. With a meal kit this question never arises — the box holds one pre-portioned sachet and the cook tips it in. Buying from a supermarket, every such line becomes a measurement the cook performs against an estimated quantity, and the estimate is only as good as ingredient_grams.json / ingredient_spoons.json. Severity scales with potency per gram: too much ground cloves ruins a dish, too much oregano does not. 'high' earns a visible estimate warning in the UI; 'forgiving' is recorded so the warning is not shown where it would be noise. Anything unlisted is 'normal'. Resolution: exact by_name -> first substring in by_keyword -> normal. See app/measures.py.",
+  "high": {
+    "by_name": [
+      "ground cloves",
+      "cloves",
+      "whole cloves",
+      "ground cinnamon",
+      "cinnamon stick",
+      "ground cardamom",
+      "cardamom pods",
+      "star anise",
+      "ground nutmeg",
+      "cayenne pepper",
+      "chilli powder",
+      "red chilli flakes",
+      "chilli flakes",
+      "smoked paprika",
+      "ground allspice",
+      "fennel seeds",
+      "caraway seeds",
+      "asafoetida",
+      "saffron",
+      "truffle zest",
+      "liquid smoke",
+      "rose harissa",
+      "wasabi paste",
+      "fish sauce"
+    ],
+    "by_keyword": [
+      "cinnamon",
+      "cardamom",
+      "nutmeg",
+      "cayenne",
+      "star anise",
+      "saffron",
+      "truffle",
+      "habanero",
+      "scotch bonnet",
+      "wasabi"
+    ]
+  },
+  "forgiving": {
+    "by_name": [
+      "dried oregano",
+      "dried italian herbs",
+      "mixed herbs",
+      "dried basil",
+      "dried parsley",
+      "flat leaf parsley",
+      "coriander",
+      "chives",
+      "dill",
+      "mint",
+      "tarragon",
+      "mild paprika",
+      "ground coriander",
+      "dried chives"
+    ],
+    "by_keyword": [
+      "dried herbs",
+      "herb blend"
+    ]
+  }
+}

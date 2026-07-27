@@ -47,6 +47,15 @@ class IngredientOut(BaseModel):
     canonical_unit: str | None = None
     image_url: str | None = None
     unmapped: bool = False
+    # Teaspoons for one pre-portioned container (sachet, pot), where that is the
+    # measure the cook can actually act on. None when the line already states a
+    # metric amount or a spoon, or when the ingredient is not spoonable.
+    spoons: float | None = None
+    # True when amount_g was derived by us from a count/container rather than
+    # stated by the source. The UI must not lead with an estimated weight.
+    amount_g_estimated: bool = False
+    # How much a wrong quantity would hurt the dish: high | normal | forgiving.
+    potency: str = "normal"
 
 
 class StepOut(BaseModel):

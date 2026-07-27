@@ -33,6 +33,7 @@ from app.db.models import (
     RecipeIngredient,
     RecipeTag,
 )
+from app import measures
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
 from app.planner.basket import Selection, basket_gap_count, build_basket
@@ -424,6 +425,9 @@ def get_recipe(
                 canonical_unit=i.canonical_unit,
                 image_url=image_url(i.image_path, 200),
                 unmapped=i.id in unmapped_ingredient_ids,
+                spoons=measures.spoons_for(i.name, i.amount, i.unit),
+                amount_g_estimated=measures.amount_g_is_estimated(i.unit),
+                potency=measures.potency_for(i.name),
             )
             for i in ingredients
         ],

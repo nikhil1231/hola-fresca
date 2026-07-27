@@ -58,14 +58,14 @@ def _reference() -> dict:
     }
 
 
-def _normalize(name: str) -> str:
+def normalize_name(name: str) -> str:
     ascii_name = re.sub(r"[^a-z0-9 ]+", " ", name.lower())
     return re.sub(r"\s+", " ", ascii_name).strip()
 
 
 def _grams_per_unit(name: str, unit: str) -> float | None:
     ref = _reference()
-    norm = _normalize(name)
+    norm = normalize_name(name)
     if norm in ref["by_name"]:
         return ref["by_name"][norm]
     for keyword, grams in ref["by_keyword"]:
@@ -119,7 +119,7 @@ def _countable_units_by_name(rows) -> dict[str, list[str]]:
     counts: dict[str, Counter] = defaultdict(Counter)
     for name, unit, _ in rows:
         if name and unit and unit not in _MASS_UNITS:
-            counts[_normalize(name)][unit] += 1
+            counts[normalize_name(name)][unit] += 1
     return {key: [u for u, _ in c.most_common()] for key, c in counts.items()}
 
 
@@ -133,7 +133,7 @@ def _typical_grams_by_name(rows) -> dict[str, float]:
     amounts: dict[str, list[float]] = defaultdict(list)
     for name, unit, amount in rows:
         if name and unit in _MASS_UNITS and amount is not None and amount >= _GRAMS_THRESHOLD:
-            amounts[_normalize(name)].append(amount)
+            amounts[normalize_name(name)].append(amount)
     return {key: sorted(v)[len(v) // 2] for key, v in amounts.items()}
 
 
@@ -192,7 +192,7 @@ def backfill_units(session: Session) -> dict[str, int]:
         )
     ).all()
     by_id = _modal_units((iid, unit) for iid, _, unit, _ in rows)
-    by_name = _modal_units((_normalize(name), unit) for _, name, unit, _ in rows if name)
+    by_name = _modal_units((normalize_name(name), unit) for _, name, unit, _ in rows if name)
     name_rows = [(name, unit, amount) for _, name, unit, amount in rows]
     countable_by_name = _countable_units_by_name(name_rows)
     typical_by_name = _typical_grams_by_name(name_rows)
@@ -208,12 +208,12 @@ def backfill_units(session: Session) -> dict[str, int]:
         if ing.source_ingredient_id:
             unit, tier = by_id.get(ing.source_ingredient_id), "by_id"
         if unit is None:
-            unit, tier = by_name.get(_normalize(ing.name)), "by_name"
+            unit, tier = by_name.get(normalize_name(ing.name)), "by_name"
         if unit is None and ing.amount is not None:
             unit = "grams" if ing.amount >= _GRAMS_THRESHOLD else _COUNT_UNIT
             tier = "by_magnitude"
         if _contradicts_magnitude(unit, ing.amount):
-            key = _normalize(ing.name)
+            key = normalize_name(ing.name)
             reread = _reread_unit(
                 ing.name, ing.amount, countable_by_name.get(key, []), typical_by_name.get(key)
             )
@@ -258,7 +258,7 @@ def repair_trace_amounts(session: Session) -> dict[str, int]:
     support: dict[str, int] = defaultdict(int)
     for name, unit, amount in rows:
         if name and unit in _MASS_UNITS and amount is not None and amount >= _GRAMS_THRESHOLD:
-            support[_normalize(name)] += 1
+            support[normalize_name(name)] += 1
 
     suspects = session.scalars(
         select(RecipeIngredient).where(
@@ -270,7 +270,7 @@ def repair_trace_amounts(session: Session) -> dict[str, int]:
     stats = {"examined": 0, "repaired": 0}
     for ing in suspects:
         stats["examined"] += 1
-        key = _normalize(ing.name)
+        key = normalize_name(ing.name)
         portion = typical.get(key)
         if portion is None or support.get(key, 0) < _MIN_GRAM_EVIDENCE:
             continue
@@ -317,7 +317,7 @@ def repair_contradicted_units(session: Session) -> dict[str, int]:
         stats["examined"] += 1
         if not _contradicts_magnitude(ing.unit, ing.amount):
             continue
-        key = _normalize(ing.name)
+        key = normalize_name(ing.name)
         reread = _reread_unit(
             ing.name, ing.amount, countable_by_name.get(key, []), typical_by_name.get(key)
         )

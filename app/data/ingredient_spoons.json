@@ -1,0 +1,32 @@
+{
+  "_comment": "Approximate teaspoons per one native container unit, for ingredients the source ships as a pre-portioned dose (a sachet of spice mix, a pot of curry powder). HelloFresh states no quantity at all for these: with a meal kit the instruction is 'add the sachet' and it is self-executing, but shopping at a supermarket the cook holds a 40g jar and has to measure. Spoons are the actionable unit at the hob, and because sachets are portion-filled by volume rather than weighed, unit->volume is far more stable across spices than unit->mass, which needs a density per spice. Estimates, not measurements: the generic by_unit figures assume a mid-density ground spice (~2.3 g/tsp) at the gram weights in ingredient_grams.json, and by_name overrides carry the low-density dried leaf herbs, whose sachets hold far fewer grams for the same fill. Where a spice is potent enough that overdoing it ruins the dish (see ingredient_potency.json), the by_name figure deliberately errs low: an under-seasoned dish is corrected at the table, an over-cinnamoned one is not, so the asymmetry in the cost of being wrong is worth paying for in the estimate. Resolution: exact by_name -> first substring in by_keyword -> generic by_unit -> null. See app/measures.py.",
+  "by_unit": {
+    "sachet(s)": 3.5,
+    "pot(s)": 5
+  },
+  "by_name": {
+    "ground cinnamon": 1,
+    "ground cloves": 0.5,
+    "ground cardamom": 1,
+    "ground nutmeg": 0.5,
+    "ground allspice": 1,
+    "cayenne pepper": 0.5,
+    "chilli powder": 1,
+    "smoked paprika": 1.5,
+    "dried oregano": 2,
+    "dried italian herbs": 2,
+    "mixed herbs": 2,
+    "dried basil": 2,
+    "dried thyme": 2,
+    "dried parsley": 2,
+    "dried mint": 2,
+    "bay leaf": 0.5,
+    "saffron": 0.25
+  },
+  "by_keyword": [
+    ["dried herbs", 2],
+    ["herb blend", 2],
+    ["chilli flakes", 1.5],
+    ["ground cloves", 1]
+  ]
+}

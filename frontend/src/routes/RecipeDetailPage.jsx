@@ -31,6 +31,7 @@ import {
   IconDots,
   IconExternalLink,
   IconFlag,
+  IconFlame,
   IconStarFilled,
   IconUsers,
 } from '@tabler/icons-react'
@@ -53,6 +54,9 @@ const DIFFICULTY = { 1: 'Easy', 2: 'Medium', 3: 'Hard' }
 const SERVINGS = [0.5, 1, 2, 3, 4, 6, 8]
 const SERVINGS_LABELS = { 0.5: '½', 1: '1', 2: '2', 3: '3', 4: '4', 6: '6', 8: '8' }
 const METRIC_UNITS = ['grams', 'milliliter(s)']
+// A bare count: the source is counting the ingredient itself, not portioning it
+// into containers, so the unit word carries nothing the name does not.
+const COUNT_UNITS = ['unit(s)', 'unit', 'units']
 // Spoon measures are how these are actually measured at the hob, so they show
 // natively rather than as the gram conversion the mapping layer needs.
 const SPOON_UNITS = ['tbsp', 'tsp', 'pinch']
@@ -84,37 +88,79 @@ function unitLabel(unit, n) {
   return unit.replace(/\((e?s)\)$/, n > 1 ? '$1' : '')
 }
 
-// Format one ingredient at the chosen scale: grams primary, native count in
-// parentheses when the source unit is a count/container (e.g. "375g (1.5 carton)").
+// Format one ingredient at the chosen scale.
+//
+// The source's own unit leads. Where a line says "1 sachet", the weight beside
+// it is our estimate from a reference table, not something HelloFresh published
+// — so leading with it would put the least trustworthy number first and, worse,
+// hand the cook a figure to measure against that we cannot stand behind. Native
+// unit first, then the actionable translation: teaspoons for a pre-portioned
+// container, the approximate weight for anything else. A line that states grams
+// or millilitres outright keeps them as the headline, because there it is the
+// source speaking.
 function hasDisplayQuantity(ing) {
   if (ing.amount != null && ing.amount <= 0) return false
   if (ing.amount_g != null && ing.amount_g <= 0) return false
   return ing.amount != null || ing.amount_g != null
 }
 
+// Worth warning about only where both halves are true: the quantity is our
+// estimate, and getting it wrong would actually hurt the dish. An estimated
+// weight of onion is not worth a badge; an estimated weight of ground cloves is.
+function estimatedPotent(ing) {
+  return ing.amount_g_estimated && ing.potency === 'high'
+}
+
+function gramsLabel(ing, factor) {
+  if (ing.amount_g == null) return null
+  const metricAmount = roundNice(ing.amount_g * factor)
+  return metricAmount > 0 ? `${metricAmount}${ing.canonical_unit || 'g'}` : null
+}
+
 function scaledQuantity(ing, factor) {
-  const parts = []
+  // Already a spoon measure: nothing to translate.
   if (ing.amount && SPOON_UNITS.includes(ing.unit)) {
     const n = Math.max(roundCount(ing.amount * factor), 0.25)
     if (n <= MAX_SPOONS) return `${formatCount(n)} ${unitLabel(ing.unit, n)}`
   }
-  if (ing.amount_g != null) {
-    const metricAmount = roundNice(ing.amount_g * factor)
-    if (metricAmount > 0) parts.push(`${metricAmount}${ing.canonical_unit || 'g'}`)
+  // The source stated a metric amount, so it leads.
+  if (!ing.amount_g_estimated) {
+    const grams = gramsLabel(ing, factor)
+    if (grams) return grams
   }
+
   const nativeIsCount =
     ing.unit && !METRIC_UNITS.includes(ing.unit) && !SPOON_UNITS.includes(ing.unit)
   if (ing.amount != null && nativeIsCount) {
     const n = roundCount(ing.amount * factor)
     if (n > 0) {
-      const label = `${formatCount(n)} ${unitLabel(ing.unit, n)}`
-      parts.push(parts.length ? `(${label})` : label)
+      // A bare count needs no unit word — the ingredient name is already the
+      // noun being counted, so "2 Sea Bass Fillets" beats "2 units Sea Bass
+      // Fillets", and the gram estimate would only get in the way of an
+      // instruction that is already complete.
+      if (COUNT_UNITS.includes(ing.unit)) return formatCount(n)
+
+      const native = `${formatCount(n)} ${unitLabel(ing.unit, n)}`
+      // Spoons are what a cook holding a supermarket jar can act on; fall back
+      // to the weight for things nobody spoons out (a bunch, a tin).
+      if (ing.spoons != null) {
+        const spoons = roundCount(ing.spoons * factor)
+        if (spoons > 0 && spoons <= MAX_SPOONS) {
+          return `${native} (≈${formatCount(spoons)} tsp)`
+        }
+      }
+      const grams = gramsLabel(ing, factor)
+      return grams ? `${native} (≈${grams})` : native
     }
-  } else if (ing.amount_g == null && ing.amount != null) {
-    const amount = Math.round(ing.amount * factor * 100) / 100
-    if (amount > 0) parts.push(String(amount))
   }
-  return parts.join(' ')
+
+  const grams = gramsLabel(ing, factor)
+  if (grams) return grams
+  if (ing.amount != null) {
+    const amount = Math.round(ing.amount * factor * 100) / 100
+    if (amount > 0) return String(amount)
+  }
+  return ''
 }
 
 function MacroStat({ label, value, unit, corrected }) {
@@ -489,6 +535,26 @@ export default function RecipeDetailPage() {
                             aria-label="Unmapped ingredient"
                           >
                             <IconAlertTriangle size={13} />
+                          </ThemeIcon>
+                        </Tooltip>
+                      )}
+                      {estimatedPotent(ing) && (
+                        <Tooltip
+                          label="Quantity is our estimate — the source ships this pre-portioned and states no weight. Easy to overdo, so add to taste."
+                          withArrow
+                          multiline
+                          w={260}
+                        >
+                          <ThemeIcon
+                            component="span"
+                            variant="light"
+                            color="orange"
+                            size="sm"
+                            radius="xl"
+                            className={classes.ingredientWarning}
+                            aria-label="Estimated quantity, easy to overdo"
+                          >
+                            <IconFlame size={13} />
                           </ThemeIcon>
                         </Tooltip>
                       )}
