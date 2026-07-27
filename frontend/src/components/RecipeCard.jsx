@@ -36,7 +36,7 @@ function formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable) {
   if (!basketAvailable) return 'No basket data'
   const marginal = formatMarginalScore(marginalScore)
   if (!marginal) return null
-  return unpricedGapCount > 0 ? `${marginal} + ${unpricedGapCount} unpriced` : marginal
+  return marginal
 }
 
 function proteinDensityLevel(value) {
@@ -182,6 +182,7 @@ function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove })
 export default function RecipeCard({
   recipe,
   basketAvailable = true,
+  basketBadgeLabel = null,
   highlighted = false,
   marginalScore = null,
   unpricedGapCount = 0,
@@ -192,7 +193,8 @@ export default function RecipeCard({
   onPortionsChange,
   onRemoveFromPlan,
 }) {
-  const basketBadge = formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable)
+  const basketBadge =
+    basketBadgeLabel ?? formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable)
   const cardClass = [
     classes.card,
     plannerEntry ? classes.cardSelected : '',
@@ -228,14 +230,25 @@ export default function RecipeCard({
             </Badge>
           )}
           {basketBadge && (
-            <Badge
-              className={classes.marginalBadge}
-              variant="filled"
-              color={basketAvailable ? 'fresh' : 'gray'}
-              radius="sm"
-            >
-              {basketBadge}
-            </Badge>
+            <span className={classes.marginalBadgeWrap}>
+              <Badge
+                className={classes.marginalBadge}
+                variant="filled"
+                color={basketAvailable ? 'fresh' : 'gray'}
+                radius="sm"
+              >
+                {basketBadge}
+              </Badge>
+              {basketAvailable && unpricedGapCount > 0 && (
+                <span
+                  className={classes.unpricedBadge}
+                  data-darkreader-ignore="true"
+                  style={{ backgroundColor: 'rgb(250, 82, 82)', color: 'rgb(255, 255, 255)' }}
+                >
+                  {unpricedGapCount}
+                </span>
+              )}
+            </span>
           )}
         </Card.Section>
 

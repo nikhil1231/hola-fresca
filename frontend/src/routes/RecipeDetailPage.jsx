@@ -458,6 +458,26 @@ export default function RecipeDetailPage() {
                       {scaledQuantity(ing, factor)}{' '}
                     </Text>
                     {ing.name}
+                    {ing.unmapped && (
+                      <Tooltip label="Not mapped to a basket product" withArrow>
+                        <ThemeIcon
+                          component="span"
+                          variant="light"
+                          color="yellow"
+                          size="sm"
+                          radius="xl"
+                          className={classes.ingredientWarning}
+                          data-darkreader-ignore="true"
+                          style={{
+                            backgroundColor: 'rgb(255, 243, 191)',
+                            color: 'rgb(124, 77, 0)',
+                          }}
+                          aria-label="Unmapped ingredient"
+                        >
+                          <IconAlertTriangle size={13} />
+                        </ThemeIcon>
+                      </Tooltip>
+                    )}
                   </Text>
                 </Group>
               ))}

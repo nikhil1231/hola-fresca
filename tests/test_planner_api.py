@@ -279,3 +279,17 @@ def test_suggestions_apply_filters_and_pagination(planner_client):
     assert data["total"] == 1
     assert data["has_more"] is False
     assert data["items"][0]["name"] == "Bean Stew"
+
+
+def test_suggestions_can_exclude_unmapped_recipes(planner_client):
+    client, ids = planner_client
+    data = client.post(
+        "/api/planner/suggestions",
+        json={
+            "selections": [{"recipe_id": ids["pinned"], "portions": 2}],
+            "filters": {"exclude": ["unmapped"]},
+        },
+    ).json()
+
+    assert data["total"] == 2
+    assert [item["name"] for item in data["items"]] == ["Rice Patties", "Bean Stew"]

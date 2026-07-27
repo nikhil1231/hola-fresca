@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.mapping import router as mapping_router
@@ -13,6 +14,17 @@ app = FastAPI(title="HolaFresca")
 app.include_router(recipes_router)
 app.include_router(mapping_router)
 app.include_router(planner_router)
+
+
+class _NoCacheFrontendMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
+
+
+app.add_middleware(_NoCacheFrontendMiddleware)
 
 
 @app.get("/api/health")

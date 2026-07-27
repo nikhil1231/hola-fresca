@@ -4,35 +4,110 @@
   flex: 0 0 auto;
 }
 
+.pageStack {
+  height: calc(100dvh - 128px);
+  min-height: 0;
+  overflow: hidden;
+  padding-block: 8px 24px;
+}
+
 .weekLayout {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
+  grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+  gap: 36px;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .recipesPanel,
 .basketPanel {
   min-width: 0;
+  min-height: 0;
   color: var(--mantine-color-text);
   background: var(--mantine-color-body);
 }
 
 .recipesPanel {
-  position: sticky;
-  top: 88px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: visible;
+}
+
+.basketPanel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.recipesScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: hidden;
+  overflow-x: visible;
+  padding: 30px 34px 58px 42px;
+  margin: -18px -24px -10px -34px;
+  scrollbar-gutter: stable;
+}
+
+.recipesScroll:hover,
+.recipesScroll:focus-within {
+  overflow-y: auto;
+}
+
+.compactRecipeTile {
+  width: 100%;
+  max-width: 250px;
+}
+
+.basketScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: hidden;
+  padding-right: 12px;
+  padding-bottom: 24px;
+  scrollbar-gutter: stable;
+}
+
+.basketScroll:hover,
+.basketScroll:focus-within {
+  overflow-y: auto;
 }
 
 .statsGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
+  flex: 0 0 auto;
+}
+
+.unmappedAlert {
+  flex: 0 0 auto;
+  background: var(--mantine-color-body);
+  border-color: var(--mantine-color-yellow-6);
+  color: var(--mantine-color-text);
+}
+
+.unmappedAlert [data-alert-title],
+.unmappedAlert svg {
+  color: var(--mantine-color-yellow-7);
+}
+
+.warningBadge {
+  color: var(--mantine-color-yellow-8);
+  border-color: var(--mantine-color-yellow-6);
+  background: transparent;
 }
 
 .stat {
   border: 1px solid var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-md);
-  padding: 14px;
+  padding: 16px;
   background: var(--mantine-color-body);
 }
 
@@ -47,7 +122,7 @@
 
 .section {
   border-top: 1px solid var(--mantine-color-default-border);
-  padding-top: 18px;
+  padding-top: 24px;
 }
 
 .sectionTitle {
@@ -180,14 +255,14 @@
 .bucketGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 
 .bucket,
 .emptyState {
   border: 1px dashed var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-md);
-  padding: 16px;
+  padding: 18px;
   background: var(--mantine-color-body);
 }
 
@@ -199,10 +274,31 @@
 @media (max-width: 48em) {
   .weekLayout {
     grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .pageStack {
+    height: auto;
+    overflow: visible;
   }
 
   .recipesPanel {
-    position: static;
+    height: auto;
+  }
+
+  .recipesScroll {
+    max-height: 44vh;
+    overflow-y: auto;
+  }
+
+  .basketPanel {
+    height: auto;
+    overflow: visible;
+  }
+
+  .basketScroll {
+    overflow-y: visible;
+    padding-right: 0;
   }
 
   .statsGrid,

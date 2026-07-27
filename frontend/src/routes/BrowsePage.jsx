@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Center,
@@ -12,10 +13,9 @@ import {
   Skeleton,
   Stack,
   Text,
-  Title,
 } from '@mantine/core'
 import { useDisclosure, useIntersection, useMediaQuery } from '@mantine/hooks'
-import { IconAdjustmentsHorizontal, IconBasket, IconMoodEmpty, IconSparkles } from '@tabler/icons-react'
+import { IconAdjustmentsHorizontal, IconMoodEmpty, IconSparkles } from '@tabler/icons-react'
 
 import FilterPanel from '../components/FilterPanel.jsx'
 import { DEFAULT_FACETS } from '../data/defaultFacets.js'
@@ -46,6 +46,12 @@ function formatMoney(value) {
   return money.format(value ?? 0)
 }
 
+function formatSignedMoney(value) {
+  if (value == null) return null
+  const absolute = Math.abs(value)
+  return `${value < 0 ? '-' : '+'}${formatMoney(absolute)}`
+}
+
 function useBrowseRowSize() {
   const isLg = useMediaQuery('(min-width: 75em)')
   const isMd = useMediaQuery('(min-width: 62em)')
@@ -55,100 +61,6 @@ function useBrowseRowSize() {
   if (isMd) return GRID_COLS.md
   if (isXs) return GRID_COLS.xs
   return GRID_COLS.base
-}
-
-function WeekRail({ entries, selections, onRemove, onPortionsChange }) {
-  const { data, isLoading } = usePlannerBasket(selections)
-
-  return (
-    <Box
-      visibleFrom="lg"
-      w={260}
-      p="md"
-      style={{
-        flexShrink: 0,
-        position: 'sticky',
-        top: 88,
-        border: '1px solid var(--mantine-color-default-border)',
-        borderRadius: 'var(--mantine-radius-md)',
-        background: 'var(--mantine-color-body)',
-      }}
-    >
-      <Group gap="xs" mb="sm">
-        <IconBasket size={18} />
-        <Title order={3} style={{ fontSize: '1rem', letterSpacing: 0 }}>
-          Week
-        </Title>
-      </Group>
-      <Text fw={800} size="xl">
-        {isLoading ? '...' : formatMoney(data?.cost)}
-      </Text>
-      <Text size="xs" c="dimmed" mb="md">
-        {entries.length} selected
-        {data?.unmapped?.length || data?.unpriceable?.length || data?.untracked_lines
-          ? `, ${(
-              (data?.unmapped?.length ?? 0)
-              + (data?.unpriceable?.length ?? 0)
-              + (data?.untracked_lines ?? 0)
-            ).toLocaleString()} unpriced`
-          : ''}
-      </Text>
-      <Stack gap="xs">
-        {entries.map((entry) => (
-          <Box
-            key={entry.recipe.id}
-            p="xs"
-            style={{
-              border: '1px solid var(--mantine-color-default-border)',
-              borderRadius: 'var(--mantine-radius-sm)',
-            }}
-          >
-            <Text fw={700} size="sm" lineClamp={2}>
-              {entry.recipe.name}
-            </Text>
-            <Group justify="space-between" mt={4}>
-              <Text size="xs" c="dimmed">
-                {entry.portions} portions
-              </Text>
-              <Group gap={4}>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="gray"
-                  disabled={entry.portions <= 1}
-                  onClick={() => onPortionsChange(entry.recipe.id, entry.portions - 1)}
-                >
-                  -
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="fresh"
-                  disabled={entry.portions >= 8}
-                  onClick={() => onPortionsChange(entry.recipe.id, entry.portions + 1)}
-                >
-                  +
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="red"
-                  onClick={() => onRemove(entry.recipe.id)}
-                >
-                  Remove
-                </Button>
-              </Group>
-            </Group>
-          </Box>
-        ))}
-        {entries.length === 0 && (
-          <Text size="sm" c="dimmed">
-            Add recipes to see a running basket.
-          </Text>
-        )}
-      </Stack>
-    </Box>
-  )
 }
 
 export default function BrowsePage() {
@@ -170,6 +82,7 @@ export default function BrowsePage() {
     [upcomingRecipes],
   )
   const plannerSelections = useMemo(() => toPlannerSelections(upcomingRecipes), [upcomingRecipes])
+  const { data: basket, isLoading: basketLoading } = usePlannerBasket(plannerSelections)
   const basePageSize = rowSize * PAGE_ROWS
   const pinnedRemainder = upcomingRecipes.length % rowSize
   const firstPageSize = pinnedRemainder === 0 ? basePageSize : basePageSize - pinnedRemainder
@@ -227,12 +140,24 @@ export default function BrowsePage() {
 
   function renderRecipeCard(recipe) {
     const plannerEntry = getRecipeEntry(recipe.id, upcomingWeekStart)
+    const perPortionScore =
+      bestFitActive && !plannerEntry && recipe.marginal_score != null
+        ? recipe.marginal_score / DEFAULT_PORTIONS
+        : !bestFitActive && !plannerEntry && recipe.intrinsic_score != null
+          ? recipe.intrinsic_score / DEFAULT_PORTIONS
+        : null
+    const gapCount = bestFitActive
+      ? recipe.unpriced_gap_count
+      : recipe.intrinsic_gap_count
     return (
       <RecipeCard
         key={recipe.id}
         recipe={recipe}
+        basketBadgeLabel={
+          perPortionScore != null ? `${formatSignedMoney(perPortionScore)} pp` : null
+        }
         marginalScore={bestFitActive && !plannerEntry ? recipe.marginal_score : null}
-        unpricedGapCount={bestFitActive && !plannerEntry ? recipe.unpriced_gap_count : 0}
+        unpricedGapCount={!plannerEntry ? gapCount ?? 0 : 0}
         basketAvailable={bestFitActive && !plannerEntry ? recipe.basket_available : true}
         plannerEntry={plannerEntry}
         plannerDisabled={!plannerEntry && upcomingWeekFull}
@@ -279,11 +204,20 @@ export default function BrowsePage() {
             </Text>
           </Group>
           <Group gap="xs" wrap="nowrap">
-            <Button
-              variant={bestFitActive ? 'filled' : 'light'}
+            <Badge
+              variant="outline"
               color="fresh"
-              size="sm"
-              leftSection={<IconSparkles size={16} />}
+              radius="sm"
+              size="lg"
+              styles={{ root: { textTransform: 'none', letterSpacing: 0 } }}
+            >
+              {basketLoading ? 'Basket ...' : `Basket ${formatMoney(basket?.cost)}`}
+            </Badge>
+            <Button
+              variant={bestFitActive ? 'filled' : 'default'}
+              color={bestFitActive ? 'fresh' : 'gray'}
+              size="xs"
+              leftSection={<IconSparkles size={14} />}
               disabled={upcomingRecipes.length === 0}
               onClick={() => setScalar('sort', bestFitActive ? 'popular' : 'best_fit')}
             >
@@ -337,15 +271,6 @@ export default function BrowsePage() {
           </>
         )}
       </Stack>
-
-      <WeekRail
-        entries={upcomingRecipes}
-        selections={plannerSelections}
-        onRemove={(recipeId) => removeRecipeFromWeek(upcomingWeekStart, recipeId)}
-        onPortionsChange={(recipeId, portions) =>
-          setRecipePortions(upcomingWeekStart, recipeId, portions)
-        }
-      />
 
       <Drawer
         opened={drawerOpen}

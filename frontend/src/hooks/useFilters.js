@@ -7,6 +7,8 @@ const ARRAY_KEYS = ['cuisine', 'diet', 'tag', 'protein', 'exclude']
 const NUMBER_KEYS = ['max_time', 'min_protein', 'min_protein_ratio', 'max_kcal', 'difficulty']
 
 export const DEFAULT_SORT = 'best_fit'
+const DEFAULT_EXCLUDES = ['unmapped']
+const SHOW_UNMAPPED_KEY = 'show_unmapped'
 
 // Parse the URL search params into a plain filters object used by the API layer.
 export function parseFilters(searchParams) {
@@ -17,6 +19,9 @@ export function parseFilters(searchParams) {
   if (sort) filters.sort = sort
   for (const key of ARRAY_KEYS) {
     const values = searchParams.getAll(key)
+    if (key === 'exclude' && searchParams.get(SHOW_UNMAPPED_KEY) !== '1') {
+      if (!values.includes('unmapped')) values.unshift('unmapped')
+    }
     if (values.length) filters[key] = values
   }
   for (const key of NUMBER_KEYS) {
@@ -30,7 +35,12 @@ export function parseFilters(searchParams) {
 // mobile "Filters" button badge.
 export function countActiveFilters(filters) {
   let n = 0
-  for (const key of ARRAY_KEYS) n += filters[key]?.length ?? 0
+  for (const key of ARRAY_KEYS) {
+    const values = filters[key] ?? []
+    n += key === 'exclude'
+      ? values.filter((value) => !DEFAULT_EXCLUDES.includes(value)).length
+      : values.length
+  }
   for (const key of NUMBER_KEYS) if (filters[key] != null) n += 1
   return n
 }
@@ -57,12 +67,16 @@ export function useFilters() {
     (key, value) => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
-        const current = next.getAll(key)
+        const current = key === 'exclude' ? parseFilters(next).exclude ?? [] : next.getAll(key)
         next.delete(key)
         const updated = current.includes(value)
           ? current.filter((v) => v !== value)
           : [...current, value]
         for (const v of updated) next.append(key, v)
+        if (key === 'exclude') {
+          if (updated.includes('unmapped')) next.delete(SHOW_UNMAPPED_KEY)
+          else next.set(SHOW_UNMAPPED_KEY, '1')
+        }
         return next
       })
     },
@@ -75,6 +89,10 @@ export function useFilters() {
         const next = new URLSearchParams(prev)
         next.delete(key)
         for (const v of values ?? []) next.append(key, v)
+        if (key === 'exclude') {
+          if ((values ?? []).includes('unmapped')) next.delete(SHOW_UNMAPPED_KEY)
+          else next.set(SHOW_UNMAPPED_KEY, '1')
+        }
         return next
       })
     },

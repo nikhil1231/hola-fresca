@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
-from app.api.recipes import _apply_filters, _to_card
+from app.api.recipes import _apply_filters, _to_card, _unmapped_recipe_ids
 from app.api.schemas import (
     BasketIn,
     BasketContributionOut,
@@ -148,11 +148,20 @@ def basket(
     return _basket_out(build_basket(index, selections))
 
 
-def _candidate_ids(session: Session, body: SuggestionsIn, pinned_ids: set[int]) -> list[int]:
+def _candidate_ids(
+    session: Session,
+    body: SuggestionsIn,
+    pinned_ids: set[int],
+    csv_path: Path | None,
+) -> list[int]:
     filters = body.filters.model_dump()
     stmt = _apply_filters(select(Recipe.id), **filters)
     if pinned_ids:
         stmt = stmt.where(Recipe.id.not_in(pinned_ids))
+    if "unmapped" in body.filters.exclude:
+        unmapped_recipe_ids = _unmapped_recipe_ids(session, csv_path)
+        if unmapped_recipe_ids:
+            stmt = stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
     return list(session.scalars(stmt).all())
 
 
@@ -178,7 +187,7 @@ def suggestions(
     _require_curated(session, pinned_recipe_ids)
 
     pinned_id_set = set(pinned_recipe_ids)
-    candidate_ids = _candidate_ids(session, body, pinned_id_set)
+    candidate_ids = _candidate_ids(session, body, pinned_id_set, csv_path)
     all_index_ids = list(dict.fromkeys([*pinned_recipe_ids, *candidate_ids]))
     index = _load_planner_index(factory, all_index_ids, csv_path)
 

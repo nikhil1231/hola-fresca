@@ -4,12 +4,14 @@ Every endpoint is scoped to the curated active library (``Recipe.curated == 1``)
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Select, func, nullslast, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api import facets as facet_cfg
-from app.api.deps import get_session
+from app.api.deps import get_planner_csv_path, get_session, get_session_factory
 from app.api.schemas import (
     AuditJobOut,
     FacetCount,
@@ -23,8 +25,18 @@ from app.api.schemas import (
     RecipeEditOut,
     StepOut,
 )
-from app.db.models import Recipe, RecipeAllergen, RecipeCuisine, RecipeIngredient, RecipeTag
+from app.db.models import (
+    IngredientMapping,
+    Recipe,
+    RecipeAllergen,
+    RecipeCuisine,
+    RecipeIngredient,
+    RecipeTag,
+)
+from app.mapping.candidates import load_source_id_index
 from app.media import image_url
+from app.planner.basket import Selection, basket_gap_count, build_basket
+from app.planner.index import RETAILER, load_index
 
 
 def _ingredient_match(keywords: list[str]):
@@ -38,6 +50,7 @@ router = APIRouter(prefix="/api", tags=["recipes"])
 CARD_WIDTH = 500
 HERO_WIDTH = 1200
 MAX_PAGE_SIZE = 60
+INTRINSIC_PORTIONS = 4
 
 # Attribute tag types that become display chips on a card, with friendly labels.
 _CHIP_LABELS = dict(facet_cfg.ATTRIBUTE_TAGS)
@@ -92,6 +105,8 @@ def _apply_filters(
         stmt = stmt.where(or_(*protein_conds))
     # Exclude: each value is either an ingredient group or an allergen name.
     for value in exclude:
+        if value == "unmapped":
+            continue
         keywords = facet_cfg.INGREDIENT_KEYWORDS.get(value.lower())
         if keywords:
             stmt = stmt.where(~_ingredient_match(keywords))
@@ -113,7 +128,16 @@ def _apply_filters(
     return stmt
 
 
-def _to_card(r: Recipe) -> RecipeCard:
+def _round_money(value: float) -> float:
+    return round(value, 2)
+
+
+def _to_card(
+    r: Recipe,
+    *,
+    intrinsic_score: float | None = None,
+    intrinsic_gap_count: int = 0,
+) -> RecipeCard:
     # A derived diet chip (most specific first) plus source attribute chips.
     chips: list[str] = []
     if r.is_vegetarian:
@@ -135,6 +159,91 @@ def _to_card(r: Recipe) -> RecipeCard:
         ratings_count=r.ratings_count,
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in r.cuisines],
         tags=list(dict.fromkeys(chips)),  # dedupe, preserve order
+        intrinsic_score=intrinsic_score,
+        intrinsic_gap_count=intrinsic_gap_count,
+    )
+
+
+def _intrinsic_prices(
+    rows: list[Recipe] | list[int],
+    factory: sessionmaker[Session],
+    csv_path: Path | None,
+) -> dict[int, tuple[float, int]]:
+    recipe_ids = [recipe if isinstance(recipe, int) else recipe.id for recipe in rows]
+    if not recipe_ids:
+        return {}
+    index = load_index(factory, recipe_ids=recipe_ids, curated_only=False, csv_path=csv_path)
+    prices: dict[int, tuple[float, int]] = {}
+    for recipe_id in recipe_ids:
+        basket = build_basket(index, [Selection(recipe_id=recipe_id, servings=INTRINSIC_PORTIONS)])
+        prices[recipe_id] = (_round_money(basket.score), basket_gap_count(basket))
+    return prices
+
+
+def _alias_roots(rows: list[IngredientMapping]) -> dict[str, str]:
+    alias_of = {row.ingredient_key: row.alias_of for row in rows if row.alias_of}
+    roots: dict[str, str] = {}
+    for row in rows:
+        seen: set[str] = set()
+        current = row.ingredient_key
+        while current in alias_of and current not in seen:
+            seen.add(current)
+            current = alias_of[current]
+        roots[row.ingredient_key] = current
+    return roots
+
+
+def _unmapped_ingredient_ids(
+    session: Session,
+    ingredients: list[RecipeIngredient],
+    csv_path: Path | None,
+) -> set[int]:
+    sid_index = load_source_id_index(csv_path)
+    mapping_rows = list(
+        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == RETAILER))
+    )
+    roots = _alias_roots(mapping_rows)
+    by_key = {row.ingredient_key: row for row in mapping_rows}
+    unmapped: set[int] = set()
+    for ingredient in ingredients:
+        raw_key = sid_index.get(ingredient.source_ingredient_id or "")
+        if raw_key is None:
+            unmapped.add(ingredient.id)
+            continue
+        root = roots.get(raw_key, raw_key)
+        row = by_key.get(root)
+        if row is None or row.status != "approved":
+            unmapped.add(ingredient.id)
+    return unmapped
+
+
+def _unmapped_recipe_ids(session: Session, csv_path: Path | None) -> set[int]:
+    sid_index = load_source_id_index(csv_path)
+    mapping_rows = list(
+        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == RETAILER))
+    )
+    roots = _alias_roots(mapping_rows)
+    approved_roots = {
+        row.ingredient_key for row in mapping_rows if row.status == "approved"
+    }
+    approved_source_ids = {
+        source_id
+        for source_id, key in sid_index.items()
+        if roots.get(key, key) in approved_roots
+    }
+    return set(
+        session.scalars(
+            select(RecipeIngredient.recipe_id)
+            .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
+            .where(
+                Recipe.curated == 1,
+                or_(
+                    RecipeIngredient.source_ingredient_id.is_(None),
+                    RecipeIngredient.source_ingredient_id.not_in(approved_source_ids),
+                ),
+            )
+            .distinct()
+        )
     )
 
 
@@ -157,34 +266,78 @@ def list_recipes(
     page_size: int = Query(default=24, ge=1, le=MAX_PAGE_SIZE),
     offset: int | None = Query(default=None, ge=0),
     session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> PaginatedRecipes:
     filters = dict(
         q=q, cuisine=cuisine, diet=diet, tag=tag, protein=protein, max_time=max_time,
         min_protein=min_protein, min_protein_ratio=min_protein_ratio, max_kcal=max_kcal,
         difficulty=difficulty, exclude=exclude,
     )
+    exclude_unmapped = "unmapped" in exclude
+    unmapped_recipe_ids = _unmapped_recipe_ids(session, csv_path) if exclude_unmapped else set()
 
     total_stmt = _apply_filters(select(func.count(Recipe.id)), **filters)
     if exclude_id:
         total_stmt = total_stmt.where(Recipe.id.not_in(exclude_id))
+    if unmapped_recipe_ids:
+        total_stmt = total_stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
     total = session.scalar(total_stmt) or 0
 
-    order = _SORT_COLUMNS.get(sort, _SORT_COLUMNS[facet_cfg.DEFAULT_SORT])
     effective_offset = offset if offset is not None else (page - 1) * page_size
-    stmt = (
-        _apply_filters(select(Recipe), **filters)
-        .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
-    )
-    if exclude_id:
-        stmt = stmt.where(Recipe.id.not_in(exclude_id))
-    stmt = (
-        stmt
-        .order_by(order, Recipe.id)
-        .offset(effective_offset)
-        .limit(page_size)
-    )
-    rows = session.scalars(stmt).all()
-    items = [_to_card(r) for r in rows]
+    if sort in {"price_low", "price_high"}:
+        id_stmt = _apply_filters(select(Recipe.id), **filters)
+        if exclude_id:
+            id_stmt = id_stmt.where(Recipe.id.not_in(exclude_id))
+        if unmapped_recipe_ids:
+            id_stmt = id_stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
+        candidate_ids = list(session.scalars(id_stmt).all())
+        intrinsic = _intrinsic_prices(candidate_ids, factory, csv_path)
+        sorted_ids = sorted(
+            candidate_ids,
+            key=lambda recipe_id: (
+                -intrinsic.get(recipe_id, (float("inf"), 0))[0]
+                if sort == "price_high"
+                else intrinsic.get(recipe_id, (float("inf"), 0))[0],
+                recipe_id,
+            ),
+        )
+        page_ids = sorted_ids[effective_offset:effective_offset + page_size]
+        by_id: dict[int, Recipe] = {}
+        if page_ids:
+            rows_for_page = session.scalars(
+                select(Recipe)
+                .where(Recipe.id.in_(page_ids))
+                .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
+            ).all()
+            by_id = {recipe.id: recipe for recipe in rows_for_page}
+        rows = [by_id[recipe_id] for recipe_id in page_ids if recipe_id in by_id]
+    else:
+        order = _SORT_COLUMNS.get(sort, _SORT_COLUMNS[facet_cfg.DEFAULT_SORT])
+        stmt = (
+            _apply_filters(select(Recipe), **filters)
+            .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
+        )
+        if exclude_id:
+            stmt = stmt.where(Recipe.id.not_in(exclude_id))
+        if unmapped_recipe_ids:
+            stmt = stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
+        stmt = (
+            stmt
+            .order_by(order, Recipe.id)
+            .offset(effective_offset)
+            .limit(page_size)
+        )
+        rows = session.scalars(stmt).all()
+        intrinsic = _intrinsic_prices(rows, factory, csv_path)
+    items = [
+        _to_card(
+            r,
+            intrinsic_score=intrinsic.get(r.id, (None, 0))[0],
+            intrinsic_gap_count=intrinsic.get(r.id, (None, 0))[1],
+        )
+        for r in rows
+    ]
     next_offset = effective_offset + len(items)
     has_more = next_offset < total
     return PaginatedRecipes(
@@ -199,7 +352,9 @@ def list_recipes(
 
 @router.get("/recipes/{recipe_id}", response_model=RecipeDetail)
 def get_recipe(
-    recipe_id: int, session: Session = Depends(get_session)
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     recipe = session.get(Recipe, recipe_id)
     if recipe is None or not recipe.curated:
@@ -210,6 +365,7 @@ def get_recipe(
         recipe.ingredients,
         key=lambda i: (i.position is None, i.position or 0, i.id),
     )
+    unmapped_ingredient_ids = _unmapped_ingredient_ids(session, ingredients, csv_path)
     return RecipeDetail(
         id=recipe.id,
         name=recipe.name,
@@ -242,6 +398,7 @@ def get_recipe(
                 amount_g=i.amount_g,
                 canonical_unit=i.canonical_unit,
                 image_url=image_url(i.image_path, 200),
+                unmapped=i.id in unmapped_ingredient_ids,
             )
             for i in ingredients
         ],
@@ -304,7 +461,9 @@ def get_audit_job(job_id: str) -> AuditJobOut:
 
 @router.post("/recipes/{recipe_id}/revert", response_model=RecipeDetail)
 def revert_recipe_edits(
-    recipe_id: int, session: Session = Depends(get_session)
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     """Put the source's original numbers back and mark the edits reverted."""
     from app import audit as audit_mod
@@ -313,11 +472,14 @@ def revert_recipe_edits(
         audit_mod.revert_recipe(session, recipe_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return get_recipe(recipe_id, session)
+    return get_recipe(recipe_id, session, csv_path)
 
 
 @router.get("/facets", response_model=FacetsOut)
-def get_facets(session: Session = Depends(get_session)) -> FacetsOut:
+def get_facets(
+    session: Session = Depends(get_session),
+    csv_path: Path | None = Depends(get_planner_csv_path),
+) -> FacetsOut:
     curated = Recipe.curated == 1
 
     # Cuisines above the noise threshold, cleaned for display.
@@ -384,6 +546,12 @@ def get_facets(session: Session = Depends(get_session)) -> FacetsOut:
             continue  # already covered by an allergen (e.g. Fish)
         excludes.append(
             FacetCount(value=v, label=label, count=ingredient_count(facet_cfg.INGREDIENT_KEYWORDS[v]))
+        )
+    unmapped_count = len(_unmapped_recipe_ids(session, csv_path))
+    if unmapped_count:
+        excludes.insert(
+            0,
+            FacetCount(value="unmapped", label="Unmapped ingredients", count=unmapped_count),
         )
 
     return FacetsOut(

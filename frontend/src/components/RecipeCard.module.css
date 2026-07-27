@@ -1,7 +1,11 @@
 .card {
   color: inherit;
   text-decoration: none;
-  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease,
+    filter 220ms ease;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -18,9 +22,21 @@
   box-shadow: 0 0 0 1px var(--mantine-color-fresh-6);
 }
 
+.cardSelected:hover {
+  border-color: var(--mantine-color-fresh-6);
+  box-shadow: 0 0 0 1px var(--mantine-color-fresh-6), var(--mantine-shadow-md);
+}
+
 .cardHighlighted {
-  border-color: var(--mantine-color-yellow-6);
-  box-shadow: 0 0 0 1px var(--mantine-color-yellow-6);
+  border-color: var(--mantine-color-fresh-5);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--mantine-color-fresh-5) 58%, transparent));
+  box-shadow: 0 0 0 1px var(--mantine-color-fresh-5);
+}
+
+.cardHighlighted:hover {
+  border-color: var(--mantine-color-fresh-5);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--mantine-color-fresh-5) 58%, transparent));
+  box-shadow: 0 0 0 1px var(--mantine-color-fresh-5), var(--mantine-shadow-md);
 }
 
 .mainLink {
@@ -50,12 +66,39 @@
   background: rgba(0, 0, 0, 0.6);
 }
 
-.marginalBadge {
+.marginalBadgeWrap {
   position: absolute;
   right: 8px;
   bottom: 8px;
-  box-shadow: var(--mantine-shadow-sm);
+  display: inline-flex;
   max-width: calc(100% - 16px);
+}
+
+.marginalBadge {
+  box-shadow: var(--mantine-shadow-sm);
+  max-width: 100%;
+}
+
+.unpricedBadge {
+  forced-color-adjust: none;
+  color-scheme: light only;
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(250, 82, 82) !important;
+  color: rgb(255, 255, 255) !important;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: var(--mantine-shadow-xs);
 }
 
 .planControls {

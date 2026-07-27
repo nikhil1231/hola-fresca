@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_session
+from app.api.deps import get_planner_csv_path, get_session, get_session_factory
 from app.db.models import (
     Recipe,
     RecipeAllergen,
@@ -20,7 +20,11 @@ from app.db.models import (
     RecipeTag,
 )
 from app.db.session import init_db, make_engine, make_session_factory
+from app.mapping import service
+from app.mapping.candidates import gather_candidates
 from main import app
+from tests.conftest import seed_candidates
+from tests.test_planner_basket import write_freq_csv
 
 
 def _make_recipe(**overrides) -> Recipe:
@@ -41,8 +45,49 @@ def client(tmp_path):
     engine = make_engine(tmp_path / "api.db")
     init_db(engine)
     factory = make_session_factory(engine)
+    csv_path = write_freq_csv(
+        tmp_path / "ingredient_frequency.csv",
+        [
+            ("name:pasta", "sid-pasta", "Pasta"),
+            ("name:lentils", "sid-lentils", "Lentils"),
+            ("name:chicken", "sid-chicken", "Chicken Breast"),
+            ("name:tortillas", "sid-tortillas", "Taco Tortillas"),
+        ],
+    )
 
     with factory() as s:
+        seed_candidates(
+            s,
+            "name:pasta",
+            "Pasta",
+            [{"sku": "pasta", "name": "Pasta 500g", "price": 1.0, "pack_value": 500, "pack_unit": "g"}],
+        )
+        seed_candidates(
+            s,
+            "name:lentils",
+            "Lentils",
+            [{"sku": "lentils", "name": "Lentils 400g", "price": 1.0, "pack_value": 400, "pack_unit": "g"}],
+        )
+        seed_candidates(
+            s,
+            "name:chicken",
+            "Chicken Breast",
+            [{"sku": "chicken", "name": "Chicken 500g", "price": 5.0, "pack_value": 500, "pack_unit": "g"}],
+        )
+        for key, sku in (
+            ("name:pasta", "pasta"),
+            ("name:lentils", "lentils"),
+            ("name:chicken", "chicken"),
+        ):
+            service.save_decision(
+                s,
+                gather_candidates(s, key),
+                service.DecisionInput(
+                    status="approved",
+                    accepted=[service.AcceptedInput(sku=sku, rank=1)],
+                ),
+            )
+
         italian = _make_recipe(
             source_id="a", name="Creamy Veggie Pasta", protein_g=50, energy_kcal=600,
             total_time_min=20, difficulty=1, avg_rating=4.5, ratings_count=900,
@@ -52,8 +97,8 @@ def client(tmp_path):
         italian.tags = [RecipeTag(name="X", type="seo")]  # no attribute chip
         italian.allergens = [RecipeAllergen(name="Milk")]
         italian.ingredients = [
-            RecipeIngredient(name="Pasta", position=2, amount=180, unit="grams", amount_g=180, canonical_unit="g"),
-            RecipeIngredient(name="Lentils", position=1, amount=1, unit="carton(s)", amount_g=250, canonical_unit="g"),
+            RecipeIngredient(name="Pasta", source_ingredient_id="sid-pasta", position=2, amount=180, unit="grams", amount_g=180, canonical_unit="g"),
+            RecipeIngredient(name="Lentils", source_ingredient_id="sid-lentils", position=1, amount=1, unit="carton(s)", amount_g=250, canonical_unit="g"),
         ]
         italian.steps = [RecipeStep(index=1, instructions_text="Boil pasta")]
         italian.nutrition = [RecipeNutrition(name="Protein", amount=50, unit="g")]
@@ -67,8 +112,8 @@ def client(tmp_path):
         mexican.tags = [RecipeTag(name="HP", type="high-protein")]
         mexican.allergens = [RecipeAllergen(name="Cereals containing gluten")]
         mexican.ingredients = [
-            RecipeIngredient(name="Chicken Breast", amount=250, unit="grams", amount_g=250),
-            RecipeIngredient(name="Taco Tortillas", amount=6, unit="unit(s)"),
+            RecipeIngredient(name="Chicken Breast", source_ingredient_id="sid-chicken", amount=250, unit="grams", amount_g=250),
+            RecipeIngredient(name="Taco Tortillas", source_ingredient_id="sid-tortillas", amount=6, unit="unit(s)"),
         ]
 
         uncurated = _make_recipe(source_id="c", name="Hidden", curated=0)
@@ -81,6 +126,8 @@ def client(tmp_path):
             yield session
 
     app.dependency_overrides[get_session] = _override
+    app.dependency_overrides[get_session_factory] = lambda: factory
+    app.dependency_overrides[get_planner_csv_path] = lambda: csv_path
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -150,9 +197,23 @@ def test_exclude_ingredient(client):
     assert data["items"][0]["name"] == "Creamy Veggie Pasta"
 
 
+def test_exclude_unmapped_recipes(client):
+    data = client.get("/api/recipes", params={"exclude": "unmapped"}).json()
+    assert data["total"] == 1
+    assert data["items"][0]["name"] == "Creamy Veggie Pasta"
+
+
 def test_sort_protein_high(client):
     items = client.get("/api/recipes", params={"sort": "protein_high"}).json()["items"]
     assert [i["protein_g"] for i in items] == [50, 30]
+
+
+def test_sort_by_intrinsic_price(client):
+    low = client.get("/api/recipes", params={"sort": "price_low"}).json()["items"]
+    high = client.get("/api/recipes", params={"sort": "price_high"}).json()["items"]
+    assert [i["name"] for i in low] == ["Creamy Veggie Pasta", "Spicy Chicken Tacos"]
+    assert [i["name"] for i in high] == ["Spicy Chicken Tacos", "Creamy Veggie Pasta"]
+    assert low[0]["intrinsic_score"] < low[1]["intrinsic_score"]
 
 
 def test_search_query(client):
@@ -180,6 +241,7 @@ def test_detail_shape_and_image(client):
     assert lentils["amount_g"] == 250
     assert lentils["canonical_unit"] == "g"
     assert detail["steps"][0]["text"] == "Boil pasta"
+    assert all(not i["unmapped"] for i in detail["ingredients"])
     assert detail["image_url"].startswith("https://img.hellofresh.com/")
     assert "w_1200" in detail["image_url"]
 
@@ -190,6 +252,13 @@ def test_detail_404_for_uncurated(client):
     assert hidden.status_code == 404
 
 
+def test_detail_flags_unmapped_ingredients(client):
+    rid = client.get("/api/recipes", params={"q": "taco"}).json()["items"][0]["id"]
+    detail = client.get(f"/api/recipes/{rid}").json()
+    unmapped = [i["name"] for i in detail["ingredients"] if i["unmapped"]]
+    assert unmapped == ["Taco Tortillas"]
+
+
 def test_facets(client):
     f = client.get("/api/facets").json()
     cuisine_labels = {c["label"] for c in f["cuisines"]}
@@ -198,10 +267,15 @@ def test_facets(client):
     assert "diets" in f and "attributes" in f and "proteins" in f and "excludes" in f
     # Excludes combine allergens (e.g. Milk) and ingredient groups (e.g. chicken).
     exclude_values = {e["value"] for e in f["excludes"]}
-    assert "Milk" in exclude_values and "chicken" in exclude_values
+    assert "Milk" in exclude_values and "chicken" in exclude_values and "unmapped" in exclude_values
     # Chicken appears as a protein facet (the Mexican recipe has it).
     assert any(p["value"] == "chicken" for p in f["proteins"])
-    assert {s["value"] for s in f["sorts"]} >= {"popular", "protein_ratio"}
+    assert {s["value"] for s in f["sorts"]} >= {
+        "popular",
+        "protein_ratio",
+        "price_low",
+        "price_high",
+    }
     assert set(f["ranges"].keys()) == {"kcal", "protein", "protein_ratio", "time"}
     # Diet facets are the derived column values.
     assert {d["value"] for d in f["diets"]} <= {

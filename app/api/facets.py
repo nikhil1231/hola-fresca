@@ -105,6 +105,8 @@ SORTS = {
     "protein_ratio": "Most protein per calorie",
     "kcal_low": "Fewest calories",
     "time_low": "Quickest",
+    "price_low": "Price: low to high",
+    "price_high": "Price: high to low",
     "newest": "Newest",
 }
 

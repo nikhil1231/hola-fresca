@@ -25,6 +25,8 @@ class RecipeCard(BaseModel):
     ratings_count: int | None = None
     cuisines: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    intrinsic_score: float | None = None
+    intrinsic_gap_count: int = 0
 
 
 class PaginatedRecipes(BaseModel):
@@ -43,6 +45,7 @@ class IngredientOut(BaseModel):
     amount_g: float | None = None
     canonical_unit: str | None = None
     image_url: str | None = None
+    unmapped: bool = False
 
 
 class StepOut(BaseModel):

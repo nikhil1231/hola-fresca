@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -55,6 +55,25 @@ function packsText(line) {
 
 function contributionIds(line) {
   return new Set((line?.contributions ?? []).map((contribution) => contribution.recipe_id))
+}
+
+function recipePortionPrices(lines, entries) {
+  const prices = new Map(entries.map((entry) => [entry.recipe.id, 0]))
+  for (const line of lines) {
+    if (!line.need_g || !line.cost || !line.contributions?.length) continue
+    for (const contribution of line.contributions) {
+      prices.set(
+        contribution.recipe_id,
+        (prices.get(contribution.recipe_id) ?? 0) + line.cost * (contribution.grams / line.need_g),
+      )
+    }
+  }
+  return new Map(
+    entries.map((entry) => [
+      entry.recipe.id,
+      (prices.get(entry.recipe.id) ?? 0) / Math.max(entry.portions, 1),
+    ]),
+  )
 }
 
 function Stat({ label, value, tone = 'default' }) {
@@ -260,6 +279,8 @@ export default function BasketPage() {
   const [activeLineKey, setActiveLineKey] = useState(null)
   const [hoverLineKey, setHoverLineKey] = useState(null)
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
+  const recipesScrollRef = useRef(null)
+  const recipeRefs = useRef(new Map())
 
   useEffect(() => {
     if (!weekStarts.includes(weekStart)) setWeekStart(upcomingWeekStart)
@@ -268,8 +289,23 @@ export default function BasketPage() {
   const entries = getWeekRecipes(weekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
   const { data, isLoading, isError, error } = usePlannerBasket(selections)
-  const onlineLines = data?.lines?.filter((line) => !line.external) ?? []
-  const externalLines = data?.lines?.filter((line) => line.external) ?? []
+  const onlineLines = useMemo(
+    () => data?.lines?.filter((line) => !line.external) ?? [],
+    [data?.lines],
+  )
+  const externalLines = useMemo(
+    () => data?.lines?.filter((line) => line.external) ?? [],
+    [data?.lines],
+  )
+  const recipePrices = useMemo(
+    () => recipePortionPrices(data?.lines ?? [], entries),
+    [data?.lines, entries],
+  )
+  const totalPortions = useMemo(
+    () => entries.reduce((total, entry) => total + entry.portions, 0),
+    [entries],
+  )
+  const basketPortionPrice = totalPortions > 0 ? (data?.cost ?? 0) / totalPortions : 0
   const selectedLineKey = hoverLineKey ?? activeLineKey
   const allLines = useMemo(
     () => [
@@ -290,8 +326,36 @@ export default function BasketPage() {
     setHoverRecipeId(null)
   }, [weekStart, selections])
 
+  useEffect(() => {
+    if (!hoverLineKey || selectedRecipeIds.size === 0) return undefined
+    const recipeId = selectedRecipeIds.values().next().value
+    const handle = window.setTimeout(() => {
+      const container = recipesScrollRef.current
+      const node = recipeRefs.current.get(recipeId)
+      if (!container || !node) return
+
+      const containerRect = container.getBoundingClientRect()
+      const nodeRect = node.getBoundingClientRect()
+      const buffer = 32
+      const topDelta = nodeRect.top - containerRect.top
+      const bottomDelta = nodeRect.bottom - containerRect.bottom
+      if (topDelta < buffer) {
+        container.scrollTo({
+          top: container.scrollTop + topDelta - buffer,
+          behavior: 'smooth',
+        })
+      } else if (bottomDelta > -buffer) {
+        container.scrollTo({
+          top: container.scrollTop + bottomDelta + buffer,
+          behavior: 'smooth',
+        })
+      }
+    }, 280)
+    return () => window.clearTimeout(handle)
+  }, [hoverLineKey, selectedRecipeIds])
+
   return (
-    <Stack gap="xl">
+    <Stack gap="xl" className={classes.pageStack}>
       <Group justify="space-between" align="flex-end">
         <div>
           <Group gap="xs">
@@ -313,7 +377,7 @@ export default function BasketPage() {
 
       <Box className={classes.weekLayout}>
         <Box className={classes.recipesPanel}>
-          <Group justify="space-between" mb="md">
+          <Group justify="space-between" mb="lg">
             <Title order={3} className={classes.sectionTitle}>
               Recipes
             </Title>
@@ -329,26 +393,34 @@ export default function BasketPage() {
               </Text>
             </Box>
           ) : (
-            <SimpleGrid cols={{ base: 1, xs: 2, md: 1 }} spacing="md">
-              {entries.map((entry) => (
-                <Box
-                  key={entry.recipe.id}
-                  onMouseEnter={() => setHoverRecipeId(entry.recipe.id)}
-                  onMouseLeave={() => setHoverRecipeId(null)}
-                >
-                  <RecipeCard
-                    recipe={entry.recipe}
-                    highlighted={selectedRecipeIds.has(entry.recipe.id)}
-                    plannerEntry={entry}
-                    plannerControlsVisible
-                    onRemoveFromPlan={() => removeRecipeFromWeek(weekStart, entry.recipe.id)}
-                    onPortionsChange={(portions) =>
-                      setRecipePortions(weekStart, entry.recipe.id, portions)
-                    }
-                  />
-                </Box>
-              ))}
-            </SimpleGrid>
+            <Box className={classes.recipesScroll} ref={recipesScrollRef}>
+              <SimpleGrid cols={{ base: 1, xs: 2, md: 1 }} spacing="lg">
+                {entries.map((entry) => (
+                  <Box
+                    key={entry.recipe.id}
+                    ref={(node) => {
+                      if (node) recipeRefs.current.set(entry.recipe.id, node)
+                      else recipeRefs.current.delete(entry.recipe.id)
+                    }}
+                    className={classes.compactRecipeTile}
+                    onMouseEnter={() => setHoverRecipeId(entry.recipe.id)}
+                    onMouseLeave={() => setHoverRecipeId(null)}
+                  >
+                    <RecipeCard
+                      recipe={entry.recipe}
+                      basketBadgeLabel={`${formatMoney(recipePrices.get(entry.recipe.id))} pp`}
+                      highlighted={selectedRecipeIds.has(entry.recipe.id)}
+                      plannerEntry={entry}
+                      plannerControlsVisible
+                      onRemoveFromPlan={() => removeRecipeFromWeek(weekStart, entry.recipe.id)}
+                      onPortionsChange={(portions) =>
+                        setRecipePortions(weekStart, entry.recipe.id, portions)
+                      }
+                    />
+                  </Box>
+                ))}
+              </SimpleGrid>
+            </Box>
           )}
         </Box>
 
@@ -369,24 +441,31 @@ export default function BasketPage() {
               <Loader color="fresh" />
             </Group>
           ) : (
-            <Stack gap="lg">
+            <>
               <Box className={classes.statsGrid}>
                 <Stat label="Spend" value={formatMoney(data.cost)} tone="spend" />
                 <Stat label="Waste" value={formatMoney(data.waste_gbp)} />
                 <Stat label="Score" value={formatMoney(data.score)} />
-                <Stat label="Untracked" value={data.untracked_lines.toLocaleString()} />
+                <Stat label="Portion price" value={formatMoney(basketPortionPrice)} />
               </Box>
 
               {data.unmapped.length > 0 && (
                 <Alert
                   color="yellow"
-                  variant="light"
+                  variant="outline"
                   title="Unmapped ingredients"
                   icon={<IconAlertTriangle size={18} />}
+                  className={classes.unmappedAlert}
                 >
                   <Group gap={6}>
                     {data.unmapped.map((name) => (
-                      <Badge key={name} color="yellow" variant="light" radius="sm">
+                      <Badge
+                        key={name}
+                        color="yellow"
+                        variant="outline"
+                        radius="sm"
+                        className={classes.warningBadge}
+                      >
                         {name}
                       </Badge>
                     ))}
@@ -394,46 +473,48 @@ export default function BasketPage() {
                 </Alert>
               )}
 
-              {entries.length === 0 ? (
-                <Box className={classes.emptyState}>
-                  <Text fw={700}>No basket yet</Text>
-                  <Text size="sm" c="dimmed">
-                    Upcoming week selections appear here.
-                  </Text>
-                </Box>
-              ) : (
-                <>
-                  <LineTable
-                    title="Online order"
-                    icon={<IconBuildingStore size={20} className={classes.sectionIcon} />}
-                    lines={onlineLines}
-                    openLineKey={openLineKey}
-                    setOpenLineKey={setOpenLineKey}
-                    tableId="online"
-                    hoverRecipeId={hoverRecipeId}
-                    selectedLineKey={selectedLineKey}
-                    setActiveLineKey={setActiveLineKey}
-                    setHoverLineKey={setHoverLineKey}
-                  />
-                  <LineTable
-                    title="Source elsewhere"
-                    icon={<IconHome size={20} className={classes.sectionIcon} />}
-                    lines={externalLines}
-                    openLineKey={openLineKey}
-                    setOpenLineKey={setOpenLineKey}
-                    tableId="external"
-                    hoverRecipeId={hoverRecipeId}
-                    selectedLineKey={selectedLineKey}
-                    setActiveLineKey={setActiveLineKey}
-                    setHoverLineKey={setHoverLineKey}
-                  />
-                  <Box className={classes.bucketGrid}>
-                    <NameList title="Pantry staples" names={data.staples} muted />
-                    <NameList title="Mapped, not priceable" names={data.unpriceable} />
+              <Stack gap="lg" className={classes.basketScroll}>
+                {entries.length === 0 ? (
+                  <Box className={classes.emptyState}>
+                    <Text fw={700}>No basket yet</Text>
+                    <Text size="sm" c="dimmed">
+                      Upcoming week selections appear here.
+                    </Text>
                   </Box>
-                </>
-              )}
-            </Stack>
+                ) : (
+                  <>
+                    <LineTable
+                      title="Online order"
+                      icon={<IconBuildingStore size={20} className={classes.sectionIcon} />}
+                      lines={onlineLines}
+                      openLineKey={openLineKey}
+                      setOpenLineKey={setOpenLineKey}
+                      tableId="online"
+                      hoverRecipeId={hoverRecipeId}
+                      selectedLineKey={selectedLineKey}
+                      setActiveLineKey={setActiveLineKey}
+                      setHoverLineKey={setHoverLineKey}
+                    />
+                    <LineTable
+                      title="Source elsewhere"
+                      icon={<IconHome size={20} className={classes.sectionIcon} />}
+                      lines={externalLines}
+                      openLineKey={openLineKey}
+                      setOpenLineKey={setOpenLineKey}
+                      tableId="external"
+                      hoverRecipeId={hoverRecipeId}
+                      selectedLineKey={selectedLineKey}
+                      setActiveLineKey={setActiveLineKey}
+                      setHoverLineKey={setHoverLineKey}
+                    />
+                    <Box className={classes.bucketGrid}>
+                      <NameList title="Pantry staples" names={data.staples} muted />
+                      <NameList title="Mapped, not priceable" names={data.unpriceable} />
+                    </Box>
+                  </>
+                )}
+              </Stack>
+            </>
           )}
         </Box>
       </Box>
