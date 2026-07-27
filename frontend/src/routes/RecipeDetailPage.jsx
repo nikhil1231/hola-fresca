@@ -86,6 +86,12 @@ function unitLabel(unit, n) {
 
 // Format one ingredient at the chosen scale: grams primary, native count in
 // parentheses when the source unit is a count/container (e.g. "375g (1.5 carton)").
+function hasDisplayQuantity(ing) {
+  if (ing.amount != null && ing.amount <= 0) return false
+  if (ing.amount_g != null && ing.amount_g <= 0) return false
+  return ing.amount != null || ing.amount_g != null
+}
+
 function scaledQuantity(ing, factor) {
   const parts = []
   if (ing.amount && SPOON_UNITS.includes(ing.unit)) {
@@ -93,16 +99,20 @@ function scaledQuantity(ing, factor) {
     if (n <= MAX_SPOONS) return `${formatCount(n)} ${unitLabel(ing.unit, n)}`
   }
   if (ing.amount_g != null) {
-    parts.push(`${roundNice(ing.amount_g * factor)}${ing.canonical_unit || 'g'}`)
+    const metricAmount = roundNice(ing.amount_g * factor)
+    if (metricAmount > 0) parts.push(`${metricAmount}${ing.canonical_unit || 'g'}`)
   }
   const nativeIsCount =
     ing.unit && !METRIC_UNITS.includes(ing.unit) && !SPOON_UNITS.includes(ing.unit)
   if (ing.amount != null && nativeIsCount) {
     const n = roundCount(ing.amount * factor)
-    const label = `${formatCount(n)} ${unitLabel(ing.unit, n)}`
-    parts.push(parts.length ? `(${label})` : label)
+    if (n > 0) {
+      const label = `${formatCount(n)} ${unitLabel(ing.unit, n)}`
+      parts.push(parts.length ? `(${label})` : label)
+    }
   } else if (ing.amount_g == null && ing.amount != null) {
-    parts.push(String(Math.round(ing.amount * factor * 100) / 100))
+    const amount = Math.round(ing.amount * factor * 100) / 100
+    if (amount > 0) parts.push(String(amount))
   }
   return parts.join(' ')
 }
@@ -448,39 +458,44 @@ export default function RecipeDetailPage() {
               />
             </div>
             <Stack gap="xs">
-              {recipe.ingredients.map((ing, i) => (
-                <Group key={i} gap="sm" wrap="nowrap" align="flex-start">
-                  {ing.image_url && (
-                    <Image src={ing.image_url} w={36} h={36} radius="sm" className={classes.ingImg} />
-                  )}
-                  <Text size="sm">
-                    <Text span fw={600}>
-                      {scaledQuantity(ing, factor)}{' '}
-                    </Text>
-                    {ing.name}
-                    {ing.unmapped && (
-                      <Tooltip label="Not mapped to a basket product" withArrow>
-                        <ThemeIcon
-                          component="span"
-                          variant="light"
-                          color="yellow"
-                          size="sm"
-                          radius="xl"
-                          className={classes.ingredientWarning}
-                          data-darkreader-ignore="true"
-                          style={{
-                            backgroundColor: 'rgb(255, 243, 191)',
-                            color: 'rgb(124, 77, 0)',
-                          }}
-                          aria-label="Unmapped ingredient"
-                        >
-                          <IconAlertTriangle size={13} />
-                        </ThemeIcon>
-                      </Tooltip>
+              {recipe.ingredients.filter(hasDisplayQuantity).map((ing, i) => {
+                const quantity = scaledQuantity(ing, factor)
+                return (
+                  <Group key={i} gap="sm" wrap="nowrap" align="flex-start">
+                    {ing.image_url && (
+                      <Image src={ing.image_url} w={36} h={36} radius="sm" className={classes.ingImg} />
                     )}
-                  </Text>
-                </Group>
-              ))}
+                    <Text size="sm">
+                      {quantity && (
+                        <Text span fw={600}>
+                          {quantity}{' '}
+                        </Text>
+                      )}
+                      {ing.name}
+                      {ing.unmapped && (
+                        <Tooltip label="Not mapped to a basket product" withArrow>
+                          <ThemeIcon
+                            component="span"
+                            variant="light"
+                            color="yellow"
+                            size="sm"
+                            radius="xl"
+                            className={classes.ingredientWarning}
+                            data-darkreader-ignore="true"
+                            style={{
+                              backgroundColor: 'rgb(255, 243, 191)',
+                              color: 'rgb(124, 77, 0)',
+                            }}
+                            aria-label="Unmapped ingredient"
+                          >
+                            <IconAlertTriangle size={13} />
+                          </ThemeIcon>
+                        </Tooltip>
+                      )}
+                    </Text>
+                  </Group>
+                )
+              })}
             </Stack>
 
             {recipe.allergens.length > 0 && (

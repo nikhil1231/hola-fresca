@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
@@ -60,6 +61,8 @@ const pageFiles = {
   mappingManual: [
     'frontend/src/routes/MappingManualPage.jsx',
     'frontend/src/components/ManualProductForm.jsx',
+    'frontend/src/components/RecipeCard.jsx',
+    'frontend/src/components/RecipeCard.module.css',
     'frontend/src/hooks/useMappingQueries.js',
     'frontend/src/api/mappingClient.js',
   ],
@@ -67,6 +70,8 @@ const pageFiles = {
     'frontend/src/routes/MappingReviewPage.jsx',
     'frontend/src/routes/MappingReviewPage.module.css',
     'frontend/src/components/ManualProductForm.jsx',
+    'frontend/src/components/RecipeCard.jsx',
+    'frontend/src/components/RecipeCard.module.css',
     'frontend/src/hooks/useMappingQueries.js',
     'frontend/src/api/mappingClient.js',
   ],
@@ -87,12 +92,33 @@ function gitLastCommit(paths) {
   }
 }
 
+function latestFileMtime(paths) {
+  const times = paths
+    .map((file) => {
+      try {
+        return fs.statSync(path.resolve(repoRoot, file)).mtimeMs
+      } catch {
+        return 0
+      }
+    })
+    .filter(Boolean)
+
+  return times.length ? Math.max(...times) : 0
+}
+
+function pageLastUpdated(files) {
+  const paths = [...sharedPageFiles, ...files]
+  const gitMeta = gitLastCommit(paths)
+  const committedMs = gitMeta?.committedAt ? new Date(gitMeta.committedAt).getTime() : 0
+  const mtimeMs = latestFileMtime(paths)
+  const updatedMs = Math.max(committedMs, mtimeMs)
+
+  return updatedMs ? { committedAt: new Date(updatedMs).toISOString(), shortSha: gitMeta?.shortSha } : null
+}
+
 function getPageLastUpdated() {
   return Object.fromEntries(
-    Object.entries(pageFiles).map(([page, files]) => [
-      page,
-      gitLastCommit([...sharedPageFiles, ...files]),
-    ]),
+    Object.entries(pageFiles).map(([page, files]) => [page, pageLastUpdated(files)]),
   )
 }
 

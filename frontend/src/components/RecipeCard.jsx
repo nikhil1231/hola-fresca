@@ -192,6 +192,7 @@ export default function RecipeCard({
   onAddToPlan,
   onPortionsChange,
   onRemoveFromPlan,
+  showStats = true,
 }) {
   const basketBadge =
     basketBadgeLabel ?? formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable)
@@ -278,7 +279,8 @@ export default function RecipeCard({
             )}
           </div>
 
-          <div className={classes.stats}>
+          {showStats && (
+            <div className={classes.stats}>
             <div className={classes.statRow}>
               <StatSlot>
                 {recipe.energy_kcal != null && (
@@ -310,7 +312,8 @@ export default function RecipeCard({
                 )}
               </StatSlot>
             </div>
-          </div>
+            </div>
+          )}
         </Stack>
       </Link>
 

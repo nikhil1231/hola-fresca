@@ -99,6 +99,7 @@ def client(tmp_path):
         italian.ingredients = [
             RecipeIngredient(name="Pasta", source_ingredient_id="sid-pasta", position=2, amount=180, unit="grams", amount_g=180, canonical_unit="g"),
             RecipeIngredient(name="Lentils", source_ingredient_id="sid-lentils", position=1, amount=1, unit="carton(s)", amount_g=250, canonical_unit="g"),
+            RecipeIngredient(name="Placeholder Spice", source_ingredient_id="sid-spice", position=3, amount=0, unit="sachet(s)", amount_g=0, canonical_unit="g"),
         ]
         italian.steps = [RecipeStep(index=1, instructions_text="Boil pasta")]
         italian.nutrition = [RecipeNutrition(name="Protein", amount=50, unit="g")]
@@ -236,6 +237,7 @@ def test_detail_shape_and_image(client):
     detail = client.get(f"/api/recipes/{rid}").json()
     assert detail["name"] == "Creamy Veggie Pasta"
     assert [i["name"] for i in detail["ingredients"]] == ["Lentils", "Pasta"]
+    assert "Placeholder Spice" not in [i["name"] for i in detail["ingredients"]]
     # Canonical grams flow through, incl. the count->grams conversion.
     lentils = next(i for i in detail["ingredients"] if i["name"] == "Lentils")
     assert lentils["amount_g"] == 250

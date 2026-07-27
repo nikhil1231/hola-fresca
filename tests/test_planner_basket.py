@@ -290,3 +290,45 @@ def test_unmapped_ingredients_are_listed_not_silently_dropped(factory, tmp_path)
     result = B.build_basket(index, [B.Selection(rid)])
     assert result.unmapped == ["Basmati Rice"]
     assert result.cost == 0.0
+
+
+def test_zero_amount_recipe_lines_do_not_become_planner_gaps(factory, tmp_path):
+    csv_path = write_freq_csv(
+        tmp_path / "freq.csv",
+        [
+            (KEY_RICE, SID_RICE, "Basmati Rice"),
+            ("name:ghost spice", "sid-ghost", "Ghost Spice"),
+        ],
+    )
+    with factory() as s:
+        seed_candidates(s, KEY_RICE, "Basmati Rice", RICE)
+        service.save_decision(
+            s,
+            gather_candidates(s, KEY_RICE),
+            service.DecisionInput(
+                status="approved", accepted=[service.AcceptedInput(sku="rice1", rank=1)]
+            ),
+        )
+        recipe = Recipe(
+            source="hellofresh", source_id="r-zero", url="", name="Rice With Ghost", curated=1,
+            base_yield=2,
+            ingredients=[
+                RecipeIngredient(name="Basmati Rice", source_ingredient_id=SID_RICE,
+                                 amount=150, unit="grams", amount_g=150),
+                RecipeIngredient(name="Ghost Spice", source_ingredient_id="sid-ghost",
+                                 amount=0, unit="sachet(s)", amount_g=0),
+            ],
+        )
+        s.add(recipe)
+        s.commit()
+        rid = recipe.id
+
+    index = load_index(factory, csv_path=csv_path)
+    plan_recipe = index.recipes[rid]
+    assert [need.display_name for need in plan_recipe.needs] == ["Basmati Rice"]
+    assert plan_recipe.untracked_lines == 0
+
+    result = B.build_basket(index, [B.Selection(rid)])
+    assert result.unmapped == []
+    assert result.untracked_lines == 0
+    assert B.basket_gap_count(result) == 0

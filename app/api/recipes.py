@@ -206,6 +206,8 @@ def _unmapped_ingredient_ids(
     by_key = {row.ingredient_key: row for row in mapping_rows}
     unmapped: set[int] = set()
     for ingredient in ingredients:
+        if not _has_display_quantity(ingredient):
+            continue
         raw_key = sid_index.get(ingredient.source_ingredient_id or "")
         if raw_key is None:
             unmapped.add(ingredient.id)
@@ -215,6 +217,16 @@ def _unmapped_ingredient_ids(
         if row is None or row.status != "approved":
             unmapped.add(ingredient.id)
     return unmapped
+
+
+def _has_display_quantity(ingredient: RecipeIngredient) -> bool:
+    # Keep the persisted source row intact, but do not present HelloFresh's
+    # zero-amount placeholders as recipe ingredients.
+    if ingredient.amount is not None and ingredient.amount <= 0:
+        return False
+    if ingredient.amount_g is not None and ingredient.amount_g <= 0:
+        return False
+    return ingredient.amount is not None or ingredient.amount_g is not None
 
 
 def _unmapped_recipe_ids(session: Session, csv_path: Path | None) -> set[int]:
@@ -241,6 +253,8 @@ def _unmapped_recipe_ids(session: Session, csv_path: Path | None) -> set[int]:
                     RecipeIngredient.source_ingredient_id.is_(None),
                     RecipeIngredient.source_ingredient_id.not_in(approved_source_ids),
                 ),
+                or_(RecipeIngredient.amount.is_(None), RecipeIngredient.amount > 0),
+                or_(RecipeIngredient.amount_g.is_(None), RecipeIngredient.amount_g > 0),
             )
             .distinct()
         )
@@ -361,10 +375,14 @@ def get_recipe(
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     steps = sorted(recipe.steps, key=lambda s: s.index)
-    ingredients = sorted(
-        recipe.ingredients,
-        key=lambda i: (i.position is None, i.position or 0, i.id),
-    )
+    ingredients = [
+        ingredient
+        for ingredient in sorted(
+            recipe.ingredients,
+            key=lambda i: (i.position is None, i.position or 0, i.id),
+        )
+        if _has_display_quantity(ingredient)
+    ]
     unmapped_ingredient_ids = _unmapped_ingredient_ids(session, ingredients, csv_path)
     return RecipeDetail(
         id=recipe.id,

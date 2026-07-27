@@ -320,6 +320,7 @@ class MappingCandidateOut(BaseModel):
 class MappingDetailOut(BaseModel):
     ingredient_key: str
     name: str
+    ingredient_icon_url: str | None = None
     status: str | None = None
     line_count: int
     spend_score: float | None = None
@@ -334,6 +335,7 @@ class MappingDetailOut(BaseModel):
     llm_notes: str | None = None
     reviewer_notes: str | None = None
     usage: dict = Field(default_factory=dict)
+    example_recipes: list[RecipeCard] = Field(default_factory=list)
     candidates: list[MappingCandidateOut] = Field(default_factory=list)
 
 

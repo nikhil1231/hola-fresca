@@ -268,6 +268,15 @@ def _load_recipes(
         names: dict[str, str] = {}
         untracked = 0
         for line in recipe.ingredients:
+            # HelloFresh uses zero-amount rows both for no-quantity pantry items
+            # and for reformulation leftovers. They are source-faithful rows, but
+            # not demand: skip them before they can become unmapped, trace, or
+            # unit-space basket lines.
+            if line.amount is not None and line.amount <= 0:
+                continue
+            if line.amount_g is not None and line.amount_g <= 0:
+                continue
+
             raw_key = sid_index.get(line.source_ingredient_id or "")
             if not raw_key:
                 untracked += 1
@@ -280,7 +289,7 @@ def _load_recipes(
                 each = each_by_key.get(raw_key)
                 if each and line.amount:
                     amount_g = each * line.amount
-            if not amount_g:
+            if amount_g is None or amount_g <= 0:
                 untracked += 1
                 continue
             names.setdefault(key, line.name)
