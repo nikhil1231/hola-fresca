@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily HolaFresca backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+# The laptop is usually off at 03:00, so most runs will actually happen shortly
+# after the next boot. That is the point: without Persistent a missed window is
+# simply skipped, and a backup that only runs on machines left on overnight is
+# not a backup.
+Persistent=true
+RandomizedDelaySec=15min
+Unit=holafresca-backup.service
+
+[Install]
+WantedBy=timers.target

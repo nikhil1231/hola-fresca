@@ -1,0 +1,19 @@
+[Unit]
+Description=HolaFresca backup (mapping export + database snapshot)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Documents/Programming/AI/HolaFresca
+# Two ExecStart lines run in order and the unit fails if either does. The export
+# is cheap and refreshes exports/*.csv for git; the snapshot is the disaster
+# copy. Both open the database read-only, so a run can never damage what it is
+# protecting, and VACUUM INTO is safe while the app is serving on :8100.
+ExecStart=%h/Documents/Programming/AI/HolaFresca/.venv/bin/python -m app.backup export-mappings
+ExecStart=%h/Documents/Programming/AI/HolaFresca/.venv/bin/python -m app.backup snapshot
+# ~16 s of mostly-gzip on a 260 MB database. Yield to anything interactive
+# rather than stutter the machine if it fires while it is in use.
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target
