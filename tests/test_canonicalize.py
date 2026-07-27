@@ -25,7 +25,12 @@ from app.db.session import init_db, make_engine, make_session_factory
         ("British Chicken Breasts", 2, "unit(s)", 320.0, "g"),
         ("Ground Cumin", 1, "tsp", 5.0, "g"),
         ("Olive Oil", 2, "tbsp", 30.0, "g"),
-        ("Coriander", 1, "bunch(es)", 25.0, "g"),          # generic by_unit fallback
+        # Herb bunches are calibrated per name: the same herbs appear as plain
+        # gram lines elsewhere in the corpus and cluster at 8-10 g, well under
+        # the 25 g generic bunch default they used to fall back to.
+        ("Coriander", 1, "bunch(es)", 10.0, "g"),
+        ("Chives", 1, "bunch(es)", 8.0, "g"),
+        ("Lasagne Sheets", 1, "pack(s)", 250.0, "g"),      # generic by_unit fallback
     ],
 )
 def test_to_grams(name, amount, unit, expected_g, expected_unit):
