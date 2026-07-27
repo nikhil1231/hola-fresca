@@ -102,3 +102,69 @@
   --review-status-bg: #fee2e2;
   --review-status-color: #991b1b;
 }
+
+
+.summaryPanel {
+  background: #ffffff;
+}
+
+.summaryHeader {
+  padding-bottom: var(--mantine-spacing-md);
+  border-bottom: 1px solid var(--mantine-color-gray-2);
+}
+
+.identityGroup {
+  min-width: 0;
+}
+
+.ingredientIcon {
+  width: 78px;
+  height: 78px;
+  flex: 0 0 78px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--mantine-color-gray-2);
+  border-radius: var(--mantine-radius-md);
+  background: #f1f8f3;
+  color: var(--mantine-color-fresh-8);
+}
+
+.titleBlock {
+  min-width: 0;
+}
+
+.reviewGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.2fr) minmax(150px, 0.7fr) minmax(150px, max-content) minmax(180px, 0.8fr);
+  gap: var(--mantine-spacing-md);
+  padding-top: var(--mantine-spacing-md);
+}
+
+.reviewCell {
+  min-width: 0;
+}
+
+
+.optionCheckbox {
+  margin-top: 26px;
+}
+
+@media (max-width: 62em) {
+  .summaryHeader {
+    align-items: stretch;
+  }
+
+  .reviewGrid,
+  .optionsCell {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 36em) {
+  .ingredientIcon {
+    width: 58px;
+    height: 58px;
+    flex-basis: 58px;
+  }
+}

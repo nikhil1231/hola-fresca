@@ -6,6 +6,7 @@ from urllib.parse import quote
 import pytest
 from fastapi.testclient import TestClient
 
+from app.db.models import Recipe, RecipeCuisine, RecipeIngredient
 from tests.conftest import seed_candidates
 
 KEY = "name:chicken breast"
@@ -38,6 +39,28 @@ def client(factory, tmp_path, monkeypatch):
     main.app.dependency_overrides[get_session] = override
     with factory() as s:
         seed_candidates(s, KEY, "Chicken Breast", PRODUCTS, line_count=500)
+        recipe = Recipe(
+            source="hellofresh",
+            source_id="hf-chicken",
+            url="https://example.com/chicken",
+            name="Chicken Dinner",
+            headline="with greens",
+            curated=1,
+            is_complete=1,
+            image_path="/recipes/chicken.jpg",
+            avg_rating=4.7,
+            ratings_count=1200,
+        )
+        recipe.cuisines = [RecipeCuisine(name="British")]
+        recipe.ingredients = [
+            RecipeIngredient(
+                name="Chicken Breast",
+                source_ingredient_id="sid1",
+                image_path="/ingredients/chicken.jpg",
+            )
+        ]
+        s.add(recipe)
+        s.commit()
     yield TestClient(main.app)
     main.app.dependency_overrides.clear()
     mapping_api._usage_stats.cache_clear()
@@ -50,6 +73,8 @@ def test_detail_before_any_decision_lists_candidates(client):
     assert body["status"] is None
     assert len(body["candidates"]) == 2
     assert body["usage"]["median"] == 450
+    assert body["ingredient_icon_url"].startswith("https://img.hellofresh.com/")
+    assert body["example_recipes"][0]["name"] == "Chicken Dinner"
 
 
 def test_unknown_ingredient_returns_404(client):

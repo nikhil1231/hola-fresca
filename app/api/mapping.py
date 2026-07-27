@@ -10,7 +10,7 @@ from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_session
 from app.api.schemas import (
@@ -34,9 +34,16 @@ from app.api.schemas import (
     ManualProductOut,
     ManualResolveIn,
 )
-from app.db.models import IngredientMapping
+from app.db.models import IngredientMapping, Recipe, RecipeIngredient
 from app.mapping import service
-from app.mapping.candidates import UsageStats, gather_candidates, load_usage_stats
+from app.api.recipes import _to_card
+from app.media import image_url
+from app.mapping.candidates import (
+    UsageStats,
+    gather_candidates,
+    load_source_id_index,
+    load_usage_stats,
+)
 
 router = APIRouter(prefix="/api/mapping", tags=["mapping"])
 
@@ -44,6 +51,48 @@ router = APIRouter(prefix="/api/mapping", tags=["mapping"])
 @lru_cache(maxsize=1)
 def _usage_stats() -> dict[str, UsageStats]:
     return load_usage_stats()
+
+
+def _source_ids_for_key(key: str) -> list[str]:
+    return [
+        source_id
+        for source_id, mapped_key in load_source_id_index().items()
+        if mapped_key == key
+    ]
+
+
+def _ingredient_icon_url(session: Session, source_ids: list[str]) -> str | None:
+    if not source_ids:
+        return None
+    image_path = session.scalar(
+        select(RecipeIngredient.image_path)
+        .where(
+            RecipeIngredient.source_ingredient_id.in_(source_ids),
+            RecipeIngredient.image_path.is_not(None),
+        )
+        .order_by(RecipeIngredient.id.asc())
+        .limit(1)
+    )
+    return image_url(image_path, 160)
+
+
+def _example_recipes(session: Session, source_ids: list[str], limit: int = 4):
+    if not source_ids:
+        return []
+    rows = session.scalars(
+        select(Recipe)
+        .join(RecipeIngredient, RecipeIngredient.recipe_id == Recipe.id)
+        .where(Recipe.curated == 1, RecipeIngredient.source_ingredient_id.in_(source_ids))
+        .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
+        .order_by(
+            Recipe.ratings_count.desc().nullslast(),
+            Recipe.avg_rating.desc().nullslast(),
+            Recipe.id,
+        )
+        .distinct()
+        .limit(limit)
+    ).all()
+    return [_to_card(recipe) for recipe in rows]
 
 
 def _ic(session: Session, key: str):
@@ -107,6 +156,7 @@ def alias_options(
 @router.get("/ingredients/{key}", response_model=MappingDetailOut)
 def get_ingredient(key: str, session: Session = Depends(get_session)) -> MappingDetailOut:
     detail = service.get_detail(session, _ic(session, key))
+    source_ids = _source_ids_for_key(key)
     candidates = [
         MappingCandidateOut(
             **vars(v.candidate),
@@ -120,6 +170,7 @@ def get_ingredient(key: str, session: Session = Depends(get_session)) -> Mapping
     return MappingDetailOut(
         ingredient_key=detail.ingredient_key,
         name=detail.name,
+        ingredient_icon_url=_ingredient_icon_url(session, source_ids),
         status=detail.status,
         line_count=detail.line_count,
         spend_score=detail.spend_score,
@@ -134,6 +185,7 @@ def get_ingredient(key: str, session: Session = Depends(get_session)) -> Mapping
         llm_notes=detail.llm_notes,
         reviewer_notes=detail.reviewer_notes,
         usage=detail.usage,
+        example_recipes=_example_recipes(session, source_ids),
         candidates=candidates,
     )
 

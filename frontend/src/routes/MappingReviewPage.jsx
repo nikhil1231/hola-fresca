@@ -8,10 +8,12 @@ import {
   Button,
   Checkbox,
   Group,
+  Image,
   Loader,
   NumberInput,
   Paper,
   Select,
+  SimpleGrid,
   Stack,
   Table,
   Tabs,
@@ -23,6 +25,7 @@ import {
 
 import classes from './MappingReviewPage.module.css'
 import ManualProductForm from '../components/ManualProductForm.jsx'
+import RecipeCard from '../components/RecipeCard.jsx'
 
 import {
   useAliasOptions,
@@ -284,71 +287,105 @@ export default function MappingReviewPage() {
         </Group>
       </Group>
 
-      <Group justify="space-between" align="flex-start">
-        <div>
-          <Title order={2}>{data.name}</Title>
-          <Text c="dimmed" size="sm">
-            Used in {data.line_count.toLocaleString('en-GB')} recipe lines
-            {u.median != null && ` · typically ${u.median}${u.metric_unit ?? 'g'}`}
-            {u.p25 != null && u.p75 != null && ` (${u.p25}–${u.p75})`}
-          </Text>
-          {u.common_native_amounts && (
-            <Text c="dimmed" size="xs">
-              common amounts: {u.common_native_amounts}
-            </Text>
-          )}
-        </div>
-        <Group align="center" gap="sm">
-          {data.status && (
-            <Badge
-              className={`${classes.reviewStatus} ${STATUS_BADGE_CLASSES[data.status] ?? ''}`}
-              size="lg"
-              variant="light"
-              data-darkreader-ignore
-            >
-              {data.status.replace('_', ' ')}
-            </Badge>
-          )}
+      <Paper withBorder radius="md" p="md" className={classes.summaryPanel}>
+        <Group justify="space-between" align="flex-start" gap="lg" className={classes.summaryHeader}>
+          <Group align="flex-start" gap="md" wrap="nowrap" className={classes.identityGroup}>
+            <div className={classes.ingredientIcon}>
+              {data.ingredient_icon_url ? (
+                <Image src={data.ingredient_icon_url} alt="" fit="contain" h="100%" w="100%" />
+              ) : (
+                <Text fw={800} size="xl">{data.name.slice(0, 1).toUpperCase()}</Text>
+              )}
+            </div>
+            <div className={classes.titleBlock}>
+              <Group gap="xs" align="center">
+                <Title order={2}>{data.name}</Title>
+                {data.status && (
+                  <Badge
+                    className={`${classes.reviewStatus} ${STATUS_BADGE_CLASSES[data.status] ?? ''}`}
+                    size="lg"
+                    variant="light"
+                    data-darkreader-ignore
+                  >
+                    {data.status.replace('_', ' ')}
+                  </Badge>
+                )}
+              </Group>
+              <Text c="dimmed" size="sm">
+                Used in {data.line_count.toLocaleString('en-GB')} recipe lines
+                {u.median != null && ` - typically ${u.median}${u.metric_unit ?? 'g'}`}
+                {u.p25 != null && u.p75 != null && ` (${u.p25}-${u.p75})`}
+              </Text>
+              {u.common_native_amounts && (
+                <Text c="dimmed" size="xs">
+                  common amounts: {u.common_native_amounts}
+                </Text>
+              )}
+            </div>
+          </Group>
           {!isAlias && actionButtons()}
         </Group>
-      </Group>
+
+        <div className={classes.reviewGrid}>
+          <div className={classes.reviewCell}>
+            <Select
+              label="Same as another ingredient"
+              description="Link near-duplicates so they share one mapping."
+              placeholder="Not an alias"
+              data={aliasOptions}
+              value={data.alias_of}
+              onChange={(v) => alias.mutate(v)}
+              searchable
+              clearable
+              disabled={alias.isPending}
+            />
+            {isAlias && (
+              <Button
+                variant="default"
+                onClick={() => alias.mutate(null)}
+                loading={alias.isPending}
+                mt="xs"
+              >
+                Remove alias
+              </Button>
+            )}
+            {alias.isError && (
+              <Text size="xs" c="red" mt="xs">
+                {alias.error?.message}
+              </Text>
+            )}
+          </div>
+          <NumberInput
+            label="Grams per unit"
+            description="Blank when sold by weight."
+            value={eachToGrams}
+            onChange={setEachToGrams}
+            min={0}
+            disabled={isAlias}
+          />
+          <Checkbox
+            className={classes.optionCheckbox}
+            label="Needs substitution"
+            checked={needsSub}
+            disabled={isAlias}
+            onChange={(e) => setNeedsSub(e.currentTarget.checked)}
+          />
+          <Checkbox
+            className={classes.optionCheckbox}
+            label="Pantry staple"
+            description="Left out of the shopping basket."
+            checked={pantryStaple}
+            disabled={isAlias}
+            onChange={(e) => setPantryStaple(e.currentTarget.checked)}
+          />
+        </div>
+      </Paper>
 
       {save.isError && (
         <Alert color="red" variant="light" title="Couldn't save decision">
           {save.error?.message}
         </Alert>
       )}
-
-      <Paper withBorder radius="md" p="md">
-        <Group align="flex-end" gap="sm">
-          <Select
-            label="Same as another ingredient"
-            description="Link near-duplicates so they share one mapping and their demand is bought together."
-            placeholder="Not an alias"
-            data={aliasOptions}
-            value={data.alias_of}
-            onChange={(v) => alias.mutate(v)}
-            searchable
-            clearable
-            disabled={alias.isPending}
-            style={{ flex: 1 }}
-          />
-          {isAlias && (
-            <Button
-              variant="default"
-              onClick={() => alias.mutate(null)}
-              loading={alias.isPending}
-            >
-              Remove alias
-            </Button>
-          )}
-        </Group>
-        {alias.isError && (
-          <Text size="xs" c="red" mt="xs">
-            {alias.error?.message}
-          </Text>
-        )}
-      </Paper>
 
       {isAlias && (
         <Alert color="blue" variant="light" title="This ingredient is an alias">
@@ -361,11 +398,60 @@ export default function MappingReviewPage() {
         </Alert>
       )}
 
+      {data.example_recipes?.length > 0 && (
+        <Stack gap="sm">
+          <Group justify="space-between" align="baseline">
+            <Title order={3}>Example recipes</Title>
+            <Text size="sm" c="dimmed">
+              {data.example_recipes.length} examples
+            </Text>
+          </Group>
+          <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing="md">
+            {data.example_recipes.map((recipe) => (
+              <RecipeCard key={recipe.id} recipe={recipe} showStats={false} />
+            ))}
+          </SimpleGrid>
+        </Stack>
+      )}
+
       {data.llm_notes && (
         <Alert color="blue" variant="light" title={`Proposal note${data.model ? ` (${data.model})` : ''}`}>
           {data.llm_notes}
         </Alert>
       )}
+
+      <Paper withBorder radius="md" p="md">
+        <Group align="flex-end" gap="sm">
+          <TextInput
+            label="Ocado search term"
+            description="Reword and search again when the candidates miss."
+            value={term}
+            disabled={isAlias}
+            onChange={(e) => setTerm(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && term.trim()) research.mutate(term.trim())
+            }}
+            style={{ flex: 1 }}
+          />
+          <Button
+            onClick={() => research.mutate(term.trim())}
+            loading={research.isPending}
+            disabled={isAlias || !term.trim()}
+          >
+            Search Ocado
+          </Button>
+        </Group>
+        {research.isPending && (
+          <Text size="xs" c="dimmed" mt="xs">
+            Searching Ocado - this drives a real browser session, so it takes a few seconds.
+          </Text>
+        )}
+        {research.isError && (
+          <Text size="xs" c="red" mt="xs">
+            Search failed: {research.error?.message}
+          </Text>
+        )}
+      </Paper>
 
       <div
         style={
@@ -376,63 +462,7 @@ export default function MappingReviewPage() {
         aria-disabled={isAlias}
       >
         <Stack gap="lg">
-      <Paper withBorder radius="md" p="md">
-        <Group align="flex-end" gap="sm">
-          <TextInput
-            label="Ocado search term"
-            description="Not finding the right product? Reword and search again — results are added to the list below."
-            value={term}
-            onChange={(e) => setTerm(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && term.trim()) research.mutate(term.trim())
-            }}
-            style={{ flex: 1 }}
-          />
-          <Button
-            onClick={() => research.mutate(term.trim())}
-            loading={research.isPending}
-            disabled={!term.trim()}
-          >
-            Search Ocado
-          </Button>
-        </Group>
-        {research.isPending && (
-          <Text size="xs" c="dimmed" mt="xs">
-            Searching Ocado — this drives a real browser session, so it takes a few seconds.
-          </Text>
-        )}
-        {research.isError && (
-          <Text size="xs" c="red" mt="xs">
-            Search failed: {research.error?.message}
-          </Text>
-        )}
-      </Paper>
-
-      <Group>
-        <NumberInput
-          label="Grams per unit (for count-sold items)"
-          description="e.g. 1 lime ≈ 67g. Leave blank if sold by weight."
-          value={eachToGrams}
-          onChange={setEachToGrams}
-          min={0}
-          w={280}
-        />
-        <Checkbox
-          label="Needs substitution / no direct match"
-          checked={needsSub}
-          onChange={(e) => setNeedsSub(e.currentTarget.checked)}
-          mt="xl"
-        />
-        <Checkbox
-          label="Pantry staple (assume already owned)"
-          description="Kept mapped, but left out of the shopping basket."
-          checked={pantryStaple}
-          onChange={(e) => setPantryStaple(e.currentTarget.checked)}
-          mt="xl"
-        />
-      </Group>
-
-      {data.candidates.length === 0 && (
+          {data.candidates.length === 0 && (
         <Alert color="yellow" variant="light" title="No product candidates">
           Ocado returned nothing for this ingredient's name — common for HelloFresh-specific wording
           ("21 Day Aged British Sirloin Steaks"). Reword the search above to find real products, or
