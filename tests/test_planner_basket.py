@@ -332,3 +332,102 @@ def test_zero_amount_recipe_lines_do_not_become_planner_gaps(factory, tmp_path):
     assert result.unmapped == []
     assert result.untracked_lines == 0
     assert B.basket_gap_count(result) == 0
+
+
+# --------------------------------------------------------------------------
+# Unit-space covering
+# --------------------------------------------------------------------------
+
+def test_count_ingredient_covers_in_units_not_grams(factory, tmp_path):
+    key, sid = "name:basa fillets", "sid-basa"
+    csv_path = write_freq_csv(tmp_path / "freq.csv", [(key, sid, "Basa Fillets")])
+    with factory() as s:
+        seed_candidates(
+            s,
+            key,
+            "Basa Fillets",
+            [{
+                "sku": "basa-250", "name": "Ocado 2 Basa Fillets 250g", "price": 3.0,
+                "pack_raw": "250g", "pack_value": 250, "pack_unit": "g",
+            }],
+        )
+        service.save_decision(
+            s,
+            gather_candidates(s, key),
+            service.DecisionInput(
+                status="approved",
+                accepted=[service.AcceptedInput(sku="basa-250", rank=1)],
+            ),
+        )
+        recipe = Recipe(
+            source="hellofresh", source_id="basa", url="", name="Basa Tacos", curated=1,
+            base_yield=2,
+            ingredients=[
+                RecipeIngredient(
+                    name="Basa Fillets", source_ingredient_id=sid, amount=4,
+                    unit="unit(s)", amount_g=520,
+                ),
+            ],
+        )
+        s.add(recipe)
+        s.commit()
+        rid = recipe.id
+
+    index = load_index(factory, csv_path=csv_path)
+    result = B.build_basket(index, [B.Selection(rid)])
+    line = result.lines[0]
+    assert line.need_qty == pytest.approx(4)
+    assert line.cover.packs == 2
+    assert line.cover.capacity_qty == pytest.approx(4)
+    assert line.cover.leftover_qty == pytest.approx(0)
+
+
+def test_count_fractional_demands_snap_before_ceiling(factory, tmp_path):
+    key, sid = "name:onion", "sid-onion"
+    csv_path = write_freq_csv(tmp_path / "freq.csv", [(key, sid, "Onion")])
+    third = 0.3333333432674408
+    with factory() as s:
+        seed_candidates(
+            s,
+            key,
+            "Onion",
+            [{
+                "sku": "onion", "name": "Ocado Onion", "price": 0.5,
+                "pack_raw": "1 per pack", "pack_value": 1, "pack_unit": "each",
+            }],
+        )
+        service.save_decision(
+            s,
+            gather_candidates(s, key),
+            service.DecisionInput(
+                status="approved",
+                accepted=[service.AcceptedInput(sku="onion", rank=1)],
+            ),
+        )
+        recipe = Recipe(
+            source="hellofresh", source_id="onion", url="", name="Onion Trio", curated=1,
+            base_yield=2,
+            ingredients=[
+                RecipeIngredient(name="Onion", source_ingredient_id=sid, amount=third, unit="unit(s)", amount_g=36.666667),
+                RecipeIngredient(name="Onion", source_ingredient_id=sid, amount=third, unit="unit(s)", amount_g=36.666667),
+                RecipeIngredient(name="Onion", source_ingredient_id=sid, amount=third, unit="unit(s)", amount_g=36.666667),
+            ],
+        )
+        s.add(recipe)
+        s.commit()
+        rid = recipe.id
+
+    index = load_index(factory, csv_path=csv_path)
+    result = B.build_basket(index, [B.Selection(rid)])
+    line = result.lines[0]
+    assert line.need_qty == pytest.approx(1)
+    assert line.cover.packs == 1
+    assert line.cover.leftover_qty == pytest.approx(0)
+
+
+def test_consumed_cost_is_pack_pro_rata_not_whole_pack():
+    spice = pack(40, 2.0, salvage=0.85)
+    cover = B._cover_with_packs((spice,), need_g=2)
+    line = B.BasketLine(key="name:paprika", name="Paprika", need_g=2, cover=cover)
+    assert line.cost == pytest.approx(2.0)
+    assert line.consumed_cost == pytest.approx(0.10)

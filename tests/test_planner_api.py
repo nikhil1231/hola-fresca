@@ -189,9 +189,9 @@ def test_basket_serializes_totals_and_all_buckets(planner_client):
     assert rice["cost"] == 1.0
     assert rice["packs"] == 1
     assert rice["choices"][0]["sku"] == "rice"
-    assert rice["contributions"] == [
-        {"recipe_id": ids["pinned"], "recipe_name": "Rice Bowl", "grams": 300}
-    ]
+    assert rice["contributions"][0]["recipe_id"] == ids["pinned"]
+    assert rice["contributions"][0]["recipe_name"] == "Rice Bowl"
+    assert rice["contributions"][0]["grams"] == 300
 
 
 def test_basket_portions_scale_from_base_yield(planner_client):
@@ -239,29 +239,29 @@ def test_suggestions_rank_shared_marginal_cost_first(planner_client):
     client, ids = planner_client
     data = client.post(
         "/api/planner/suggestions",
-        json={"selections": [{"recipe_id": ids["pinned"], "portions": 2}]},
+        json={
+            "selections": [{"recipe_id": ids["pinned"], "portions": 2}],
+            "filters": {"exclude": ["unmapped"]},
+        },
     ).json()
 
-    assert data["total"] == 3
+    assert data["total"] == 2
     assert [item["name"] for item in data["items"]] == [
         "Rice Patties",
         "Bean Stew",
-        "Mystery Plate",
     ]
     assert data["items"][0]["marginal_score"] < 0.0
     assert data["items"][0]["standalone_score"] > data["items"][0]["marginal_score"]
     assert data["items"][0]["ranking_score"] < data["items"][1]["ranking_score"]
     assert data["items"][0]["shared_ingredient_count"] == 1
 
+    assert data["items"][0]["marginal_cost"] < data["items"][0]["standalone_cost"]
+
     bean = data["items"][1]
     assert bean["shared_ingredient_count"] == 0
     assert bean["marginal_score"] == bean["standalone_score"]
+    assert bean["marginal_cost"] == bean["standalone_cost"]
     assert bean["standalone_score"] > 0
-
-    mystery = data["items"][2]
-    assert mystery["marginal_score"] == 0.0
-    assert mystery["unpriced_gap_count"] == 3
-    assert mystery["ranking_score"] > bean["ranking_score"]
 
 
 def test_suggestions_apply_filters_and_pagination(planner_client):

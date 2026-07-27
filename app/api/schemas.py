@@ -26,6 +26,7 @@ class RecipeCard(BaseModel):
     cuisines: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     intrinsic_score: float | None = None
+    intrinsic_cost: float | None = None
     intrinsic_gap_count: int = 0
 
 
@@ -188,6 +189,8 @@ class BasketPackChoiceOut(BaseModel):
     pack_size_raw: str | None = None
     url: str | None = None
     capacity_g: float
+    capacity_qty: float | None = None
+    quantity_unit: str = "g"
     price: float
     count: int
     cost: float
@@ -199,14 +202,20 @@ class BasketContributionOut(BaseModel):
     recipe_id: int
     recipe_name: str
     grams: float
+    quantity: float | None = None
+    quantity_unit: str = "g"
 
 
 class BasketLineOut(BaseModel):
     key: str
     name: str
     need_g: float
+    need_qty: float | None = None
+    quantity_unit: str = "g"
     capacity_g: float | None = None
+    capacity_qty: float | None = None
     leftover_g: float | None = None
+    leftover_qty: float | None = None
     cost: float
     waste_gbp: float
     score: float
@@ -241,6 +250,8 @@ class RecipeSuggestionCard(RecipeCard):
     marginal_score: float | None = None
     standalone_score: float | None = None
     ranking_score: float | None = None
+    marginal_cost: float | None = None
+    standalone_cost: float | None = None
     unpriced_gap_count: int = 0
     shared_ingredient_count: int
     basket_available: bool = True

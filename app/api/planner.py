@@ -26,11 +26,11 @@ from app.planner.basket import (
     Selection,
     basket_gap_count,
     build_basket,
-    median_priced_line_cost,
 )
 from app.planner.index import PlanIndex, load_index
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
+assert SuggestionsIn.model_fields["candidate_portions"].default == 4
 
 
 def _planner_selection(body_selection) -> Selection:
@@ -72,6 +72,8 @@ def _line_out(line: BasketLine) -> BasketLineOut:
                 pack_size_raw=choice.pack.pack_size_raw,
                 url=choice.pack.url,
                 capacity_g=round(choice.pack.capacity_g, 1),
+                capacity_qty=round(choice.pack.capacity_qty, 3) if choice.pack.capacity_qty is not None else None,
+                quantity_unit=choice.pack.quantity_unit,
                 price=_round_money(choice.pack.price),
                 count=choice.count,
                 cost=_round_money(choice.cost),
@@ -84,8 +86,12 @@ def _line_out(line: BasketLine) -> BasketLineOut:
         key=line.key,
         name=line.name,
         need_g=line.need_g,
+        need_qty=line.need_qty,
+        quantity_unit=line.quantity_unit,
         capacity_g=round(cover.capacity_g, 1) if cover else None,
+        capacity_qty=round(cover.capacity_qty, 3) if cover and cover.capacity_qty is not None else None,
         leftover_g=round(cover.leftover_g, 1) if cover else None,
+        leftover_qty=round(cover.leftover_qty, 3) if cover and cover.leftover_qty is not None else None,
         cost=_round_money(line.cost),
         waste_gbp=_round_money(line.waste_gbp),
         score=_round_money(cover.score if cover else 0.0),
@@ -99,6 +105,8 @@ def _line_out(line: BasketLine) -> BasketLineOut:
                 recipe_id=contribution.recipe_id,
                 recipe_name=contribution.recipe_name,
                 grams=round(contribution.grams, 1),
+                quantity=round(contribution.quantity, 3) if contribution.quantity is not None else None,
+                quantity_unit=contribution.quantity_unit,
             )
             for contribution in line.contributions
         ],
@@ -172,10 +180,6 @@ def _recipe_keys(index: PlanIndex, recipe_id: int) -> set[str]:
     return {need.key for need in recipe.needs}
 
 
-def _rank_score(score: float, gaps: int, gap_cost: float) -> float:
-    return score + (gaps * gap_cost)
-
-
 @router.post("/suggestions", response_model=PlannerSuggestionsOut)
 def suggestions(
     body: SuggestionsIn,
@@ -194,7 +198,7 @@ def suggestions(
     pinned = [_planner_selection(selection) for selection in body.selections]
     base = build_basket(index, pinned) if pinned else Basket()
     base_score = base.score
-    gap_cost = median_priced_line_cost(index)
+    base_cost = base.cost
     base_keys: set[str] = set()
     for recipe_id in pinned_recipe_ids:
         base_keys.update(_recipe_keys(index, recipe_id))
@@ -207,7 +211,7 @@ def suggestions(
     for key in base_keys:
         overlapping_ids.update(recipes_by_key.get(key, set()))
 
-    scores: list[tuple[float, int, float | None, float | None, int, int, bool]] = []
+    scores: list[tuple[float, int, float | None, float | None, float | None, float | None, int, int, bool]] = []
     for recipe_id in candidate_ids:
         keys = _recipe_keys(index, recipe_id)
         candidate = Selection(recipe_id=recipe_id, servings=body.candidate_portions)
@@ -215,24 +219,30 @@ def suggestions(
         gaps = basket_gap_count(standalone_basket)
         basket_available = bool(keys) or gaps > 0
         if not basket_available:
-            scores.append((float("inf"), recipe_id, None, None, 0, 0, False))
+            scores.append((float("inf"), recipe_id, None, None, None, None, 0, 0, False))
             continue
         standalone = standalone_basket.score
-        standalone_rank = _rank_score(standalone, gaps, gap_cost)
+        standalone_cost = standalone_basket.cost
         shared = len(base_keys & keys)
         if recipe_id in overlapping_ids:
-            marginal = build_basket(index, [*pinned, candidate]).score - base_score
-            ranking = _rank_score(marginal, gaps, gap_cost)
+            with_candidate = build_basket(index, [*pinned, candidate])
+            marginal = with_candidate.score - base_score
+            marginal_cost = with_candidate.cost - base_cost
+            ranking = marginal
         else:
             marginal = standalone
-            ranking = standalone_rank
-        scores.append((ranking, recipe_id, marginal, standalone, gaps, shared, basket_available))
+            marginal_cost = standalone_cost
+            ranking = standalone
+        scores.append((
+            ranking, recipe_id, marginal, standalone, marginal_cost, standalone_cost,
+            gaps, shared, basket_available,
+        ))
 
     scores.sort(key=lambda item: (item[0], item[1]))
     total = len(scores)
     start = body.offset if body.offset is not None else (body.page - 1) * body.page_size
     page_scores = scores[start:start + body.page_size]
-    page_ids = [recipe_id for _, recipe_id, _, _, _, _, _ in page_scores]
+    page_ids = [recipe_id for _, recipe_id, _, _, _, _, _, _, _ in page_scores]
     by_id: dict[int, Recipe] = {}
     if page_ids:
         rows = session.scalars(
@@ -243,7 +253,10 @@ def suggestions(
         by_id = {recipe.id: recipe for recipe in rows}
 
     items = []
-    for ranking, recipe_id, marginal, standalone, gaps, shared, basket_available in page_scores:
+    for (
+        ranking, recipe_id, marginal, standalone, marginal_cost, standalone_cost,
+        gaps, shared, basket_available,
+    ) in page_scores:
         recipe = by_id.get(recipe_id)
         if recipe is None:
             continue
@@ -254,6 +267,8 @@ def suggestions(
                 marginal_score=_round_money(marginal) if basket_available else None,
                 standalone_score=_round_money(standalone) if standalone is not None else None,
                 ranking_score=_round_money(ranking) if basket_available else None,
+                marginal_cost=_round_money(marginal_cost) if marginal_cost is not None else None,
+                standalone_cost=_round_money(standalone_cost) if standalone_cost is not None else None,
                 unpriced_gap_count=gaps,
                 shared_ingredient_count=shared,
                 basket_available=basket_available,

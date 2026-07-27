@@ -46,6 +46,15 @@ function formatGrams(value) {
   return `${Math.round(value).toLocaleString()}g`
 }
 
+function formatQuantity(value, unit = 'g') {
+  if (value == null) return '-'
+  if (unit === 'unit') {
+    const rounded = Math.round(value * 100) / 100
+    return `${rounded.toLocaleString()} ${rounded === 1 ? 'unit' : 'units'}`
+  }
+  return formatGrams(value)
+}
+
 function packsText(line) {
   if (!line.choices?.length) return line.note ?? '-'
   return line.choices
@@ -60,11 +69,15 @@ function contributionIds(line) {
 function recipePortionPrices(lines, entries) {
   const prices = new Map(entries.map((entry) => [entry.recipe.id, 0]))
   for (const line of lines) {
-    if (!line.need_g || !line.cost || !line.contributions?.length) continue
+    const lineNeed = line.quantity_unit === 'unit' ? line.need_qty : line.need_g
+    if (!lineNeed || !line.cost || !line.contributions?.length) continue
     for (const contribution of line.contributions) {
+      const contributionNeed =
+        line.quantity_unit === 'unit' ? contribution.quantity : contribution.grams
+      if (!contributionNeed) continue
       prices.set(
         contribution.recipe_id,
-        (prices.get(contribution.recipe_id) ?? 0) + line.cost * (contribution.grams / line.need_g),
+        (prices.get(contribution.recipe_id) ?? 0) + line.cost * (contributionNeed / lineNeed),
       )
     }
   }
@@ -192,9 +205,9 @@ function LineTable({
                         </div>
                       </Group>
                     </Table.Td>
-                    <Table.Td>{formatGrams(line.need_g)}</Table.Td>
+                    <Table.Td>{formatQuantity(line.need_qty ?? line.need_g, line.quantity_unit)}</Table.Td>
                     <Table.Td>{packsText(line)}</Table.Td>
-                    <Table.Td>{formatGrams(line.leftover_g)}</Table.Td>
+                    <Table.Td>{formatQuantity(line.leftover_qty ?? line.leftover_g, line.quantity_unit)}</Table.Td>
                     <Table.Td>{formatMoney(line.cost)}</Table.Td>
                     <Table.Td>{formatMoney(line.waste_gbp)}</Table.Td>
                   </Table.Tr>
@@ -408,7 +421,7 @@ export default function BasketPage() {
                   >
                     <RecipeCard
                       recipe={entry.recipe}
-                      basketBadgeLabel={`${formatMoney(recipePrices.get(entry.recipe.id))} pp`}
+                      basketBadgeLabel={`${formatMoney(recipePrices.get(entry.recipe.id))} pp share`}
                       highlighted={selectedRecipeIds.has(entry.recipe.id)}
                       plannerEntry={entry}
                       plannerControlsVisible

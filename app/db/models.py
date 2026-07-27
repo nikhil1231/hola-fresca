@@ -412,6 +412,9 @@ class IngredientMapping(Base):
     # Grams per single unit, for ingredients the retailer sells by count
     # (e.g. 1 lime ~= 67 g). Null when the ingredient is sold/used by weight.
     each_to_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Planner quantity space: mass/volume continue through grams; count is
+    # covered as whole units and converted to grams only for display/context.
+    unit_kind: Mapped[str] = mapped_column(String(16), default="mass")
     # True when no candidate is a direct match and a substitution/composite is
     # needed (e.g. stock paste -> stock pot).
     needs_substitution: Mapped[bool] = mapped_column(Integer, default=0)

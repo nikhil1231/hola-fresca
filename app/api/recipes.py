@@ -136,6 +136,7 @@ def _to_card(
     r: Recipe,
     *,
     intrinsic_score: float | None = None,
+    intrinsic_cost: float | None = None,
     intrinsic_gap_count: int = 0,
 ) -> RecipeCard:
     # A derived diet chip (most specific first) plus source attribute chips.
@@ -160,6 +161,7 @@ def _to_card(
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in r.cuisines],
         tags=list(dict.fromkeys(chips)),  # dedupe, preserve order
         intrinsic_score=intrinsic_score,
+        intrinsic_cost=intrinsic_cost,
         intrinsic_gap_count=intrinsic_gap_count,
     )
 
@@ -168,15 +170,19 @@ def _intrinsic_prices(
     rows: list[Recipe] | list[int],
     factory: sessionmaker[Session],
     csv_path: Path | None,
-) -> dict[int, tuple[float, int]]:
+) -> dict[int, tuple[float, float, int]]:
     recipe_ids = [recipe if isinstance(recipe, int) else recipe.id for recipe in rows]
     if not recipe_ids:
         return {}
     index = load_index(factory, recipe_ids=recipe_ids, curated_only=False, csv_path=csv_path)
-    prices: dict[int, tuple[float, int]] = {}
+    prices: dict[int, tuple[float, float, int]] = {}
     for recipe_id in recipe_ids:
         basket = build_basket(index, [Selection(recipe_id=recipe_id, servings=INTRINSIC_PORTIONS)])
-        prices[recipe_id] = (_round_money(basket.score), basket_gap_count(basket))
+        prices[recipe_id] = (
+            _round_money(basket.score),
+            _round_money(basket.consumed_cost),
+            basket_gap_count(basket),
+        )
     return prices
 
 
@@ -310,9 +316,9 @@ def list_recipes(
         sorted_ids = sorted(
             candidate_ids,
             key=lambda recipe_id: (
-                -intrinsic.get(recipe_id, (float("inf"), 0))[0]
+                -intrinsic.get(recipe_id, (float("inf"), float("inf"), 0))[0]
                 if sort == "price_high"
-                else intrinsic.get(recipe_id, (float("inf"), 0))[0],
+                else intrinsic.get(recipe_id, (float("inf"), float("inf"), 0))[0],
                 recipe_id,
             ),
         )
@@ -347,8 +353,9 @@ def list_recipes(
     items = [
         _to_card(
             r,
-            intrinsic_score=intrinsic.get(r.id, (None, 0))[0],
-            intrinsic_gap_count=intrinsic.get(r.id, (None, 0))[1],
+            intrinsic_score=intrinsic.get(r.id, (None, None, 0))[0],
+            intrinsic_cost=intrinsic.get(r.id, (None, None, 0))[1],
+            intrinsic_gap_count=intrinsic.get(r.id, (None, None, 0))[2],
         )
         for r in rows
     ]

@@ -140,12 +140,18 @@ export default function BrowsePage() {
 
   function renderRecipeCard(recipe) {
     const plannerEntry = getRecipeEntry(recipe.id, upcomingWeekStart)
-    const perPortionScore =
-      bestFitActive && !plannerEntry && recipe.marginal_score != null
-        ? recipe.marginal_score / DEFAULT_PORTIONS
-        : !bestFitActive && !plannerEntry && recipe.intrinsic_score != null
-          ? recipe.intrinsic_score / DEFAULT_PORTIONS
-        : null
+    const perPortionCost =
+      bestFitActive && !plannerEntry && recipe.marginal_cost != null
+        ? recipe.marginal_cost / DEFAULT_PORTIONS
+        : !bestFitActive && !plannerEntry && recipe.intrinsic_cost != null
+          ? recipe.intrinsic_cost / DEFAULT_PORTIONS
+          : null
+    const basketBadgeLabel =
+      perPortionCost == null
+        ? null
+        : bestFitActive
+          ? `${formatSignedMoney(perPortionCost)} pp`
+          : `~${formatMoney(perPortionCost)} pp`
     const gapCount = bestFitActive
       ? recipe.unpriced_gap_count
       : recipe.intrinsic_gap_count
@@ -153,10 +159,8 @@ export default function BrowsePage() {
       <RecipeCard
         key={recipe.id}
         recipe={recipe}
-        basketBadgeLabel={
-          perPortionScore != null ? `${formatSignedMoney(perPortionScore)} pp` : null
-        }
-        marginalScore={bestFitActive && !plannerEntry ? recipe.marginal_score : null}
+        basketBadgeLabel={basketBadgeLabel}
+        marginalScore={bestFitActive && !plannerEntry ? recipe.marginal_cost : null}
         unpricedGapCount={!plannerEntry ? gapCount ?? 0 : 0}
         basketAvailable={bestFitActive && !plannerEntry ? recipe.basket_available : true}
         plannerEntry={plannerEntry}
