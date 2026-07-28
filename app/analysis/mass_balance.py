@@ -55,7 +55,7 @@ EXPORT_PATH = config.ROOT_DIR / "exports" / "gram_suggestions.csv"
 
 FIELDS = (
     "status", "ingredient", "unit", "current_g", "suggested_g", "multiplier",
-    "recipes", "mass_share", "note",
+    "recipes", "mass_share", "recipe_ratio", "artefact", "note",
 )
 
 
@@ -69,6 +69,10 @@ class Suggestion:
     mass_share: float
     # The corpus-wide ratio, which every ingredient inherits and none causes.
     baseline: float = 1.0
+    # Whole-recipe weight against stated serving weight, for the recipes this
+    # ingredient appears in. A cross-check on the headline figure: see `artefact`.
+    recipe_ratio: float = 1.0
+    corpus_recipe_ratio: float = 1.0
 
     @property
     def multiplier(self) -> float:
@@ -92,6 +96,25 @@ class Suggestion:
     def disagreement(self) -> float:
         return abs(self.multiplier - 1.0)
 
+    @property
+    def artefact(self) -> bool:
+        """True when the recipes containing this ingredient already weigh correctly.
+
+        The headline multiplier is derived from the *free* part of each recipe —
+        everything whose weight we inferred — after subtracting the source-stated
+        lines. That decomposition is noisier than it looks, and it can indict an
+        ingredient whose recipes add up perfectly well. Salmon Fillets was flagged
+        at 0.85 while its recipes sat at 0.99 against their stated serving weight,
+        which is not a wrong constant: there is no missing mass to explain.
+
+        Tomato Passata is the contrasting case, and the reason this check earns its
+        place: its recipes weigh 1.10 while the corpus sits at 0.97, so there
+        really is unexplained mass. Chopped Tomatoes shares the same 390 g carton
+        constant and sits at 0.98, which is what makes the passata reading
+        specific to passata rather than to the carton.
+        """
+        return abs(self.recipe_ratio - self.corpus_recipe_ratio) < 0.05
+
 
 def _load(conn: sqlite3.Connection):
     targets = {
@@ -104,6 +127,7 @@ def _load(conn: sqlite3.Connection):
     lines: dict[int, list[tuple[tuple[str, str], float]]] = {}
     anchored: dict[int, float] = {}
     per_unit: dict[tuple[str, str], float] = {}
+    whole: dict[int, float] = {}
     rows = conn.execute(
         "SELECT ri.recipe_id, ri.name, ri.unit, ri.amount, ri.amount_g "
         "FROM recipe_ingredients ri JOIN recipes r ON r.id = ri.recipe_id "
@@ -114,6 +138,7 @@ def _load(conn: sqlite3.Connection):
             continue
         if amount_g > MAX_PLAUSIBLE_LINE_G:
             continue
+        whole[rid] = whole.get(rid, 0.0) + amount_g
         if unit in METRIC_UNITS:
             # The source stated this one, so it is a fixed part of the equation.
             anchored[rid] = anchored.get(rid, 0.0) + amount_g
@@ -121,14 +146,14 @@ def _load(conn: sqlite3.Connection):
         key = (name, unit)
         lines.setdefault(rid, []).append((key, float(amount)))
         per_unit[key] = amount_g / amount
-    return targets, lines, anchored, per_unit
+    return targets, lines, anchored, per_unit, whole
 
 
 def suggestions(db_path: Path | None = None) -> tuple[list[Suggestion], float]:
     """Ranked disagreements between our constants and the stated serving weights."""
     db = db_path or config.DB_PATH
     with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
-        targets, lines, anchored, per_unit = _load(conn)
+        targets, lines, anchored, per_unit, whole = _load(conn)
 
     ratios: dict[int, float] = {}
     for rid, items in lines.items():
@@ -143,6 +168,8 @@ def suggestions(db_path: Path | None = None) -> tuple[list[Suggestion], float]:
             appears.setdefault(key, []).append(rid)
 
     baseline = median(ratios.values()) if ratios else 1.0
+    recipe_ratios = {r: whole[r] / targets[r] for r in whole if targets.get(r)}
+    corpus_recipe_ratio = median(recipe_ratios.values()) if recipe_ratios else 1.0
     out: list[Suggestion] = []
     for key, rids in appears.items():
         scored = [r for r in rids if r in ratios]
@@ -161,6 +188,10 @@ def suggestions(db_path: Path | None = None) -> tuple[list[Suggestion], float]:
             name=key[0], unit=key[1], current_g=per_unit[key],
             raw_multiplier=median(ratios[r] for r in scored),
             recipes=len(scored), mass_share=share, baseline=baseline,
+            recipe_ratio=median(
+                [recipe_ratios[r] for r in scored if r in recipe_ratios] or [corpus_recipe_ratio]
+            ),
+            corpus_recipe_ratio=corpus_recipe_ratio,
         )
         if candidate.disagreement >= MIN_DISAGREEMENT:
             out.append(candidate)
@@ -186,6 +217,7 @@ def write_csv(items: list[Suggestion], path: Path | None = None) -> Path:
             writer.writerow([
                 existing.get((s.name, s.unit), ""), s.name, s.unit,
                 round(s.current_g, 1), s.suggested_g, round(s.multiplier, 3),
-                s.recipes, f"{s.mass_share:.2f}", "",
+                s.recipes, f"{s.mass_share:.2f}", f"{s.recipe_ratio:.2f}",
+                "likely" if s.artefact else "", "",
             ])
     return target

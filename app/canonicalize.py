@@ -49,6 +49,10 @@ _MASS_UNITS = frozenset(_METRIC)
 # backfill_units tier 3. The observed corpus gap is wide: counts top out around
 # 6 (tomatoes, buns) and gram weights start around 10 (spices, nuts, cheese).
 _GRAMS_THRESHOLD = 10.0
+# Above this a small gram amount reads as a real weight rather than a stand-in
+# for "one of them": 5 g of sesame seeds is a garnish, 1 g of kalettes is not a
+# vegetable. Only the placeholder end gets the reference-table fallback.
+_PLACEHOLDER_MAX = 2.0
 _COUNT_UNIT = "unit(s)"
 # No dish calls for this many of a countable thing (the corpus tops out at 10
 # gyozas). Above it the unit word is wrong and the amount is really grams —
@@ -61,6 +65,10 @@ def _reference() -> dict:
     data = json.loads(_REFERENCE_PATH.read_text())
     return {
         "by_name": {k.lower(): float(v) for k, v in data["by_name"].items()},
+        "by_name_unit": {
+            k.lower(): {u: float(g) for u, g in units.items()}
+            for k, units in data.get("by_name_unit", {}).items()
+        },
         "by_keyword": [(k.lower(), float(v)) for k, v in data["by_keyword"]],
         "by_unit": {k: float(v) for k, v in data["by_unit"].items()},
         "unit_ceiling": {k: float(v) for k, v in data.get("unit_ceiling", {}).items()},
@@ -121,6 +129,13 @@ def _grams_per_unit(name: str, unit: str) -> float | None:
         return float(dose["grams"])
     ref = _reference()
     norm = normalize_name(name)
+    # A weight authored for one container, e.g. a 400 g tin of cherry tomatoes.
+    # Kept apart from the flat table because that one answers a different
+    # question — what one of these weighs — and conflating them made a stray
+    # "2 cherry tomatoes" worth 800 g.
+    scoped = ref["by_name_unit"].get(norm)
+    if scoped is not None and unit in scoped:
+        return scoped[unit]
     if norm in ref["by_name"]:
         return ref["by_name"][norm]
     ceiling = ref["unit_ceiling"].get(unit)
@@ -331,7 +346,18 @@ def repair_trace_amounts(session: Session) -> dict[str, int]:
         key = normalize_name(ing.name)
         portion = typical.get(key)
         if portion is None or support.get(key, 0) < _MIN_GRAM_EVIDENCE:
-            continue
+            # The corpus cannot vouch for this ingredient — Kalettes appears five
+            # times in total, so there is no median to trust. Fall back to what
+            # the reference says one whole item weighs, which is the same claim
+            # the placeholder is making. Restricted to amounts of one or two,
+            # because past that a small number is more likely a real weight than
+            # a stand-in, and to the flat by_name tier, which is the only one that
+            # means "one of these" rather than "one container of these".
+            if ing.amount is None or ing.amount > _PLACEHOLDER_MAX:
+                continue
+            portion = _reference()["by_name"].get(key)
+            if portion is None:
+                continue
         if ing.amount is None or ing.amount > _MAX_PORTION_MULTIPLE:
             continue
         ing.amount = round(ing.amount * portion, 1)

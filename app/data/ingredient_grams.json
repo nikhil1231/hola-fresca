@@ -5,18 +5,16 @@
     "apple": 150,
     "aubergine": 250,
     "avocado": 200,
+    "baby bok choy": 100,
     "baby cucumber": 100,
     "baby gem lettuce": 90,
     "baby leaves": 60,
     "baking potato": 220,
     "bao buns": 40,
-    "bay leaf": 1,
     "beansprouts": 150,
     "beef stock pot": 28,
-    "beef stock powder": 11,
     "beetroot": 120,
     "bell pepper": 160,
-    "biona chilli beans": 400,
     "black beans": 240,
     "boursin": 150,
     "braeburn apple": 150,
@@ -25,13 +23,13 @@
     "burger buns": 60,
     "butter beans": 240,
     "butternut squash": 550,
+    "button mushrooms": 150,
     "cannellini beans": 240,
     "carrot": 100,
     "cauliflower": 550,
+    "cavolo nero": 200,
     "celeriac": 500,
     "celery stick": 40,
-    "cherry tomatoes": 400,
-    "chicken stock powder": 11,
     "chickpeas": 240,
     "chilli": 15,
     "chinese rice vinegar": 15,
@@ -65,13 +63,11 @@
     "habanero sauce": 15,
     "iceberg lettuce": 400,
     "intense tomato": 80,
-    "jackfruit": 400,
     "jalape o chilli": 15,
     "kaffir lime leaf": 0.5,
+    "kalettes": 150,
     "ketchup": 30,
     "kiwi": 75,
-    "knorr chicken stock": 12,
-    "knorr vegetable stock": 12,
     "kumato tomato": 80,
     "leek": 150,
     "lemon": 90,
@@ -115,12 +111,12 @@
     "red kidney beans": 240,
     "red onion": 110,
     "red pepper": 160,
+    "red potato": 180,
     "romanesco": 400,
     "rosemary": 8,
     "sage": 8,
     "seville orange honey dressing": 30,
     "shallot": 40,
-    "skipjack tuna in water": 145,
     "small sweet potato": 150,
     "sour cream": 150,
     "spring onion": 15,
@@ -139,7 +135,6 @@
     "vegetable gyozas": 200,
     "vegetable spring rolls": 200,
     "vegetable stock pot": 12,
-    "vegetable stock powder": 11,
     "vine tomatoes": 90,
     "vivera plant quarter pounder burger": 113,
     "wholemeal bap": 70,
@@ -148,6 +143,38 @@
     "yellow bean sauce": 60,
     "yellow courgette": 200,
     "yellow pepper": 160
+  },
+  "by_name_unit": {
+    "cherry tomatoes": {
+      "tin(s)": 400
+    },
+    "biona chilli beans": {
+      "tin(s)": 400
+    },
+    "jackfruit": {
+      "tin(s)": 400
+    },
+    "skipjack tuna in water": {
+      "tin(s)": 145
+    },
+    "bay leaf": {
+      "pack(s)": 1
+    },
+    "chicken stock powder": {
+      "sachet(s)": 11
+    },
+    "vegetable stock powder": {
+      "sachet(s)": 11
+    },
+    "beef stock powder": {
+      "sachet(s)": 11
+    },
+    "knorr chicken stock": {
+      "pot(s)": 12
+    },
+    "knorr vegetable stock": {
+      "pot(s)": 12
+    }
   },
   "by_keyword": [
     [

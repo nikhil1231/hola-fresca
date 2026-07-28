@@ -44,16 +44,26 @@ def main(argv: list[str] | None = None) -> int:
             f"(divided out of every figure below — see the module docstring)"
         )
         print(
+            f"whole-recipe weights average {items[0].corpus_recipe_ratio:.2f} of stated "
+            f"serving weight; an ingredient whose own recipes match that has no missing "
+            f"mass to explain and is marked artefact?\n" if items else ""
+        )
+        print(
             f"{len(items)} ingredient(s) disagree by more than "
             f"{mass_balance.MIN_DISAGREEMENT:.0%}, at >={mass_balance.MIN_MASS_SHARE:.0%} "
             f"mass share and >={mass_balance.MIN_RECIPES} recipes\n"
         )
         if items:
-            print(f"  {'ingredient':<32}{'unit':<12}{'now':>7}{'->':>8}{'x':>7}{'n':>6}{'share':>7}")
+            print(
+                f"  {'ingredient':<32}{'unit':<12}{'now':>7}{'->':>8}{'x':>7}"
+                f"{'n':>6}{'share':>7}{'recipes':>9}"
+            )
         for s in items:
+            flag = "  artefact?" if s.artefact else ""
             print(
                 f"  {s.name[:30]:<32}{s.unit:<12}{s.current_g:>7.0f}"
                 f"{s.suggested_g:>8.0f}{s.multiplier:>7.2f}{s.recipes:>6}{s.mass_share:>7.0%}"
+                f"{s.recipe_ratio:>9.2f}{flag}"
             )
         if args.write:
             path = mass_balance.write_csv(items)
