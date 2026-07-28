@@ -29,6 +29,8 @@ import RecipeCard from '../components/RecipeCard.jsx'
 
 import {
   useAliasOptions,
+  useAttachCatalogueMatches,
+  useCatalogueStatus,
   useMappingDetail,
   useMappingList,
   useResolveWithManualProduct,
@@ -42,6 +44,21 @@ const MATCH_TYPES = [
   { value: 'substitute', label: 'substitute' },
   { value: 'form_differs', label: 'form differs' },
 ]
+
+// Who sells a candidate, in the order the tabs appear. Ocado is the online order;
+// everything after it is sourced separately and priced as an external line.
+const CATALOGUE_RETAILER = 'seasoned_pioneers'
+const RETAILER_TABS = [
+  { value: 'ocado', label: 'Ocado' },
+  { value: CATALOGUE_RETAILER, label: 'Seasoned Pioneers' },
+  { value: 'manual', label: 'Manual' },
+]
+const EMPTY_CANDIDATES = {
+  ocado: 'No Ocado candidates for this ingredient.',
+  [CATALOGUE_RETAILER]:
+    'No Seasoned Pioneers matches yet — use "Match catalogue" to score their spice range against this ingredient.',
+  manual: 'No hand-entered products for this ingredient yet.',
+}
 
 const STATUS_BADGE_CLASSES = {
   proposed: classes.status_proposed,
@@ -83,6 +100,11 @@ export default function MappingReviewPage() {
   const [retailerTab, setRetailerTab] = useState('ocado')
   const [sourcingManually, setSourcingManually] = useState(false)
   const resolveManual = useResolveWithManualProduct(key)
+  const matchCatalogue = useAttachCatalogueMatches(key)
+  // The catalogue is synced from a committed snapshot, so it can legitimately be
+  // absent; the button says so rather than failing on click.
+  const { data: catalogue } = useCatalogueStatus()
+  const catalogueReady = (catalogue?.products ?? 0) > 0
 
   // Seed local editing state once the detail loads.
   useEffect(() => {
@@ -215,9 +237,17 @@ export default function MappingReviewPage() {
   // Candidates split by who sells them. Only the *display* is filtered — picks
   // are keyed by sku and submit() walks the full list, so accepting a manual
   // product and then switching back to Ocado never silently drops it.
-  const ocadoCandidates = data.candidates.filter((c) => c.retailer !== 'manual')
-  const manualCandidates = data.candidates.filter((c) => c.retailer === 'manual')
-  const visibleCandidates = retailerTab === 'manual' ? manualCandidates : ocadoCandidates
+  //
+  // Anything from an unrecognised retailer falls into the Ocado tab rather than
+  // vanishing: a candidate the reviewer cannot see is one they cannot reject.
+  const knownRetailers = new Set(RETAILER_TABS.map((t) => t.value))
+  const candidatesByRetailer = (retailer) =>
+    data.candidates.filter((c) =>
+      retailer === 'ocado'
+        ? c.retailer === 'ocado' || !knownRetailers.has(c.retailer)
+        : c.retailer === retailer,
+    )
+  const visibleCandidates = candidatesByRetailer(retailerTab)
 
   // Rendered twice — under the header and at the foot of the candidate table —
   // so a quick approve never needs a scroll past the whole list.
@@ -473,18 +503,43 @@ export default function MappingReviewPage() {
       <Group justify="space-between" align="flex-end">
         <Tabs value={retailerTab} onChange={(v) => setRetailerTab(v ?? 'ocado')}>
           <Tabs.List>
-            <Tabs.Tab value="ocado">Ocado ({ocadoCandidates.length})</Tabs.Tab>
-            <Tabs.Tab value="manual">Manual ({manualCandidates.length})</Tabs.Tab>
+            {RETAILER_TABS.map((tab) => (
+              <Tabs.Tab key={tab.value} value={tab.value}>
+                {tab.label} ({candidatesByRetailer(tab.value).length})
+              </Tabs.Tab>
+            ))}
           </Tabs.List>
         </Tabs>
-        <Button
-          variant={sourcingManually ? 'filled' : 'light'}
-          size="xs"
-          onClick={() => setSourcingManually((v) => !v)}
-        >
-          {sourcingManually ? 'Cancel' : 'Source this manually'}
-        </Button>
+        <Group gap="xs">
+          <Button
+            variant="light"
+            size="xs"
+            onClick={() => matchCatalogue.mutate({})}
+            loading={matchCatalogue.isPending}
+            disabled={!catalogueReady}
+            title={
+              catalogueReady
+                ? 'Score the Seasoned Pioneers spice range against this ingredient'
+                : 'Catalogue not synced — run: python -m app.scraper.products --retailer seasoned_pioneers sync'
+            }
+          >
+            Match catalogue
+          </Button>
+          <Button
+            variant={sourcingManually ? 'filled' : 'light'}
+            size="xs"
+            onClick={() => setSourcingManually((v) => !v)}
+          >
+            {sourcingManually ? 'Cancel' : 'Source this manually'}
+          </Button>
+        </Group>
       </Group>
+
+      {matchCatalogue.isError && (
+        <Alert color="red" variant="light" title="Catalogue match failed">
+          {matchCatalogue.error?.message}
+        </Alert>
+      )}
 
       {sourcingManually && (
         <Paper withBorder radius="md" p="md">
@@ -598,9 +653,7 @@ export default function MappingReviewPage() {
                 <Table.Tr>
                   <Table.Td colSpan={8}>
                     <Text size="sm" c="dimmed" ta="center" py="md">
-                      {retailerTab === 'manual'
-                        ? 'No hand-entered products for this ingredient yet.'
-                        : 'No Ocado candidates for this ingredient.'}
+                      {EMPTY_CANDIDATES[retailerTab] ?? EMPTY_CANDIDATES.ocado}
                     </Text>
                   </Table.Td>
                 </Table.Tr>

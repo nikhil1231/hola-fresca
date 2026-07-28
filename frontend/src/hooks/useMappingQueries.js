@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
 import {
+  attachCatalogueAcrossQueue,
+  attachCatalogueMatches,
   attachManualProduct,
   bulkApprove,
   deleteManualProduct,
   fetchAliases,
   fetchAliasOptions,
+  fetchCatalogueStatus,
   fetchJob,
   fetchManualProducts,
   fetchMappingDetail,
@@ -64,6 +67,37 @@ export function useSearchCandidates(key) {
 
 export function useMappingStats() {
   return useQuery({ queryKey: ['mapping-stats'], queryFn: fetchMappingStats })
+}
+
+export function useCatalogueStatus() {
+  return useQuery({ queryKey: ['mapping-catalogue-status'], queryFn: fetchCatalogueStatus })
+}
+
+// Offers the specialist catalogue's best matches for one ingredient. Local
+// string matching over cached products, so unlike the Ocado re-search it
+// returns straight away.
+export function useAttachCatalogueMatches(key) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (options) => attachCatalogueMatches(key, options),
+    onSuccess: (data) => {
+      qc.setQueryData(['mapping-detail', key], data)
+      qc.invalidateQueries({ queryKey: ['mapping-list'] })
+      qc.invalidateQueries({ queryKey: ['mapping-stats'] })
+    },
+  })
+}
+
+export function useAttachCatalogueAcrossQueue() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => attachCatalogueAcrossQueue(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mapping-detail'] })
+      qc.invalidateQueries({ queryKey: ['mapping-list'] })
+      qc.invalidateQueries({ queryKey: ['mapping-stats'] })
+    },
+  })
 }
 
 export function useAliases() {

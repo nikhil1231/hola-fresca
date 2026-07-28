@@ -14,6 +14,7 @@ politeness delay.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 
@@ -50,3 +51,20 @@ class AdaptiveThrottle:
         """Register a rate-limit/server-error signal and slow down."""
         async with self._lock:
             self.delay = min(self.max_delay, self.delay * self.backoff_factor + self.backoff_floor)
+
+    # -- synchronous mirrors ---------------------------------------------
+    #
+    # The product scrapers are sync (a Playwright page for Ocado, blocking httpx
+    # for the rest), so they cannot await the methods above. Same arithmetic, no
+    # lock: a sync fetcher is single-threaded by construction.
+
+    def sleep_before(self) -> None:
+        if self.delay > 0:
+            time.sleep(self.delay)
+
+    def note_success(self) -> None:
+        if self.delay > 0:
+            self.delay = max(0.0, self.delay * self.recover_factor - 0.01)
+
+    def note_throttle(self) -> None:
+        self.delay = min(self.max_delay, self.delay * self.backoff_factor + self.backoff_floor)

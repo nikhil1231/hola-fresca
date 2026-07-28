@@ -477,3 +477,49 @@ class ManualProductOut(BaseModel):
 
 class ManualProductListOut(BaseModel):
     items: list[ManualProductOut] = Field(default_factory=list)
+
+
+class CatalogueMatchOut(BaseModel):
+    """One specialist-retailer product proposed for an ingredient."""
+
+    sku: str
+    product_name: str
+    score: float
+    price: float | None = None
+    pack_size_raw: str | None = None
+    url: str | None = None
+    in_stock: bool | None = None
+
+
+class CatalogueMatchListOut(BaseModel):
+    items: list[CatalogueMatchOut] = Field(default_factory=list)
+
+
+class CatalogueAttachIn(BaseModel):
+    """Bulk pass: offer catalogue matches across the review queue."""
+
+    # Off by default the pass would propose "Rose Petals" for "Peas"; see
+    # app.mapping.external.arrives_as_seasoning.
+    seasonings_only: bool = True
+    include_approved: bool = False
+    min_score: float | None = None
+    limit: int | None = None
+
+
+class CatalogueAttachOut(BaseModel):
+    considered: int
+    ingredients_matched: int
+    hits_added: int
+    skipped_not_seasoning: int
+    notes: list[str] = Field(default_factory=list)
+
+
+class CatalogueStatusOut(BaseModel):
+    """Whether the catalogue is loaded, and how fresh the snapshot is."""
+
+    retailer: str
+    products: int
+    in_stock: int
+    captured_at: str | None = None
+    snapshot_product_count: int | None = None
+    source: str | None = None

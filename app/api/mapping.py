@@ -20,6 +20,11 @@ from app.api.schemas import (
     AliasOptionsOut,
     AliasOut,
     BulkApproveIn,
+    CatalogueAttachIn,
+    CatalogueAttachOut,
+    CatalogueMatchListOut,
+    CatalogueMatchOut,
+    CatalogueStatusOut,
     DecisionIn,
     GenerateIn,
     JobOut,
@@ -413,3 +418,109 @@ def attach_manual_product(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     session.commit()
     return get_ingredient(key, session)
+
+
+# --------------------------------------------------------------------------
+# Specialist-retailer catalogue (Seasoned Pioneers)
+# --------------------------------------------------------------------------
+
+@router.get("/catalogue/status", response_model=CatalogueStatusOut)
+def catalogue_status(session: Session = Depends(get_session)) -> CatalogueStatusOut:
+    """Is the catalogue synced, and how old is the snapshot behind it?"""
+    from app.scraper.products import catalogue as catalogue_mod
+    from app.scraper.products.seasoned_pioneers import RETAILER as CATALOGUE_RETAILER
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _request_session():
+        yield session
+
+    counts = catalogue_mod.status_counts(_request_session)
+    snapshot = counts.get("snapshot") or {}
+    return CatalogueStatusOut(
+        retailer=CATALOGUE_RETAILER,
+        products=counts["products"],
+        in_stock=counts["in_stock"],
+        captured_at=snapshot.get("captured_at"),
+        snapshot_product_count=snapshot.get("product_count"),
+        source=snapshot.get("source"),
+    )
+
+
+@router.get("/ingredients/{key}/catalogue", response_model=CatalogueMatchListOut)
+def preview_catalogue_matches(
+    key: str,
+    q: str | None = Query(default=None, description="score against this wording instead"),
+    min_score: float | None = Query(default=None, ge=0.0, le=1.0),
+    limit: int = Query(default=8, ge=1, le=50),
+    session: Session = Depends(get_session),
+) -> CatalogueMatchListOut:
+    """What the catalogue would offer for this ingredient, attaching nothing."""
+    from app.mapping import external
+
+    ic = _ic(session, key)
+    matches = external.match_products(
+        session,
+        external.resolve_name(session, key, name=q, fallback=ic.name),
+        limit=limit,
+        min_score=min_score if min_score is not None else external.MIN_SCORE,
+    )
+    return CatalogueMatchListOut(items=[CatalogueMatchOut(**vars(m)) for m in matches])
+
+
+@router.post("/ingredients/{key}/catalogue", response_model=MappingDetailOut)
+def attach_catalogue_matches(
+    key: str,
+    q: str | None = Query(default=None, description="match against this wording instead"),
+    min_score: float | None = Query(default=None, ge=0.0, le=1.0),
+    limit: int = Query(default=4, ge=1, le=20),
+    session: Session = Depends(get_session),
+) -> MappingDetailOut:
+    """Add the catalogue's best matches to this ingredient's candidate pool.
+
+    Asked for by name, so the seasoning guard that governs the bulk pass does not
+    apply — a reviewer looking at "Harissa Paste" and wanting to see the dry
+    harissa should get it.
+    """
+    from app.mapping import external
+
+    ic = _ic(session, key)
+    external.attach_matches(
+        session,
+        key,
+        name=external.resolve_name(session, key, name=q, fallback=ic.name),
+        limit=limit,
+        min_score=min_score if min_score is not None else external.MIN_SCORE,
+    )
+    session.commit()
+    return get_ingredient(key, session)
+
+
+@router.post("/catalogue/attach", response_model=CatalogueAttachOut)
+def attach_catalogue_across_queue(
+    body: CatalogueAttachIn, session: Session = Depends(get_session)
+) -> CatalogueAttachOut:
+    """Offer catalogue matches across the whole review queue in one pass.
+
+    Cheap enough to run inline — matching is string work over a few hundred
+    cached products, not a network call per ingredient — so unlike ``/generate``
+    this needs no job handle.
+    """
+    from app.mapping import external
+
+    result = external.attach_all(
+        session,
+        seasonings_only=body.seasonings_only,
+        include_approved=body.include_approved,
+        min_score=body.min_score if body.min_score is not None else external.MIN_SCORE,
+        limit=body.limit if body.limit is not None else external.DEFAULT_LIMIT,
+        usage=_usage_stats() if body.seasonings_only else None,
+    )
+    return CatalogueAttachOut(
+        considered=result.considered,
+        ingredients_matched=result.ingredients_matched,
+        hits_added=result.hits_added,
+        skipped_not_seasoning=result.skipped_not_seasoning,
+        notes=result.notes,
+    )

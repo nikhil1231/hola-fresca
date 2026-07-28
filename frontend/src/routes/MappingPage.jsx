@@ -20,7 +20,9 @@ import {
 } from '@mantine/core'
 
 import {
+  useAttachCatalogueAcrossQueue,
   useBulkApprove,
+  useCatalogueStatus,
   useGenerateMappings,
   useMappingList,
   useMappingStats,
@@ -105,6 +107,11 @@ export default function MappingPage() {
   })
   const bulk = useBulkApprove()
   const generate = useGenerateMappings()
+  const catalogueMatch = useAttachCatalogueAcrossQueue()
+  // Absent until the catalogue snapshot has been synced, so the whole panel is
+  // hidden rather than offering a button that cannot work.
+  const { data: catalogue } = useCatalogueStatus()
+  const catalogueReady = (catalogue?.products ?? 0) > 0
   const { data: stats, isError: statsIsError, error: statsError } = useMappingStats()
   const [batchSize, setBatchSize] = useState('10')
   const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE))
@@ -402,6 +409,48 @@ export default function MappingPage() {
           {generate.job.no_match} with no products found
           {generate.job.errors > 0 && `, ${generate.job.errors} failed`}.
         </Text>
+      )}
+
+      {catalogueReady && (
+        <Paper withBorder radius="md" p="md" mt="md">
+          <Group justify="space-between" align="flex-start" wrap="nowrap">
+            <div>
+              <Text fw={600} size="sm">
+                Seasoned Pioneers spice catalogue
+              </Text>
+              <Text size="sm" c="dimmed" mt={2}>
+                {catalogue.products} products, captured {catalogue.captured_at}. They supply
+                the blends Ocado has no equivalent for — Chermoula, Central American, North
+                Indian and the rest. This scores their range against every ingredient the
+                library ships as a sachet or pot, and offers the matches for review; nothing
+                is approved automatically.
+              </Text>
+              {catalogueMatch.data && (
+                <Text size="sm" c="teal.7" mt="xs">
+                  {catalogueMatch.data.ingredients_matched} ingredients matched,{' '}
+                  {catalogueMatch.data.hits_added} candidates added across{' '}
+                  {catalogueMatch.data.considered} considered
+                  {catalogueMatch.data.skipped_not_seasoning > 0 &&
+                    `, ${catalogueMatch.data.skipped_not_seasoning} skipped as not shipped in a spice container`}
+                  .
+                </Text>
+              )}
+              {catalogueMatch.isError && (
+                <Text size="sm" c="red.7" mt="xs">
+                  {catalogueMatch.error?.message}
+                </Text>
+              )}
+            </div>
+            <Button
+              variant="light"
+              loading={catalogueMatch.isPending}
+              onClick={() => catalogueMatch.mutate({})}
+              style={{ flexShrink: 0 }}
+            >
+              Match catalogue
+            </Button>
+          </Group>
+        </Paper>
       )}
     </Stack>
   )

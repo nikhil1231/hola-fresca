@@ -106,9 +106,13 @@ def normalize(
 
 
 # Columns added to an already-populated products table, name -> SQLite decl.
+# ``create_all`` only makes whole tables, so a database created before one of
+# these was declared never gains it and every read of the table fails.
 _PRODUCT_COLUMNS = {
     "shelf_life_raw": "VARCHAR(32)",
     "shelf_life_days": "INTEGER",
+    "avg_rating": "FLOAT",
+    "ratings_count": "INTEGER",
 }
 
 

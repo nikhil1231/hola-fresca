@@ -117,3 +117,27 @@ export function attachManualProduct(key, sku) {
     {},
   )
 }
+
+// --- Specialist catalogue (Seasoned Pioneers) --------------------------------
+
+export function fetchCatalogueStatus() {
+  return getJSON('/api/mapping/catalogue/status')
+}
+
+// Adds the catalogue's best matches to this ingredient's candidate pool. Pure
+// string matching over cached products, so it returns immediately.
+export function attachCatalogueMatches(key, { q, minScore, limit } = {}) {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  if (minScore != null) params.set('min_score', String(minScore))
+  if (limit != null) params.set('limit', String(limit))
+  const query = params.toString()
+  return postJSON(
+    `/api/mapping/ingredients/${encodeURIComponent(key)}/catalogue${query ? `?${query}` : ''}`,
+    {},
+  )
+}
+
+export function attachCatalogueAcrossQueue(body = {}) {
+  return postJSON('/api/mapping/catalogue/attach', body)
+}

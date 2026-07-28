@@ -217,3 +217,160 @@ def test_stats_counts_approved_mappings(client):
     body = client.get("/api/mapping/stats").json()
     assert body["approved"] == 1
     assert body["mappings_total"] == 1
+
+
+# --- specialist catalogue endpoints ----------------------------------------
+
+CAT_KEY = "name:chermoula spice mix"
+CAT_KEY_Q = quote(CAT_KEY, safe="")
+
+
+def _catalogue(tmp_path, captured_at="2026-07-28"):
+    """A two-product Seasoned Pioneers snapshot on disk."""
+    import json
+
+    def product(woo_id, name, price, size):
+        return {
+            "id": woo_id,
+            "name": name,
+            "sku": "",
+            "type": "simple",
+            "permalink": f"https://www.seasonedpioneers.com/x/{woo_id}/",
+            "prices": {"price": price, "currency_minor_unit": 2, "currency_code": "GBP"},
+            "categories": [{"slug": "moroccan", "name": "Moroccan Spices"}],
+            "images": [],
+            "average_rating": "4.9",
+            "review_count": 17,
+            "is_in_stock": True,
+            "size_raw": size,
+        }
+
+    path = tmp_path / "sp_catalogue.json"
+    path.write_text(
+        json.dumps({
+            "captured_at": captured_at,
+            "products": [
+                product(4996, "Chermoula Spice Mix", "350", "35g"),
+                product(5001, "Ras el Hanout", "350", "33g"),
+            ],
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _seed_spice(factory, tmp_path, monkeypatch, *, native="1 sachet(s) (244)"):
+    """Sync the catalogue and put a spice ingredient into the review queue.
+
+    The shared fixture's only ingredient is Chicken Breast, which arrives by
+    weight — deliberately not a seasoning, so it exercises the guard rather than
+    the match.
+    """
+    from app.api import mapping as mapping_api
+    from app.db.models import IngredientMapping
+    from app.scraper.products import catalogue
+
+    path = _catalogue(tmp_path)
+    monkeypatch.setattr(
+        "app.scraper.products.seasoned_pioneers.CATALOGUE_PATH", path
+    )
+    catalogue.sync(factory, path=path, cache_raw=False)
+
+    csv_path = tmp_path / "ingredient_frequency.csv"
+    with csv_path.open("a", encoding="utf-8") as fh:
+        fh.write(
+            f"2,{CAT_KEY},sid2,Chermoula Spice Mix,318,g,8,8,8,{native},\n"
+        )
+    mapping_api._usage_stats.cache_clear()
+
+    with factory() as s:
+        s.add(
+            IngredientMapping(
+                retailer="ocado",
+                ingredient_key=CAT_KEY,
+                name="Chermoula Spice Mix",
+                line_count=318,
+                status="proposed",
+            )
+        )
+        s.commit()
+    return path
+
+
+def test_catalogue_status_reports_nothing_before_a_sync(client):
+    body = client.get("/api/mapping/catalogue/status").json()
+    assert body["products"] == 0
+    assert body["retailer"] == "seasoned_pioneers"
+
+
+def test_catalogue_status_reports_the_synced_snapshot(client, factory, tmp_path, monkeypatch):
+    _seed_spice(factory, tmp_path, monkeypatch)
+
+    body = client.get("/api/mapping/catalogue/status").json()
+    assert body["products"] == 2
+    assert body["in_stock"] == 2
+    assert body["captured_at"] == "2026-07-28"
+
+
+def test_catalogue_preview_scores_without_attaching(client, factory, tmp_path, monkeypatch):
+    _seed_spice(factory, tmp_path, monkeypatch)
+
+    body = client.get(f"/api/mapping/ingredients/{CAT_KEY_Q}/catalogue").json()
+    assert [i["product_name"] for i in body["items"]] == ["Chermoula Spice Mix"]
+    assert body["items"][0]["score"] == 1.0
+    assert body["items"][0]["pack_size_raw"] == "35g"
+
+    # Preview attaches nothing, so the candidate pool is untouched.
+    detail = client.get(f"/api/mapping/ingredients/{CAT_KEY_Q}").json()
+    assert detail["candidates"] == []
+
+
+def test_catalogue_attach_adds_candidates_to_the_ingredient(client, factory, tmp_path, monkeypatch):
+    _seed_spice(factory, tmp_path, monkeypatch)
+
+    body = client.post(f"/api/mapping/ingredients/{CAT_KEY_Q}/catalogue").json()
+    candidates = [c for c in body["candidates"] if c["retailer"] == "seasoned_pioneers"]
+    assert [c["name"] for c in candidates] == ["Chermoula Spice Mix"]
+    assert candidates[0]["pack_size_value"] == 35.0
+    assert candidates[0]["price"] == 3.5
+
+
+def test_catalogue_attach_accepts_alternative_wording(client, factory, tmp_path, monkeypatch):
+    """The q override is the reviewer's escape hatch when the name does not match."""
+    _seed_spice(factory, tmp_path, monkeypatch)
+
+    body = client.post(
+        f"/api/mapping/ingredients/{CAT_KEY_Q}/catalogue", params={"q": "Ras el Hanout"}
+    ).json()
+    names = {c["name"] for c in body["candidates"] if c["retailer"] == "seasoned_pioneers"}
+    assert "Ras el Hanout" in names
+
+
+def test_catalogue_bulk_attach_matches_the_queue(client, factory, tmp_path, monkeypatch):
+    _seed_spice(factory, tmp_path, monkeypatch)
+
+    body = client.post("/api/mapping/catalogue/attach", json={}).json()
+    assert body["considered"] == 1
+    assert body["ingredients_matched"] == 1
+    assert body["hits_added"] == 1
+
+    detail = client.get(f"/api/mapping/ingredients/{CAT_KEY_Q}").json()
+    assert [c["name"] for c in detail["candidates"]] == ["Chermoula Spice Mix"]
+
+
+def test_catalogue_bulk_attach_skips_ingredients_not_shipped_as_seasonings(
+    client, factory, tmp_path, monkeypatch
+):
+    """Fresh produce shares names with dried spice; how it arrives settles it."""
+    _seed_spice(factory, tmp_path, monkeypatch, native="1 unit(s) (244)")
+
+    body = client.post("/api/mapping/catalogue/attach", json={}).json()
+    assert body["considered"] == 0
+    assert body["hits_added"] == 0
+    assert body["skipped_not_seasoning"] == 1
+
+    # ...and turning the guard off reaches it after all.
+    body = client.post(
+        "/api/mapping/catalogue/attach", json={"seasonings_only": False}
+    ).json()
+    assert body["hits_added"] == 1
