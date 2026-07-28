@@ -11,6 +11,7 @@ from statistics import median
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
+from app.canonicalize import _COUNT_MAX
 from app.db.models import (
     IngredientMapping,
     IngredientMappingProduct,
@@ -155,39 +156,78 @@ def _stable_each(ratios: list[float]) -> float | None:
     return _round_each(float(med))
 
 
+# An ingredient is only shopped as whole units if the library really counts it.
+# Rosemary carries five stray "unit(s)" lines against 245 "bunch(es)" ones, and on
+# the strength of those five it was being covered by the sprig — so a count claim
+# has to win the vote, not merely appear. The share does the discriminating; the
+# line floor is only there so a single stray line cannot decide it alone, and is
+# kept low because a genuinely countable ingredient can be rare (Celeriac and
+# Lamb Shank are counted in every line they appear in, but appear four times).
+_COUNT_MIN_LINES = 3
+_COUNT_MIN_SHARE = 0.5
+
+
 def _derive_count_metadata(
     session: Session, rows: list[IngredientMapping], roots: dict[str, str], sid_index: dict[str, str]
 ) -> None:
+    """Set ``each_to_grams`` and ``unit_kind`` from how the library states amounts.
+
+    Only curated recipes are consulted: they are the only ones the planner will
+    ever put in a basket, and a classification driven by lines from abandoned 2013
+    stubs is not evidence about anything that can be cooked.
+    """
     by_key = {row.ingredient_key: row for row in rows}
     ratios: dict[str, list[float]] = defaultdict(list)
-    for line in session.scalars(select(RecipeIngredient)):
-        if not _is_count_unit(line.unit):
-            continue
-        if not line.amount or line.amount <= 0 or not line.amount_g or line.amount_g <= 0:
-            continue
+    count_lines: dict[str, int] = defaultdict(int)
+    total_lines: dict[str, int] = defaultdict(int)
+
+    stmt = (
+        select(RecipeIngredient)
+        .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
+        .where(Recipe.curated == 1)
+    )
+    for line in session.scalars(stmt):
         raw_key = sid_index.get(line.source_ingredient_id or "")
         if not raw_key:
             continue
         root = roots.get(raw_key, raw_key)
+        total_lines[root] += 1
+        if not _is_count_unit(line.unit):
+            continue
+        # "200 unit(s)" is a mislabelled gram weight, not two hundred of anything:
+        # to_grams passes such amounts straight through, which would otherwise
+        # contribute a per-unit weight of exactly 1 g and drag the median with it
+        # (Lamb Shank was deriving 1 g apiece this way).
+        if line.amount is not None and line.amount >= _COUNT_MAX:
+            continue
+        count_lines[root] += 1
+        if not line.amount or line.amount <= 0 or not line.amount_g or line.amount_g <= 0:
+            continue
         ratios[root].append(float(line.amount_g) / float(line.amount))
 
     changed = False
-    for key, values in ratios.items():
-        row = by_key.get(key)
-        if row is None:
-            continue
-        each = _stable_each(values)
-        if each is None:
-            continue
-        if row.each_to_grams is None:
+    for row in rows:
+        key = row.ingredient_key
+        counted = count_lines.get(key, 0)
+        total = total_lines.get(key, 0)
+        each = _stable_each(ratios.get(key, []))
+        is_count = (
+            each is not None
+            and counted >= _COUNT_MIN_LINES
+            and total > 0
+            and counted / total >= _COUNT_MIN_SHARE
+        )
+        # A per-unit weight is worth keeping even for a mass ingredient — it is how
+        # an "each"-priced pack gets a capacity — so it is recorded whenever the
+        # count lines support one, independently of the classification.
+        if each is not None and row.each_to_grams is None:
             row.each_to_grams = each
             changed = True
-        if getattr(row, "unit_kind", None) != "count":
-            row.unit_kind = "count"
-            changed = True
-    for row in rows:
-        if not getattr(row, "unit_kind", None):
-            row.unit_kind = "mass"
+        kind = "count" if is_count else "mass"
+        # Reassigned in both directions: the old code only ever promoted to count,
+        # so a bad classification could never be undone by better data.
+        if getattr(row, "unit_kind", None) != kind:
+            row.unit_kind = kind
             changed = True
     if changed:
         session.commit()

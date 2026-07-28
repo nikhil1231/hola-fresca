@@ -10,7 +10,9 @@ import csv
 
 import pytest
 
-from app.db.models import Recipe, RecipeIngredient
+from sqlalchemy import select
+
+from app.db.models import IngredientMapping, Recipe, RecipeIngredient
 from app.mapping import service
 from app.mapping.candidates import gather_candidates
 from app.planner import basket as B
@@ -370,6 +372,18 @@ def test_count_ingredient_covers_in_units_not_grams(factory, tmp_path):
             ],
         )
         s.add(recipe)
+        # Siblings so the ingredient earns its count classification: one line is no
+        # longer enough to make something countable, or five stray "unit(s)" lines
+        # would go on turning rosemary into sprigs.
+        for i in range(2):
+            s.add(Recipe(
+                source="hellofresh", source_id=f"basa-sib{i}", url="", name=f"Basa {i}",
+                curated=1, base_yield=2,
+                ingredients=[RecipeIngredient(
+                    name="Basa Fillets", source_ingredient_id=sid, amount=2,
+                    unit="unit(s)", amount_g=260,
+                )],
+            ))
         s.commit()
         rid = recipe.id
 
@@ -431,3 +445,87 @@ def test_consumed_cost_is_pack_pro_rata_not_whole_pack():
     line = B.BasketLine(key="name:paprika", name="Paprika", need_g=2, cover=cover)
     assert line.cost == pytest.approx(2.0)
     assert line.consumed_cost == pytest.approx(0.10)
+
+
+def _seed_ingredient_with_units(session, key, sid, name, unit_lines):
+    """One approved ingredient plus recipes stating it in the given units."""
+    seed_candidates(
+        session, key, name,
+        [{"sku": f"{sid}-pack", "name": f"Ocado {name}", "price": 2.0,
+          "pack_raw": "200g", "pack_value": 200, "pack_unit": "g"}],
+    )
+    service.save_decision(
+        session, gather_candidates(session, key),
+        service.DecisionInput(
+            status="approved",
+            accepted=[service.AcceptedInput(sku=f"{sid}-pack", rank=1)],
+        ),
+    )
+    for i, (unit, amount, grams) in enumerate(unit_lines):
+        session.add(Recipe(
+            source="hellofresh", source_id=f"{sid}-r{i}", url="", name=f"R{i}",
+            curated=1, base_yield=2,
+            ingredients=[RecipeIngredient(
+                name=name, source_ingredient_id=sid, amount=amount,
+                unit=unit, amount_g=grams,
+            )],
+        ))
+    session.commit()
+
+
+def test_a_minority_of_count_lines_does_not_make_an_ingredient_countable(factory, tmp_path):
+    """Rosemary is bought by the packet, not the sprig.
+
+    It carried five stray "unit(s)" lines against 245 "bunch(es)" ones, and on the
+    strength of those five was being covered in whole sprigs. A count claim has to
+    win the vote, not merely appear.
+    """
+    key, sid = "name:rosemary", "sid-rosemary"
+    csv_path = write_freq_csv(tmp_path / "freq.csv", [(key, sid, "Rosemary")])
+    lines = [("bunch(es)", 1, 8.0)] * 9 + [("unit(s)", 1, 8.0)]
+    with factory() as s:
+        _seed_ingredient_with_units(s, key, sid, "Rosemary", lines)
+
+    load_index(factory, csv_path=csv_path)
+    with factory() as s:
+        row = s.scalars(
+            select(IngredientMapping).where(IngredientMapping.ingredient_key == key)
+        ).one()
+        assert row.unit_kind == "mass"
+
+
+def test_a_consistently_counted_ingredient_stays_countable_even_when_rare(factory, tmp_path):
+    """Celeriac appears four times and is counted every time — that is not weak evidence."""
+    key, sid = "name:celeriac", "sid-celeriac"
+    csv_path = write_freq_csv(tmp_path / "freq.csv", [(key, sid, "Celeriac")])
+    with factory() as s:
+        _seed_ingredient_with_units(s, key, sid, "Celeriac", [("unit(s)", 1, 500.0)] * 4)
+
+    load_index(factory, csv_path=csv_path)
+    with factory() as s:
+        row = s.scalars(
+            select(IngredientMapping).where(IngredientMapping.ingredient_key == key)
+        ).one()
+        assert row.unit_kind == "count"
+        assert row.each_to_grams == pytest.approx(500.0)
+
+
+def test_a_mislabelled_gram_weight_is_not_read_as_a_count(factory, tmp_path):
+    """"200 unit(s)" is 200 g wearing the wrong label.
+
+    to_grams passes such amounts straight through, so treating them as counts
+    derives a per-unit weight of exactly 1 g — which is how Lamb Shank came to
+    weigh a gram apiece.
+    """
+    key, sid = "name:lamb shank", "sid-shank"
+    csv_path = write_freq_csv(tmp_path / "freq.csv", [(key, sid, "Lamb Shank")])
+    with factory() as s:
+        _seed_ingredient_with_units(s, key, sid, "Lamb Shank", [("unit(s)", 400, 400.0)] * 4)
+
+    load_index(factory, csv_path=csv_path)
+    with factory() as s:
+        row = s.scalars(
+            select(IngredientMapping).where(IngredientMapping.ingredient_key == key)
+        ).one()
+        assert row.unit_kind == "mass"
+        assert row.each_to_grams != 1.0
