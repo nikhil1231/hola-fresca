@@ -181,6 +181,28 @@ def _contradicts_magnitude(unit: str | None, amount: float | None) -> bool:
     )
 
 
+def is_mislabelled_weight(unit: str | None, amount: float | None) -> bool:
+    """True when a counted unit carries an amount only a weight could be.
+
+    The mirror of :func:`_contradicts_magnitude`, and the more expensive of the
+    two. ``to_grams`` already reads "600 unit(s) Butternut Squash" as 600 g, but
+    it only returns a number — the unit word stays ``unit(s)``, and everything
+    downstream still believes the line is a count. The recipe page then offers
+    the cook six hundred squashes, and the planner, covering count ingredients in
+    whole units, prices them: 600 × 550 g came to 330 kg and £2,850 of squash in
+    a two-person traybake.
+
+    So the label has to be corrected, not just worked around at conversion time.
+    """
+    return bool(
+        unit
+        and unit not in _MASS_UNITS
+        and unit not in _SPOON
+        and amount is not None
+        and amount >= _COUNT_MAX
+    )
+
+
 # How far a re-read amount may stray from the ingredient's typical weight before
 # it is rejected. Wide, because one ingredient legitimately varies with serving
 # size, but narrow enough to catch "1 balsamic vinegar" becoming a 250 ml bottle.
@@ -270,7 +292,7 @@ def backfill_units(session: Session) -> dict[str, int]:
     countable_by_name = _countable_units_by_name(name_rows)
     typical_by_name = _typical_grams_by_name(name_rows)
 
-    filled = {"by_id": 0, "by_name": 0, "by_magnitude": 0, "count_veto": 0}
+    filled = {"by_id": 0, "by_name": 0, "by_magnitude": 0, "count_veto": 0, "weight_veto": 0}
     empties = session.scalars(
         select(RecipeIngredient).where(
             (RecipeIngredient.unit.is_(None)) | (RecipeIngredient.unit == ""),
@@ -292,6 +314,9 @@ def backfill_units(session: Session) -> dict[str, int]:
             )
             if reread:
                 unit, tier = reread, "count_veto"
+        elif is_mislabelled_weight(unit, ing.amount):
+            # The modal unit is a count, but nobody cooks 600 of anything.
+            unit, tier = "grams", "weight_veto"
         if unit:
             ing.unit = unit
             filled[tier] += 1
@@ -389,6 +414,22 @@ def repair_contradicted_units(session: Session) -> dict[str, int]:
     countable_by_name = _countable_units_by_name(rows)
     typical_by_name = _typical_grams_by_name(rows)
 
+    # Already-stored counts carrying a weight, the mirror of the case below. Left
+    # alone these keep their unit(s) label for ever, since nothing else revisits it.
+    mislabelled = session.scalars(
+        select(RecipeIngredient).where(
+            RecipeIngredient.unit.not_in(sorted(_MASS_UNITS) + sorted(_SPOON)),
+            RecipeIngredient.unit.is_not(None),
+            RecipeIngredient.amount >= _COUNT_MAX,
+        )
+    )
+    stats = {"examined": 0, "repaired": 0}
+    for ing in mislabelled:
+        stats["examined"] += 1
+        if is_mislabelled_weight(ing.unit, ing.amount):
+            ing.unit = "grams"
+            stats["repaired"] += 1
+
     suspects = session.scalars(
         select(RecipeIngredient).where(
             RecipeIngredient.unit.in_(sorted(_MASS_UNITS)),
@@ -396,7 +437,6 @@ def repair_contradicted_units(session: Session) -> dict[str, int]:
             RecipeIngredient.amount < _GRAMS_THRESHOLD,
         )
     )
-    stats = {"examined": 0, "repaired": 0}
     for ing in suspects:
         stats["examined"] += 1
         if not _contradicts_magnitude(ing.unit, ing.amount):

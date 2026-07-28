@@ -6,6 +6,7 @@ import pytest
 from app import config as app_config
 from app.canonicalize import (
     backfill_units,
+    is_mislabelled_weight,
     repair_contradicted_units,
     repair_trace_amounts,
     to_grams,
@@ -101,7 +102,10 @@ def test_backfill_units_falls_back_to_name(tmp_path, monkeypatch):
 
         updated = backfill_units(s)
         s.commit()
-        assert updated == {"by_id": 0, "by_name": 1, "by_magnitude": 1, "count_veto": 0}
+        assert updated == {
+            "by_id": 0, "by_name": 1, "by_magnitude": 1,
+            "count_veto": 0, "weight_veto": 0,
+        }
 
         rows = {(i.name, i.unit) for i in s.query(RecipeIngredient).all()}
         # Adopted from the sibling id carrying the same name.
@@ -245,3 +249,54 @@ def test_to_grams_rejects_implausible_counts():
     assert to_grams("Butternut Squash", 1000, "unit(s)") == (1000, "g")
     # Plausible counts still use the gram reference.
     assert to_grams("Butternut Squash", 1, "unit(s)") == (550.0, "g")
+
+
+@pytest.mark.parametrize(
+    "unit,amount,expected",
+    [
+        # Nobody roasts six hundred butternut squashes.
+        ("unit(s)", 600, True),
+        ("unit(s)", 4, False),
+        ("carton(s)", 100, True),
+        ("sachet(s)", 1.5, False),
+        # A stated weight is already a weight; a spoon measure can legitimately be
+        # large in a bulk recipe, and neither is a mislabelled count.
+        ("grams", 600, False),
+        ("tsp", 60, False),
+        (None, 600, False),
+    ],
+)
+def test_is_mislabelled_weight(unit, amount, expected):
+    assert is_mislabelled_weight(unit, amount) is expected
+
+
+def test_a_count_unit_carrying_a_weight_is_relabelled(tmp_path, monkeypatch):
+    """The £2,850 traybake.
+
+    "600 unit(s) Butternut Squash" is 600 g. to_grams already read it that way, but
+    the unit string stayed a count, so the recipe page offered the cook six hundred
+    squashes and the planner — which covers count ingredients in whole units —
+    priced 600 x 550 g of them.
+    """
+    monkeypatch.setattr(app_config, "DB_PATH", tmp_path / "c.db")
+    engine = make_engine(tmp_path / "c.db")
+    init_db(engine)
+    factory = make_session_factory(engine)
+
+    with factory() as s:
+        r = Recipe(source="hellofresh", source_id="x", url="u", name="Traybake")
+        r.ingredients = [
+            RecipeIngredient(source_ingredient_id="bs", name="Butternut Squash",
+                             amount=600, unit="unit(s)"),
+            # A real count on the same ingredient must survive untouched.
+            RecipeIngredient(source_ingredient_id="bs", name="Butternut Squash",
+                             amount=1, unit="unit(s)"),
+        ]
+        s.add(r)
+        s.commit()
+
+        repair_contradicted_units(s)
+        s.commit()
+
+        rows = sorted((i.amount, i.unit) for i in s.query(RecipeIngredient).all())
+        assert rows == [(1.0, "unit(s)"), (600.0, "grams")]
