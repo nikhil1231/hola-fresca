@@ -24,10 +24,9 @@ from app.planner.basket import (
     Basket,
     BasketLine,
     Selection,
-    basket_gap_count,
     build_basket,
 )
-from app.planner.cache import get_index
+from app.planner.cache import get_index, get_ranking
 from app.planner.index import PlanIndex
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
@@ -163,26 +162,23 @@ def _candidate_ids(
     pinned_ids: set[int],
     factory: sessionmaker[Session],
     csv_path: Path | None,
-) -> list[int]:
+) -> set[int]:
+    """Which recipes the request's filters allow — a membership test, not an order.
+
+    The ranking is computed over the whole library because it does not depend on
+    any of this; the filters only decide which of the ranked recipes are shown.
+    """
     filters = body.filters.model_dump()
     stmt = _apply_filters(select(Recipe.id), **filters)
     if pinned_ids:
         stmt = stmt.where(Recipe.id.not_in(pinned_ids))
 
-    candidate_ids = list(session.scalars(stmt).all())
+    candidate_ids = set(session.scalars(stmt).all())
     if "unmapped" not in body.filters.exclude:
         return candidate_ids
 
-    gap_recipe_ids = _recipe_ids_with_pricing_gaps(candidate_ids, factory, csv_path)
-    return [recipe_id for recipe_id in candidate_ids if recipe_id not in gap_recipe_ids]
-
-
-
-def _recipe_keys(index: PlanIndex, recipe_id: int) -> set[str]:
-    recipe = index.recipes.get(recipe_id)
-    if recipe is None:
-        return set()
-    return {need.key for need in recipe.needs}
+    gap_recipe_ids = _recipe_ids_with_pricing_gaps(sorted(candidate_ids), factory, csv_path)
+    return candidate_ids - gap_recipe_ids
 
 
 @router.post("/suggestions", response_model=PlannerSuggestionsOut)
@@ -195,59 +191,19 @@ def suggestions(
     pinned_recipe_ids = _selection_ids(body.selections)
     _require_curated(session, pinned_recipe_ids)
 
-    pinned_id_set = set(pinned_recipe_ids)
-    candidate_ids = _candidate_ids(session, body, pinned_id_set, factory, csv_path)
-    all_index_ids = list(dict.fromkeys([*pinned_recipe_ids, *candidate_ids]))
-    index = _load_planner_index(factory, all_index_ids, csv_path)
-
     pinned = [_planner_selection(selection) for selection in body.selections]
-    base = build_basket(index, pinned) if pinned else Basket()
-    base_score = base.score
-    base_cost = base.cost
-    base_keys: set[str] = set()
-    for recipe_id in pinned_recipe_ids:
-        base_keys.update(_recipe_keys(index, recipe_id))
+    # Ranked over the whole library and cached against the pinned week, so paging
+    # and filter changes are a walk over a list rather than a re-scoring of it.
+    ranked = get_ranking(
+        factory, pinned, candidate_portions=body.candidate_portions, csv_path=csv_path
+    )
+    allowed = _candidate_ids(session, body, set(pinned_recipe_ids), factory, csv_path)
 
-    recipes_by_key: dict[str, set[int]] = {}
-    for recipe_id in candidate_ids:
-        for key in _recipe_keys(index, recipe_id):
-            recipes_by_key.setdefault(key, set()).add(recipe_id)
-    overlapping_ids = set()
-    for key in base_keys:
-        overlapping_ids.update(recipes_by_key.get(key, set()))
-
-    scores: list[tuple[float, int, float | None, float | None, float | None, float | None, int, int, bool]] = []
-    for recipe_id in candidate_ids:
-        keys = _recipe_keys(index, recipe_id)
-        candidate = Selection(recipe_id=recipe_id, servings=body.candidate_portions)
-        standalone_basket = build_basket(index, [candidate])
-        gaps = basket_gap_count(standalone_basket)
-        basket_available = bool(keys) or gaps > 0
-        if not basket_available:
-            scores.append((float("inf"), recipe_id, None, None, None, None, 0, 0, False))
-            continue
-        standalone = standalone_basket.score
-        standalone_cost = standalone_basket.cost
-        shared = len(base_keys & keys)
-        if recipe_id in overlapping_ids:
-            with_candidate = build_basket(index, [*pinned, candidate])
-            marginal = with_candidate.score - base_score
-            marginal_cost = with_candidate.cost - base_cost
-            ranking = marginal
-        else:
-            marginal = standalone
-            marginal_cost = standalone_cost
-            ranking = standalone
-        scores.append((
-            ranking, recipe_id, marginal, standalone, marginal_cost, standalone_cost,
-            gaps, shared, basket_available,
-        ))
-
-    scores.sort(key=lambda item: (item[0], item[1]))
-    total = len(scores)
+    page_scores = [c for c in ranked if c.recipe_id in allowed]
+    total = len(page_scores)
     start = body.offset if body.offset is not None else (body.page - 1) * body.page_size
-    page_scores = scores[start:start + body.page_size]
-    page_ids = [recipe_id for _, recipe_id, _, _, _, _, _, _, _ in page_scores]
+    page_scores = page_scores[start:start + body.page_size]
+    page_ids = [c.recipe_id for c in page_scores]
     by_id: dict[int, Recipe] = {}
     if page_ids:
         rows = session.scalars(
@@ -258,25 +214,35 @@ def suggestions(
         by_id = {recipe.id: recipe for recipe in rows}
 
     items = []
-    for (
-        ranking, recipe_id, marginal, standalone, marginal_cost, standalone_cost,
-        gaps, shared, basket_available,
-    ) in page_scores:
-        recipe = by_id.get(recipe_id)
+    for candidate in page_scores:
+        recipe = by_id.get(candidate.recipe_id)
         if recipe is None:
             continue
         card = _to_card(recipe).model_dump()
+        available = candidate.available
         items.append(
             RecipeSuggestionCard(
                 **card,
-                marginal_score=_round_money(marginal) if basket_available else None,
-                standalone_score=_round_money(standalone) if standalone is not None else None,
-                ranking_score=_round_money(ranking) if basket_available else None,
-                marginal_cost=_round_money(marginal_cost) if marginal_cost is not None else None,
-                standalone_cost=_round_money(standalone_cost) if standalone_cost is not None else None,
-                unpriced_gap_count=gaps,
-                shared_ingredient_count=shared,
-                basket_available=basket_available,
+                marginal_score=_round_money(candidate.marginal) if available else None,
+                standalone_score=(
+                    _round_money(candidate.standalone)
+                    if candidate.standalone is not None
+                    else None
+                ),
+                ranking_score=_round_money(candidate.ranking) if available else None,
+                marginal_cost=(
+                    _round_money(candidate.marginal_cost)
+                    if candidate.marginal_cost is not None
+                    else None
+                ),
+                standalone_cost=(
+                    _round_money(candidate.standalone_cost)
+                    if candidate.standalone_cost is not None
+                    else None
+                ),
+                unpriced_gap_count=candidate.gap_count,
+                shared_ingredient_count=candidate.shared,
+                basket_available=available,
             )
         )
 

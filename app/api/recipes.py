@@ -36,8 +36,7 @@ from app.db.models import (
 from app import measures
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
-from app.planner.basket import Selection, basket_gap_count, build_basket
-from app.planner.cache import get_index
+from app.planner.cache import get_standalone_prices
 from app.planner.index import RETAILER
 
 
@@ -180,36 +179,24 @@ def _to_card(
     )
 
 
-def _standalone_baskets(
-    recipe_ids: list[int],
-    factory: sessionmaker[Session],
-    csv_path: Path | None,
-):
-    if not recipe_ids:
-        return {}
-    index = get_index(factory, csv_path=csv_path)
-    return {
-        recipe_id: build_basket(
-            index, [Selection(recipe_id=recipe_id, servings=INTRINSIC_PORTIONS)]
-        )
-        for recipe_id in recipe_ids
-    }
-
-
 def _intrinsic_prices(
     rows: list[Recipe] | list[int],
     factory: sessionmaker[Session],
     csv_path: Path | None,
 ) -> dict[int, tuple[float, float, int]]:
     recipe_ids = [recipe if isinstance(recipe, int) else recipe.id for recipe in rows]
-    prices: dict[int, tuple[float, float, int]] = {}
-    for recipe_id, basket in _standalone_baskets(recipe_ids, factory, csv_path).items():
-        prices[recipe_id] = (
-            _round_money(basket.score),
-            _round_money(basket.consumed_cost),
-            basket_gap_count(basket),
+    if not recipe_ids:
+        return {}
+    prices = get_standalone_prices(factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path)
+    return {
+        recipe_id: (
+            _round_money(price.score),
+            _round_money(price.consumed_cost),
+            price.gap_count,
         )
-    return prices
+        for recipe_id in recipe_ids
+        if (price := prices.get(recipe_id)) is not None
+    }
 
 
 def _recipe_ids_with_pricing_gaps(
@@ -217,28 +204,21 @@ def _recipe_ids_with_pricing_gaps(
     factory: sessionmaker[Session],
     csv_path: Path | None,
 ) -> set[int]:
+    """Recipes carrying an ingredient the basket cannot price.
+
+    A gap is exactly what stops the standalone price from being the whole story —
+    an unmapped line, a mapping with nothing buyable behind it, or a line the
+    library never tracked — so it is read off the same precomputed table rather
+    than re-walking each recipe's needs.
+    """
     if not recipe_ids:
         return set()
-    index = get_index(factory, csv_path=csv_path)
-    gap_recipe_ids: set[int] = set()
-    for recipe_id in recipe_ids:
-        recipe = index.recipes.get(recipe_id)
-        if recipe is None:
-            continue
-        if recipe.untracked_lines > 0:
-            gap_recipe_ids.add(recipe_id)
-            continue
-        for need in recipe.needs:
-            ingredient = index.ingredient(need.key)
-            if ingredient is None:
-                gap_recipe_ids.add(recipe_id)
-                break
-            if ingredient.pantry_staple:
-                continue
-            if not ingredient.shoppable:
-                gap_recipe_ids.add(recipe_id)
-                break
-    return gap_recipe_ids
+    prices = get_standalone_prices(factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path)
+    return {
+        recipe_id
+        for recipe_id in recipe_ids
+        if (price := prices.get(recipe_id)) is not None and price.has_gap
+    }
 
 
 def _alias_roots(rows: list[IngredientMapping]) -> dict[str, str]:

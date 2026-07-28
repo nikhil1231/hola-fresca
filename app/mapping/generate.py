@@ -282,6 +282,14 @@ def generate(
             job.processed += 1
 
     job.current = None
+    # New mapping rows arrive with no unit classification, and only the recipe
+    # library can supply one. The planner reads that classification rather than
+    # deriving it per request, so the batch that created the rows has to leave
+    # them decided.
+    if job.added or job.staples:
+        from app.planner.index import derive_count_metadata
+
+        derive_count_metadata(session_factory, csv_path=csv_path)
     job.status = "done"
     log.info(
         "generate done: %d proposed, %d staples, %d no-match, %d errors",

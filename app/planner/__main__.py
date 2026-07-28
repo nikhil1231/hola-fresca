@@ -2,11 +2,13 @@
 
     python -m app.planner basket <recipe_id>[:servings] ... [--include-staples]
     python -m app.planner waste-model
+    python -m app.planner derive-counts
 
 ``basket`` prices a chosen week and shows where the money goes and where it is
 thrown away. ``waste-model`` prints the salvage assumptions applied to the
 approved mappings, which is how the perishability model gets sanity-checked
-against real products rather than in the abstract.
+against real products rather than in the abstract. ``derive-counts`` re-decides
+which ingredients are shopped by the unit and what one of each weighs.
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from collections import Counter
 from app.db.session import init_db, make_engine, make_session_factory
 from app.planner import waste as waste_mod
 from app.planner.basket import Selection, build_basket
-from app.planner.index import load_index
+from app.planner.index import derive_count_metadata, load_index
 
 
 def _selection(token: str) -> Selection:
@@ -45,6 +47,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("waste-model", help="salvage fractions applied across approved mappings")
+    sub.add_parser(
+        "derive-counts",
+        help="reclassify counted vs weighed ingredients from the recipe library",
+    )
     return parser
 
 
@@ -148,6 +154,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "waste-model":
         index = load_index(session_factory, recipe_ids=[])
         _print_waste_model(index)
+    elif args.command == "derive-counts":
+        changed = derive_count_metadata(session_factory)
+        print(f"count metadata: {changed} mapping field(s) updated")
     return 0
 
 

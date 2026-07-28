@@ -404,6 +404,78 @@ def aggregate_needs(
     return needs, names, untracked, contributions
 
 
+@dataclass(frozen=True, slots=True)
+class BasketScore:
+    """Only the figures a ranking compares — no line detail, no contributions."""
+
+    score: float
+    cost: float
+    consumed_cost: float
+    gap_count: int
+
+
+def score_basket(index: PlanIndex, selections: Iterable[Selection]) -> BasketScore:
+    """Price a selection without building the itemised basket.
+
+    :func:`build_basket` spends most of its time assembling things a ranking
+    never reads — per-line contribution tuples, rounded display quantities, the
+    cost-ordered line list. Ranking the library calls this once per candidate and
+    then some, so it walks the same decisions and keeps only the totals. It must
+    agree with ``build_basket`` exactly; ``test_score_basket_agrees_with_build_basket``
+    holds the two together.
+    """
+    needs: dict[str, Demand] = {}
+    gaps = 0
+    for selection in selections:
+        recipe = index.recipes.get(selection.recipe_id)
+        if recipe is None:
+            continue
+        servings = selection.servings or recipe.base_yield
+        factor = servings / recipe.base_yield if recipe.base_yield else 1.0
+        gaps += recipe.untracked_lines
+        for need in recipe.needs:
+            grams = need.grams * factor
+            units = need.units * factor if need.units is not None else None
+            current = needs.get(need.key)
+            if current is None:
+                needs[need.key] = Demand(grams=grams, units=units)
+            else:
+                needs[need.key] = Demand(
+                    grams=current.grams + grams,
+                    units=(current.units or 0.0) + units if units is not None else current.units,
+                )
+
+    cost = 0.0
+    waste = 0.0
+    consumed = 0.0
+    for key, demand in needs.items():
+        ingredient = index.ingredient(key)
+        if ingredient is None:
+            gaps += 1
+            continue
+        if ingredient.pantry_staple:
+            continue
+        if not ingredient.shoppable:
+            gaps += 1
+            continue
+        cover = cover_need(index, ingredient, demand.grams, demand.units)
+        if cover is None:
+            continue
+        cost += cover.cost
+        waste += cover.waste_gbp
+        # Mirrors ``BasketLine.consumed_cost``, rounding the demand exactly as the
+        # line would, so the pro-rata figure on a card is the same either way.
+        if cover.cost <= 0:
+            continue
+        if ingredient.unit_kind == "count" and demand.units is not None and cover.capacity_qty:
+            consumed += cover.cost * (round(demand.units, 3) / cover.capacity_qty)
+        elif cover.capacity_g:
+            consumed += cover.cost * (round(demand.grams, 1) / cover.capacity_g)
+    return BasketScore(
+        score=cost + waste, cost=cost, consumed_cost=consumed, gap_count=gaps
+    )
+
+
 def build_basket(
     index: PlanIndex,
     selections: Iterable[Selection],

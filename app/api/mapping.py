@@ -282,10 +282,16 @@ def set_alias(
     key: str, body: AliasIn, session: Session = Depends(get_session)
 ) -> MappingDetailOut:
     """Link this ingredient to another (or clear the link when alias_of is null)."""
+    from app.api.deps import _session_factory
+    from app.planner.index import derive_count_metadata
+
     try:
         service.set_alias(session, key, body.alias_of)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Aliasing moves this ingredient's recipe lines under a different root, which
+    # is exactly the evidence the counted/weighed classification is drawn from.
+    derive_count_metadata(_session_factory())
     return get_ingredient(key, session)
 
 

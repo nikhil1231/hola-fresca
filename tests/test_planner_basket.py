@@ -17,7 +17,13 @@ from app.mapping import service
 from app.mapping.candidates import gather_candidates
 from app.planner import basket as B
 from app.planner import waste as W
-from app.planner.index import Ingredient, Pack, PlanIndex, load_index
+from app.planner.index import (
+    Ingredient,
+    Pack,
+    PlanIndex,
+    derive_count_metadata,
+    load_index,
+)
 
 from tests.conftest import seed_candidates
 
@@ -387,6 +393,7 @@ def test_count_ingredient_covers_in_units_not_grams(factory, tmp_path):
         s.commit()
         rid = recipe.id
 
+    derive_count_metadata(factory, csv_path=csv_path)
     index = load_index(factory, csv_path=csv_path)
     result = B.build_basket(index, [B.Selection(rid)])
     line = result.lines[0]
@@ -431,6 +438,7 @@ def test_count_fractional_demands_snap_before_ceiling(factory, tmp_path):
         s.commit()
         rid = recipe.id
 
+    derive_count_metadata(factory, csv_path=csv_path)
     index = load_index(factory, csv_path=csv_path)
     result = B.build_basket(index, [B.Selection(rid)])
     line = result.lines[0]
@@ -486,7 +494,7 @@ def test_a_minority_of_count_lines_does_not_make_an_ingredient_countable(factory
     with factory() as s:
         _seed_ingredient_with_units(s, key, sid, "Rosemary", lines)
 
-    load_index(factory, csv_path=csv_path)
+    derive_count_metadata(factory, csv_path=csv_path)
     with factory() as s:
         row = s.scalars(
             select(IngredientMapping).where(IngredientMapping.ingredient_key == key)
@@ -501,7 +509,7 @@ def test_a_consistently_counted_ingredient_stays_countable_even_when_rare(factor
     with factory() as s:
         _seed_ingredient_with_units(s, key, sid, "Celeriac", [("unit(s)", 1, 500.0)] * 4)
 
-    load_index(factory, csv_path=csv_path)
+    derive_count_metadata(factory, csv_path=csv_path)
     with factory() as s:
         row = s.scalars(
             select(IngredientMapping).where(IngredientMapping.ingredient_key == key)
@@ -522,10 +530,68 @@ def test_a_mislabelled_gram_weight_is_not_read_as_a_count(factory, tmp_path):
     with factory() as s:
         _seed_ingredient_with_units(s, key, sid, "Lamb Shank", [("unit(s)", 400, 400.0)] * 4)
 
-    load_index(factory, csv_path=csv_path)
+    derive_count_metadata(factory, csv_path=csv_path)
     with factory() as s:
         row = s.scalars(
             select(IngredientMapping).where(IngredientMapping.ingredient_key == key)
         ).one()
         assert row.unit_kind == "mass"
         assert row.each_to_grams != 1.0
+
+
+def test_score_basket_agrees_with_build_basket(factory, tmp_path):
+    """The lean scoring path is only safe while it says the same thing.
+
+    ``score_basket`` exists to skip the itemised basket, so nothing else would
+    notice it drifting — the ranking would simply start ordering the library by a
+    number the basket page disagrees with.
+    """
+    keys = [("name:pasta", "sid-pasta", "Pasta"), ("name:basil", "sid-basil", "Basil")]
+    csv_path = write_freq_csv(tmp_path / "freq.csv", keys)
+    with factory() as s:
+        seed_candidates(s, "name:pasta", "Pasta", [
+            {"sku": "p500", "name": "Pasta 500g", "price": 1.2, "pack_value": 500, "pack_unit": "g"},
+        ])
+        seed_candidates(s, "name:basil", "Basil", [
+            {"sku": "b30", "name": "Basil 30g", "price": 0.9, "pack_value": 30, "pack_unit": "g"},
+        ])
+        for key, sku in (("name:pasta", "p500"), ("name:basil", "b30")):
+            service.save_decision(
+                s,
+                gather_candidates(s, key),
+                service.DecisionInput(
+                    status="approved",
+                    accepted=[service.AcceptedInput(sku=sku, rank=1)],
+                ),
+            )
+        rids = []
+        for i, (pasta_g, basil_g) in enumerate([(180, 10), (350, 25), (90, 5)]):
+            r = Recipe(
+                source="hellofresh", source_id=f"r{i}", url="", name=f"R{i}",
+                curated=1, base_yield=2,
+                ingredients=[
+                    RecipeIngredient(name="Pasta", source_ingredient_id="sid-pasta",
+                                     amount=pasta_g, unit="grams", amount_g=pasta_g),
+                    RecipeIngredient(name="Basil", source_ingredient_id="sid-basil",
+                                     amount=basil_g, unit="grams", amount_g=basil_g),
+                ],
+            )
+            s.add(r)
+            s.flush()
+            rids.append(r.id)
+        s.commit()
+
+    index = load_index(factory, csv_path=csv_path)
+    selection_sets = [
+        [B.Selection(rids[0], 4)],
+        [B.Selection(rids[1], 2)],
+        [B.Selection(rids[0], 4), B.Selection(rids[1], 4)],
+        [B.Selection(r, 4) for r in rids],
+    ]
+    for selections in selection_sets:
+        built = B.build_basket(index, selections)
+        scored = B.score_basket(index, selections)
+        assert scored.score == pytest.approx(built.score)
+        assert scored.cost == pytest.approx(built.cost)
+        assert scored.consumed_cost == pytest.approx(built.consumed_cost)
+        assert scored.gap_count == B.basket_gap_count(built)

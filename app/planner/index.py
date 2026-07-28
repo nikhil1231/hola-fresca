@@ -169,12 +169,14 @@ _COUNT_MIN_SHARE = 0.5
 
 def _derive_count_metadata(
     session: Session, rows: list[IngredientMapping], roots: dict[str, str], sid_index: dict[str, str]
-) -> None:
+) -> int:
     """Set ``each_to_grams`` and ``unit_kind`` from how the library states amounts.
 
     Only curated recipes are consulted: they are the only ones the planner will
     ever put in a basket, and a classification driven by lines from abandoned 2013
     stubs is not evidence about anything that can be cooked.
+
+    Returns the number of mapping rows it changed.
     """
     by_key = {row.ingredient_key: row for row in rows}
     ratios: dict[str, list[float]] = defaultdict(list)
@@ -205,7 +207,7 @@ def _derive_count_metadata(
             continue
         ratios[root].append(float(line.amount_g) / float(line.amount))
 
-    changed = False
+    changed = 0
     for row in rows:
         key = row.ingredient_key
         counted = count_lines.get(key, 0)
@@ -222,15 +224,42 @@ def _derive_count_metadata(
         # count lines support one, independently of the classification.
         if each is not None and row.each_to_grams is None:
             row.each_to_grams = each
-            changed = True
+            changed += 1
         kind = "count" if is_count else "mass"
         # Reassigned in both directions: the old code only ever promoted to count,
         # so a bad classification could never be undone by better data.
         if getattr(row, "unit_kind", None) != kind:
             row.unit_kind = kind
-            changed = True
+            changed += 1
     if changed:
         session.commit()
+    return changed
+
+
+def derive_count_metadata(
+    session_factory: sessionmaker[Session],
+    *,
+    retailer: str = RETAILER,
+    csv_path: Path | None = None,
+) -> int:
+    """Reclassify every mapped ingredient as counted or weighed, in the database.
+
+    This is a build step, not part of serving a request. It reads every curated
+    recipe line — tens of thousands of rows — and writes its verdict back onto the
+    mapping rows, so ``load_index`` can simply believe ``unit_kind`` and
+    ``each_to_grams``. Re-run it whenever new ingredients enter the mapping, an
+    alias is changed, or the recipe library is re-normalised:
+
+        python -m app.planner derive-counts
+    """
+    sid_index = load_source_id_index(csv_path)
+    with session_factory() as session:
+        rows = list(
+            session.scalars(
+                select(IngredientMapping).where(IngredientMapping.retailer == retailer)
+            )
+        )
+        return _derive_count_metadata(session, rows, _alias_roots(rows), sid_index)
 
 
 def _pack_capacity_g(product: Product, each_to_grams: float | None) -> float | None:
@@ -302,9 +331,14 @@ def _build_pack(
 
 
 def _load_ingredients(
-    session: Session, statuses: tuple[str, ...], retailer: str, sid_index: dict[str, str]
+    session: Session, statuses: tuple[str, ...], retailer: str
 ) -> tuple[dict[str, Ingredient], dict[str, str], dict[str, float], dict[str, str]]:
-    """Build the canonical ingredient table, alias roots, unit metadata."""
+    """Build the canonical ingredient table, alias roots, unit metadata.
+
+    ``unit_kind`` and ``each_to_grams`` are read as given: deriving them is
+    :func:`derive_count_metadata`'s job and runs as a build step, because it costs
+    a scan of every curated recipe line and it writes.
+    """
     rows = (
         session.scalars(
             select(IngredientMapping)
@@ -320,7 +354,6 @@ def _load_ingredients(
     )
     rows = list(rows)
     roots = _alias_roots(rows)
-    _derive_count_metadata(session, rows, roots, sid_index)
     by_key = {r.ingredient_key: r for r in rows}
     each_by_key = {r.ingredient_key: r.each_to_grams for r in rows if r.each_to_grams}
     unit_kind_by_key = {r.ingredient_key: (r.unit_kind or "mass") for r in rows}
@@ -452,7 +485,7 @@ def load_index(
     sid_index = load_source_id_index(csv_path)
     with session_factory() as session:
         ingredients, roots, each_by_key, unit_kind_by_key = _load_ingredients(
-            session, statuses, retailer, sid_index
+            session, statuses, retailer
         )
         recipes = _load_recipes(
             session,
