@@ -51,6 +51,10 @@ class IngredientOut(BaseModel):
     # measure the cook can actually act on. None when the line already states a
     # metric amount or a spoon, or when the ingredient is not spoonable.
     spoons: float | None = None
+    # The teaspoon span a sensible cook would stay within, as [min, max]. Shown
+    # beside potent seasonings, where our container mass is an estimate and the
+    # span matters more than the midpoint.
+    spoon_range: list[float] | None = None
     # True when amount_g was derived by us from a count/container rather than
     # stated by the source. The UI must not lead with an estimated weight.
     amount_g_estimated: bool = False

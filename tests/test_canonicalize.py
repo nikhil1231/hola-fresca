@@ -21,7 +21,12 @@ from app.db.session import init_db, make_engine, make_session_factory
         ("Water", 50, "milliliter(s)", 50, "ml"),
         ("Garlic Clove", 1, "unit(s)", 5.0, "g"),
         ("Lentils", 1, "carton(s)", 250.0, "g"),          # not "1 carton"
-        ("Vegetable Stock Powder", 1, "sachet(s)", 8.0, "g"),
+        # Stock is a small dose of concentrate. It used to weigh 160 g here,
+        # because the keyword table matched "chicken" for the poultry variant and
+        # priced a sachet as a chicken breast; the sibling entries came along for
+        # the ride at the old flat 8 g default.
+        ("Vegetable Stock Powder", 1, "sachet(s)", 11.0, "g"),
+        ("Chicken Stock Powder", 1, "sachet(s)", 11.0, "g"),
         ("British Chicken Breasts", 2, "unit(s)", 320.0, "g"),
         ("Ground Cumin", 1, "tsp", 5.0, "g"),
         ("Olive Oil", 2, "tbsp", 30.0, "g"),

@@ -1,0 +1,390 @@
+{
+  "_comment": "How much a pre-portioned seasoning container holds, in grams, plus the teaspoon range a cook should measure. HelloFresh publishes no weight for these, so before this file the mass was a flat 8 g per sachet and the teaspoon figure lived in a separate table that drifted out of step with it — the UI once said 'half a tsp of ground cloves' while the planner bought 8 g, an implied 16 g/tsp against a real 2.1. Here `grams` is the single canonical number and teaspoons are always derived from it as grams / g_per_tsp, so the two can no longer disagree. `g_per_tsp` is a published density constant, not a guess; the only estimated quantity is the container mass itself. `source` records which masses are real: 'measured' entries were read off delivered packaging and must never be overwritten by an automated pass. tsp_min/tsp_max bound what a sensible cook would use in a base-yield (2 serving) dish; they drive the displayed range and act as a guardrail on the mass. Resolution: exact by_name -> defaults by unit and kind. See app/canonicalize.py (spice_dose) and app/measures.py.",
+  "defaults": {
+    "sachet(s)": {
+      "dry": {
+        "grams": 4.5,
+        "g_per_tsp": 2.3,
+        "tsp_min": 1.0,
+        "tsp_max": 3.0,
+        "note": "Rebased from a flat 8 g onto the two measured sachets (3.5 g and 5 g). Both are spice mixes — the dominant seasoning of their dish — so they sit at the top of the range and an unlisted dry sachet should sit a little under them."
+      },
+      "wet": {
+        "grams": 15.0,
+        "g_per_tsp": 5.5,
+        "tsp_min": 1.0,
+        "tsp_max": 4.0,
+        "note": "Purees, pastes and condiments in sachet form. Denser and larger than a spice dose; a mayonnaise or ginger puree sachet is a tablespoon-ish, not a teaspoon."
+      }
+    },
+    "pot(s)": {
+      "dry": {
+        "grams": 7.0,
+        "g_per_tsp": 2.3,
+        "tsp_min": 1.5,
+        "tsp_max": 5.0,
+        "note": "Pots hold more than sachets. Scaled from the sachet default by the ratio the old flat constants assumed (12/8), applied to the corrected sachet mass."
+      },
+      "wet": {
+        "grams": 30.0,
+        "g_per_tsp": 5.5,
+        "tsp_min": 2.0,
+        "tsp_max": 8.0,
+        "note": "Peanut butter, mustards, curry pastes."
+      }
+    }
+  },
+  "by_name": {
+    "tandoori masala mix": {
+      "grams": 5.0,
+      "g_per_tsp": 2.4,
+      "tsp_min": 1.5,
+      "tsp_max": 2.5,
+      "source": "measured",
+      "note": "Printed on the sachet, Super Quick Tandoori Salmon, 2 servings."
+    },
+    "indonesian style spice mix": {
+      "grams": 3.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 2.0,
+      "source": "measured",
+      "note": "Printed on the sachet, Protein-Packed Shredded Satay Chicken Noodles, 2 servings."
+    },
+    "ground cinnamon": {
+      "grams": 2.0,
+      "g_per_tsp": 2.6,
+      "tsp_min": 0.5,
+      "tsp_max": 1.5,
+      "source": "estimated",
+      "note": "Accent spice, not a base. Must sit below the measured mixes, and cinnamon dominates a dish quickly."
+    },
+    "ground cloves": {
+      "grams": 1.0,
+      "g_per_tsp": 2.1,
+      "tsp_min": 0.25,
+      "tsp_max": 0.75,
+      "source": "estimated",
+      "note": "The most overpowering spice in the library; erring low costs a duller dish, erring high costs the dish."
+    },
+    "ground cardamom": {
+      "grams": 1.5,
+      "g_per_tsp": 2.0,
+      "tsp_min": 0.5,
+      "tsp_max": 1.0,
+      "source": "estimated"
+    },
+    "ground nutmeg": {
+      "grams": 1.0,
+      "g_per_tsp": 2.2,
+      "tsp_min": 0.25,
+      "tsp_max": 0.75,
+      "source": "estimated"
+    },
+    "cayenne pepper": {
+      "grams": 1.0,
+      "g_per_tsp": 1.8,
+      "tsp_min": 0.25,
+      "tsp_max": 1.0,
+      "source": "estimated"
+    },
+    "chilli flakes": {
+      "grams": 1.5,
+      "g_per_tsp": 1.7,
+      "tsp_min": 0.5,
+      "tsp_max": 1.5,
+      "source": "estimated"
+    },
+    "red chilli flakes": {
+      "grams": 1.5,
+      "g_per_tsp": 1.7,
+      "tsp_min": 0.5,
+      "tsp_max": 1.5,
+      "source": "estimated"
+    },
+    "chilli powder": {
+      "grams": 2.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 0.5,
+      "tsp_max": 1.5,
+      "source": "estimated"
+    },
+    "smoked paprika": {
+      "grams": 3.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 2.0,
+      "source": "estimated",
+      "note": "Used generously as a base in Spanish and Cajun dishes, but potent enough to dominate."
+    },
+    "mild paprika": {
+      "grams": 4.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 2.5,
+      "source": "estimated",
+      "note": "Forgiving, so it can sit near the general dry-sachet default."
+    },
+    "ground cumin": {
+      "grams": 4.0,
+      "g_per_tsp": 2.1,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated",
+      "note": "A base spice, frequently the largest single seasoning in a curry."
+    },
+    "ground coriander": {
+      "grams": 4.0,
+      "g_per_tsp": 1.8,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "ground turmeric": {
+      "grams": 3.0,
+      "g_per_tsp": 3.0,
+      "tsp_min": 0.5,
+      "tsp_max": 2.0,
+      "source": "estimated",
+      "note": "Dense, and colours far more than it flavours; a little goes a long way."
+    },
+    "chinese five spice": {
+      "grams": 2.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 0.5,
+      "tsp_max": 1.5,
+      "source": "estimated",
+      "note": "Contains cloves and star anise, so it behaves like an accent blend rather than a base."
+    },
+    "ras-el-hanout": {
+      "grams": 5.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.5,
+      "tsp_max": 3.0,
+      "source": "estimated",
+      "note": "A base mix, so anchored to the measured mixes rather than the accent spices."
+    },
+    "za'atar": {
+      "grams": 5.0,
+      "g_per_tsp": 1.8,
+      "tsp_min": 1.5,
+      "tsp_max": 4.0,
+      "source": "estimated"
+    },
+    "dukkah mix": {
+      "grams": 6.0,
+      "g_per_tsp": 2.0,
+      "tsp_min": 2.0,
+      "tsp_max": 4.0,
+      "source": "estimated",
+      "note": "Nut-and-seed based, used as a topping rather than a seasoning, so a larger dose."
+    },
+    "dried oregano": {
+      "grams": 2.0,
+      "g_per_tsp": 1.0,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated",
+      "note": "Dried leaf is a third the density of ground spice, so the same fill weighs far less."
+    },
+    "mixed herbs": {
+      "grams": 2.0,
+      "g_per_tsp": 1.0,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "dried italian herbs": {
+      "grams": 2.0,
+      "g_per_tsp": 1.0,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "italian style herbs": {
+      "grams": 2.0,
+      "g_per_tsp": 1.0,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "provencal herbs": {
+      "grams": 2.0,
+      "g_per_tsp": 1.0,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "dried thyme": {
+      "grams": 1.5,
+      "g_per_tsp": 1.0,
+      "tsp_min": 0.5,
+      "tsp_max": 2.0,
+      "source": "estimated"
+    },
+    "dried rosemary": {
+      "grams": 1.5,
+      "g_per_tsp": 1.2,
+      "tsp_min": 0.5,
+      "tsp_max": 2.0,
+      "source": "estimated"
+    },
+    "nigella seeds": {
+      "grams": 3.0,
+      "g_per_tsp": 2.6,
+      "tsp_min": 0.5,
+      "tsp_max": 2.0,
+      "source": "estimated"
+    },
+    "mustard seeds": {
+      "grams": 3.0,
+      "g_per_tsp": 3.2,
+      "tsp_min": 0.5,
+      "tsp_max": 2.0,
+      "source": "estimated"
+    },
+    "black peppercorns": {
+      "grams": 3.0,
+      "g_per_tsp": 2.9,
+      "tsp_min": 0.5,
+      "tsp_max": 2.0,
+      "source": "estimated"
+    },
+    "chicken stock powder": {
+      "grams": 11.0,
+      "g_per_tsp": 3.0,
+      "tsp_min": 2.0,
+      "tsp_max": 5.0,
+      "source": "estimated",
+      "note": "One stock cube's worth of concentrate for ~500 ml. Previously 160 g, because the keyword table matched 'chicken' and priced it as a chicken breast."
+    },
+    "vegetable stock powder": {
+      "grams": 11.0,
+      "g_per_tsp": 3.0,
+      "tsp_min": 2.0,
+      "tsp_max": 5.0,
+      "source": "estimated"
+    },
+    "beef stock powder": {
+      "grams": 11.0,
+      "g_per_tsp": 3.0,
+      "tsp_min": 2.0,
+      "tsp_max": 5.0,
+      "source": "estimated"
+    },
+    "garlic salt": {
+      "grams": 5.0,
+      "g_per_tsp": 3.3,
+      "tsp_min": 0.5,
+      "tsp_max": 2.0,
+      "source": "estimated"
+    },
+    "peri peri seasoning": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "cajun spice mix": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "mexican style spice mix": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "central american style spice mix": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "chermoula spice mix": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "thai style spice mix": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "north indian style spice mix": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "curry powder mix": {
+      "grams": 4.5,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "mild curry powder": {
+      "grams": 6.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.5,
+      "tsp_max": 4.0,
+      "source": "estimated",
+      "note": "Sold as a pot rather than a sachet, hence larger."
+    },
+    "roasted spice and herb blend": {
+      "grams": 4.5,
+      "g_per_tsp": 2.0,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "lemon & herb seasoning": {
+      "grams": 4.5,
+      "g_per_tsp": 2.0,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "caribbean style jerk": {
+      "grams": 5.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.0,
+      "tsp_max": 3.0,
+      "source": "estimated"
+    },
+    "poudre de colombo": {
+      "grams": 6.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.5,
+      "tsp_max": 4.0,
+      "source": "estimated"
+    },
+    "mexican spice": {
+      "grams": 6.0,
+      "g_per_tsp": 2.3,
+      "tsp_min": 1.5,
+      "tsp_max": 4.0,
+      "source": "estimated"
+    },
+    "tandoori masala spice": {
+      "grams": 6.0,
+      "g_per_tsp": 2.4,
+      "tsp_min": 1.5,
+      "tsp_max": 4.0,
+      "source": "estimated",
+      "note": "The pot form of the measured 5 g sachet, so a little larger."
+    }
+  }
+}

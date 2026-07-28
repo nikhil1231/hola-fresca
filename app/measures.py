@@ -14,9 +14,12 @@ the same recipe from a supermarket it matters a great deal: the cook is holding 
 containers are portion-filled by volume rather than weighed, unit→volume holds
 far steadier across spices than unit→mass, which needs a density per spice.
 
-So the native unit stays the canonical cooking quantity, spoons are offered as
-the actionable translation, and grams are demoted to a derived projection that
-only the shopping path reads.
+So the native unit stays the canonical cooking quantity and spoons are offered as
+the actionable translation. Both come from ``ingredient_spice_doses.json`` via
+:func:`app.canonicalize.spice_dose`: one container mass, from which teaspoons are
+derived. Keeping the two in one record is deliberate — they were once separate
+tables and drifted, leaving the page advising half a teaspoon of ground cloves
+while the planner bought eight grams of it.
 """
 from __future__ import annotations
 
@@ -24,9 +27,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from app.canonicalize import normalize_name
+from app.canonicalize import normalize_name, spice_dose
 
-_SPOONS_PATH = Path(__file__).parent / "data" / "ingredient_spoons.json"
 _POTENCY_PATH = Path(__file__).parent / "data" / "ingredient_potency.json"
 
 # Units that already state a metric quantity, so nothing needs deriving and the
@@ -38,16 +40,6 @@ SPOON_UNITS = frozenset({"tsp", "tbsp", "pinch"})
 POTENCY_HIGH = "high"
 POTENCY_NORMAL = "normal"
 POTENCY_FORGIVING = "forgiving"
-
-
-@lru_cache(maxsize=1)
-def _spoons() -> dict:
-    data = json.loads(_SPOONS_PATH.read_text())
-    return {
-        "by_name": {k.lower(): float(v) for k, v in data["by_name"].items()},
-        "by_keyword": [(k.lower(), float(v)) for k, v in data["by_keyword"]],
-        "by_unit": {k: float(v) for k, v in data["by_unit"].items()},
-    }
 
 
 @lru_cache(maxsize=1)
@@ -73,6 +65,17 @@ def amount_g_is_estimated(unit: str | None) -> bool:
     return (unit or "") not in METRIC_UNITS
 
 
+def _tsp_per_container(name: str, unit: str | None) -> tuple[float, dict] | None:
+    """Teaspoons in one container, derived from its mass — never stored separately."""
+    dose = spice_dose(name, unit)
+    if dose is None:
+        return None
+    per_tsp = float(dose.get("g_per_tsp") or 0)
+    if per_tsp <= 0:
+        return None
+    return float(dose["grams"]) / per_tsp, dose
+
+
 def spoons_for(name: str, amount: float | None, unit: str | None) -> float | None:
     """Teaspoons for a pre-portioned container of ``name``, or None.
 
@@ -84,16 +87,34 @@ def spoons_for(name: str, amount: float | None, unit: str | None) -> float | Non
         return None
     if unit in METRIC_UNITS or unit in SPOON_UNITS:
         return None
-    ref = _spoons()
-    norm = normalize_name(name)
-    per_unit = ref["by_name"].get(norm)
-    if per_unit is None:
-        per_unit = next((v for k, v in ref["by_keyword"] if k in norm), None)
-    if per_unit is None:
-        per_unit = ref["by_unit"].get(unit)
-    if per_unit is None:
+    resolved = _tsp_per_container(name, unit)
+    if resolved is None:
         return None
-    return round(amount * per_unit, 2)
+    return round(amount * resolved[0], 2)
+
+
+def spoon_range_for(
+    name: str, amount: float | None, unit: str | None
+) -> tuple[float, float] | None:
+    """The teaspoon span a sensible cook would stay within, scaled to ``amount``.
+
+    Shown next to potent seasonings, where our container mass is an estimate and
+    the difference between the low and high end is the difference between an
+    under-seasoned dish and an inedible one. Also a guardrail: a mass that implies
+    a spoonful outside this span is wrong by construction.
+    """
+    if amount is None or amount <= 0 or not unit:
+        return None
+    if unit in METRIC_UNITS or unit in SPOON_UNITS:
+        return None
+    resolved = _tsp_per_container(name, unit)
+    if resolved is None:
+        return None
+    _, dose = resolved
+    lo, hi = dose.get("tsp_min"), dose.get("tsp_max")
+    if lo is None or hi is None:
+        return None
+    return round(amount * float(lo), 2), round(amount * float(hi), 2)
 
 
 def potency_for(name: str) -> str:

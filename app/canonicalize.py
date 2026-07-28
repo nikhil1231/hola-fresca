@@ -29,6 +29,14 @@ from sqlalchemy.orm import Session
 from app.db.models import RecipeIngredient
 
 _REFERENCE_PATH = Path(__file__).parent / "data" / "ingredient_grams.json"
+_SPICE_DOSE_PATH = Path(__file__).parent / "data" / "ingredient_spice_doses.json"
+
+# Sachet/pot contents split into two physical classes: a spoonful of dry powder
+# weighs nothing like a squeeze of puree, and one constant cannot serve both.
+_WET_WORDS = (
+    "puree", "paste", "sauce", "honey", "oil", "vinegar", "ketchup", "mayonnaise",
+    "mayo", "syrup", "mustard", "jelly", "butter", "avocado", "nduja", "harissa",
+)
 
 _METRIC = {"grams": "g", "milliliter(s)": "ml"}
 # Standard kitchen conversions (approx; density ~1 so treated as g/ml).
@@ -55,7 +63,38 @@ def _reference() -> dict:
         "by_name": {k.lower(): float(v) for k, v in data["by_name"].items()},
         "by_keyword": [(k.lower(), float(v)) for k, v in data["by_keyword"]],
         "by_unit": {k: float(v) for k, v in data["by_unit"].items()},
+        "unit_ceiling": {k: float(v) for k, v in data.get("unit_ceiling", {}).items()},
     }
+
+
+@lru_cache(maxsize=1)
+def _spice_doses() -> dict:
+    data = json.loads(_SPICE_DOSE_PATH.read_text())
+    return {
+        "by_name": {k.lower(): v for k, v in data["by_name"].items()},
+        "defaults": data["defaults"],
+    }
+
+
+def spice_dose(name: str, unit: str | None) -> dict | None:
+    """The dose record for one pre-portioned container of ``name``, or None.
+
+    The single source of truth for both what the planner buys and what the cook
+    measures: ``grams`` is canonical and teaspoons are derived from it, so the two
+    numbers cannot drift apart the way two independent tables did.
+    """
+    if not unit:
+        return None
+    doses = _spice_doses()
+    norm = normalize_name(name)
+    entry = doses["by_name"].get(norm)
+    if entry is not None:
+        return entry
+    per_unit = doses["defaults"].get(unit)
+    if per_unit is None:
+        return None
+    kind = "wet" if any(w in norm for w in _WET_WORDS) else "dry"
+    return per_unit.get(kind)
 
 
 def normalize_name(name: str) -> str:
@@ -64,12 +103,31 @@ def normalize_name(name: str) -> str:
 
 
 def _grams_per_unit(name: str, unit: str) -> float | None:
+    """Grams for one ``unit`` of ``name``: exact name, then keyword, then the unit.
+
+    The keyword tier matches on substrings and knows nothing about the container,
+    which is how "Chicken Stock Powder" came to weigh 160 g a sachet — it contains
+    "chicken", and a chicken breast is 160 g. A keyword hit that is impossible for
+    the container it arrives in is therefore rejected rather than trusted: a sachet
+    holds a spoonful of something, whatever word appears in its name. Exact
+    ``by_name`` entries are exempt, being a deliberate statement about that
+    ingredient rather than an inference from part of its name.
+    """
+    # Pre-portioned seasoning containers are governed by the dose table, which is
+    # also what the cook is shown, so the shopping weight and the measured spoonful
+    # are the same statement rather than two that can disagree.
+    dose = spice_dose(name, unit)
+    if dose is not None:
+        return float(dose["grams"])
     ref = _reference()
     norm = normalize_name(name)
     if norm in ref["by_name"]:
         return ref["by_name"][norm]
+    ceiling = ref["unit_ceiling"].get(unit)
     for keyword, grams in ref["by_keyword"]:
         if keyword in norm:
+            if ceiling is not None and grams > ceiling:
+                break
             return grams
     return ref["by_unit"].get(unit)
 

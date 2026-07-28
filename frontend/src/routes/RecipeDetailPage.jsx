@@ -111,6 +111,17 @@ function estimatedPotent(ing) {
   return ing.amount_g_estimated && ing.potency === 'high'
 }
 
+// "1–2" for a potent spice whose range is worth showing, else null. Collapses
+// when both ends round to the same figure, so a narrow range never renders as
+// the nonsense "1–1".
+function potentSpan(ing, factor) {
+  if (!estimatedPotent(ing) || !ing.spoon_range) return null
+  const lo = roundCount(ing.spoon_range[0] * factor)
+  const hi = roundCount(ing.spoon_range[1] * factor)
+  if (!(lo > 0) || hi <= lo || hi > MAX_SPOONS) return null
+  return `${formatCount(lo)}–${formatCount(hi)}`
+}
+
 function gramsLabel(ing, factor) {
   if (ing.amount_g == null) return null
   const metricAmount = roundNice(ing.amount_g * factor)
@@ -146,7 +157,13 @@ function scaledQuantity(ing, factor) {
       if (ing.spoons != null) {
         const spoons = roundCount(ing.spoons * factor)
         if (spoons > 0 && spoons <= MAX_SPOONS) {
-          return `${native} (≈${formatCount(spoons)} tsp)`
+          // For a spice potent enough to ruin the dish, the span is the honest
+          // answer: the container mass behind that midpoint is our estimate, and
+          // the cook is better served by the range than by false precision.
+          const span = potentSpan(ing, factor)
+          return span
+            ? `${native} (${span} tsp)`
+            : `${native} (≈${formatCount(spoons)} tsp)`
         }
       }
       const grams = gramsLabel(ing, factor)

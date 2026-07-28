@@ -426,6 +426,11 @@ def get_recipe(
                 image_url=image_url(i.image_path, 200),
                 unmapped=i.id in unmapped_ingredient_ids,
                 spoons=measures.spoons_for(i.name, i.amount, i.unit),
+                spoon_range=(
+                    list(rng)
+                    if (rng := measures.spoon_range_for(i.name, i.amount, i.unit))
+                    else None
+                ),
                 amount_g_estimated=measures.amount_g_is_estimated(i.unit),
                 potency=measures.potency_for(i.name),
             )
