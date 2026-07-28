@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
-from app.api.recipes import _apply_filters, _to_card, _unmapped_recipe_ids
+from app.api.recipes import _apply_filters, _recipe_ids_with_pricing_gaps, _to_card
 from app.api.schemas import (
     BasketIn,
     BasketContributionOut,
@@ -27,7 +27,8 @@ from app.planner.basket import (
     basket_gap_count,
     build_basket,
 )
-from app.planner.index import PlanIndex, load_index
+from app.planner.cache import get_index
+from app.planner.index import PlanIndex
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
 assert SuggestionsIn.model_fields["candidate_portions"].default == 4
@@ -131,12 +132,12 @@ def _load_planner_index(
     recipe_ids: list[int],
     csv_path: Path | None,
 ) -> PlanIndex:
-    return load_index(
-        factory,
-        recipe_ids=recipe_ids,
-        curated_only=False,
-        csv_path=csv_path,
-    )
+    """The shared curated index; ``recipe_ids`` is only ever a subset of it.
+
+    Every recipe id reaching this module has been through ``_require_curated`` or
+    ``_apply_filters``, both of which insist on the curated library.
+    """
+    return get_index(factory, csv_path=csv_path)
 
 
 @router.post("/basket", response_model=BasketOut)
@@ -160,17 +161,21 @@ def _candidate_ids(
     session: Session,
     body: SuggestionsIn,
     pinned_ids: set[int],
+    factory: sessionmaker[Session],
     csv_path: Path | None,
 ) -> list[int]:
     filters = body.filters.model_dump()
     stmt = _apply_filters(select(Recipe.id), **filters)
     if pinned_ids:
         stmt = stmt.where(Recipe.id.not_in(pinned_ids))
-    if "unmapped" in body.filters.exclude:
-        unmapped_recipe_ids = _unmapped_recipe_ids(session, csv_path)
-        if unmapped_recipe_ids:
-            stmt = stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
-    return list(session.scalars(stmt).all())
+
+    candidate_ids = list(session.scalars(stmt).all())
+    if "unmapped" not in body.filters.exclude:
+        return candidate_ids
+
+    gap_recipe_ids = _recipe_ids_with_pricing_gaps(candidate_ids, factory, csv_path)
+    return [recipe_id for recipe_id in candidate_ids if recipe_id not in gap_recipe_ids]
+
 
 
 def _recipe_keys(index: PlanIndex, recipe_id: int) -> set[str]:
@@ -191,7 +196,7 @@ def suggestions(
     _require_curated(session, pinned_recipe_ids)
 
     pinned_id_set = set(pinned_recipe_ids)
-    candidate_ids = _candidate_ids(session, body, pinned_id_set, csv_path)
+    candidate_ids = _candidate_ids(session, body, pinned_id_set, factory, csv_path)
     all_index_ids = list(dict.fromkeys([*pinned_recipe_ids, *candidate_ids]))
     index = _load_planner_index(factory, all_index_ids, csv_path)
 

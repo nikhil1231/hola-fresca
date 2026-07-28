@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import Select, func, nullslast, or_, select
+from sqlalchemy import Select, and_, func, nullslast, or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api import facets as facet_cfg
@@ -37,7 +37,8 @@ from app import measures
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
 from app.planner.basket import Selection, basket_gap_count, build_basket
-from app.planner.index import RETAILER, load_index
+from app.planner.cache import get_index
+from app.planner.index import RETAILER
 
 
 def _ingredient_match(keywords: list[str]):
@@ -45,6 +46,18 @@ def _ingredient_match(keywords: list[str]):
     return Recipe.ingredients.any(
         or_(*[RecipeIngredient.name.ilike(f"%{k}%") for k in keywords])
     )
+
+
+def _main_protein_match(keywords: list[str]):
+    """A condition: the recipe has a main protein ingredient matching a keyword."""
+    protein_names = or_(*[RecipeIngredient.name.ilike(f"%{k}%") for k in keywords])
+    non_main_names = or_(
+        *[
+            RecipeIngredient.name.ilike(f"%{k}%")
+            for k in facet_cfg.PROTEIN_NON_MAIN_KEYWORDS
+        ]
+    )
+    return Recipe.ingredients.any(and_(protein_names, ~non_main_names))
 
 router = APIRouter(prefix="/api", tags=["recipes"])
 
@@ -98,7 +111,7 @@ def _apply_filters(
         stmt = stmt.where(Recipe.tags.any(RecipeTag.type == tag_type))
     # Protein include: recipe contains ANY of the selected proteins (OR).
     protein_conds = [
-        _ingredient_match(facet_cfg.INGREDIENT_KEYWORDS[p])
+        _main_protein_match(facet_cfg.INGREDIENT_KEYWORDS[p])
         for p in protein
         if p in facet_cfg.INGREDIENT_KEYWORDS
     ]
@@ -167,24 +180,65 @@ def _to_card(
     )
 
 
+def _standalone_baskets(
+    recipe_ids: list[int],
+    factory: sessionmaker[Session],
+    csv_path: Path | None,
+):
+    if not recipe_ids:
+        return {}
+    index = get_index(factory, csv_path=csv_path)
+    return {
+        recipe_id: build_basket(
+            index, [Selection(recipe_id=recipe_id, servings=INTRINSIC_PORTIONS)]
+        )
+        for recipe_id in recipe_ids
+    }
+
+
 def _intrinsic_prices(
     rows: list[Recipe] | list[int],
     factory: sessionmaker[Session],
     csv_path: Path | None,
 ) -> dict[int, tuple[float, float, int]]:
     recipe_ids = [recipe if isinstance(recipe, int) else recipe.id for recipe in rows]
-    if not recipe_ids:
-        return {}
-    index = load_index(factory, recipe_ids=recipe_ids, curated_only=False, csv_path=csv_path)
     prices: dict[int, tuple[float, float, int]] = {}
-    for recipe_id in recipe_ids:
-        basket = build_basket(index, [Selection(recipe_id=recipe_id, servings=INTRINSIC_PORTIONS)])
+    for recipe_id, basket in _standalone_baskets(recipe_ids, factory, csv_path).items():
         prices[recipe_id] = (
             _round_money(basket.score),
             _round_money(basket.consumed_cost),
             basket_gap_count(basket),
         )
     return prices
+
+
+def _recipe_ids_with_pricing_gaps(
+    recipe_ids: list[int],
+    factory: sessionmaker[Session],
+    csv_path: Path | None,
+) -> set[int]:
+    if not recipe_ids:
+        return set()
+    index = get_index(factory, csv_path=csv_path)
+    gap_recipe_ids: set[int] = set()
+    for recipe_id in recipe_ids:
+        recipe = index.recipes.get(recipe_id)
+        if recipe is None:
+            continue
+        if recipe.untracked_lines > 0:
+            gap_recipe_ids.add(recipe_id)
+            continue
+        for need in recipe.needs:
+            ingredient = index.ingredient(need.key)
+            if ingredient is None:
+                gap_recipe_ids.add(recipe_id)
+                break
+            if ingredient.pantry_staple:
+                continue
+            if not ingredient.shoppable:
+                gap_recipe_ids.add(recipe_id)
+                break
+    return gap_recipe_ids
 
 
 def _alias_roots(rows: list[IngredientMapping]) -> dict[str, str]:
@@ -296,23 +350,36 @@ def list_recipes(
         difficulty=difficulty, exclude=exclude,
     )
     exclude_unmapped = "unmapped" in exclude
-    unmapped_recipe_ids = _unmapped_recipe_ids(session, csv_path) if exclude_unmapped else set()
-
-    total_stmt = _apply_filters(select(func.count(Recipe.id)), **filters)
-    if exclude_id:
-        total_stmt = total_stmt.where(Recipe.id.not_in(exclude_id))
-    if unmapped_recipe_ids:
-        total_stmt = total_stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
-    total = session.scalar(total_stmt) or 0
-
-    effective_offset = offset if offset is not None else (page - 1) * page_size
-    if sort in {"price_low", "price_high"}:
+    excluded_recipe_ids = set(exclude_id)
+    filtered_candidate_ids: list[int] | None = None
+    if exclude_unmapped:
         id_stmt = _apply_filters(select(Recipe.id), **filters)
         if exclude_id:
             id_stmt = id_stmt.where(Recipe.id.not_in(exclude_id))
-        if unmapped_recipe_ids:
-            id_stmt = id_stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
-        candidate_ids = list(session.scalars(id_stmt).all())
+        filtered_candidate_ids = list(session.scalars(id_stmt).all())
+        excluded_recipe_ids.update(
+            _recipe_ids_with_pricing_gaps(filtered_candidate_ids, factory, csv_path)
+        )
+
+    if filtered_candidate_ids is not None:
+        total = sum(1 for recipe_id in filtered_candidate_ids if recipe_id not in excluded_recipe_ids)
+    else:
+        total_stmt = _apply_filters(select(func.count(Recipe.id)), **filters)
+        if excluded_recipe_ids:
+            total_stmt = total_stmt.where(Recipe.id.not_in(excluded_recipe_ids))
+        total = session.scalar(total_stmt) or 0
+
+    effective_offset = offset if offset is not None else (page - 1) * page_size
+    if sort in {"price_low", "price_high"}:
+        if filtered_candidate_ids is not None:
+            candidate_ids = [
+                recipe_id for recipe_id in filtered_candidate_ids if recipe_id not in excluded_recipe_ids
+            ]
+        else:
+            id_stmt = _apply_filters(select(Recipe.id), **filters)
+            if excluded_recipe_ids:
+                id_stmt = id_stmt.where(Recipe.id.not_in(excluded_recipe_ids))
+            candidate_ids = list(session.scalars(id_stmt).all())
         intrinsic = _intrinsic_prices(candidate_ids, factory, csv_path)
         sorted_ids = sorted(
             candidate_ids,
@@ -339,10 +406,8 @@ def list_recipes(
             _apply_filters(select(Recipe), **filters)
             .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
         )
-        if exclude_id:
-            stmt = stmt.where(Recipe.id.not_in(exclude_id))
-        if unmapped_recipe_ids:
-            stmt = stmt.where(Recipe.id.not_in(unmapped_recipe_ids))
+        if excluded_recipe_ids:
+            stmt = stmt.where(Recipe.id.not_in(excluded_recipe_ids))
         stmt = (
             stmt
             .order_by(order, Recipe.id)
@@ -558,8 +623,13 @@ def get_facets(
             select(func.count()).select_from(Recipe).where(curated, _ingredient_match(keywords))
         ) or 0
 
+    def protein_count(keywords: list[str]) -> int:
+        return session.scalar(
+            select(func.count()).select_from(Recipe).where(curated, _main_protein_match(keywords))
+        ) or 0
+
     proteins = [
-        FacetCount(value=v, label=label, count=ingredient_count(facet_cfg.INGREDIENT_KEYWORDS[v]))
+        FacetCount(value=v, label=label, count=protein_count(facet_cfg.INGREDIENT_KEYWORDS[v]))
         for v, label in facet_cfg.PROTEIN_FILTERS.items()
     ]
     proteins = sorted([p for p in proteins if p.count], key=lambda f: f.count, reverse=True)

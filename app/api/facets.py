@@ -71,6 +71,21 @@ INGREDIENT_KEYWORDS = {
     "coconut": ["coconut"],
 }
 
+# Mentions of a protein that are not the recipe's main protein. Protein include
+# filters ignore these; ingredient excludes deliberately keep using the broader
+# keyword groups above.
+PROTEIN_NON_MAIN_KEYWORDS = [
+    "bouillon",
+    "broth",
+    "flavouring",
+    "flavoring",
+    "gravy",
+    "paste",
+    "sauce",
+    "seasoning",
+    "stock",
+]
+
 # The proteins offered in the "protein" include filter. value -> label.
 PROTEIN_FILTERS = {
     "chicken": "Chicken",

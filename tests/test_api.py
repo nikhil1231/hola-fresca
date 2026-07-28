@@ -51,6 +51,7 @@ def client(tmp_path):
             ("name:pasta", "sid-pasta", "Pasta"),
             ("name:lentils", "sid-lentils", "Lentils"),
             ("name:chicken", "sid-chicken", "Chicken Breast"),
+            ("name:chicken stock paste", "sid-chicken-stock", "Chicken Stock Paste"),
             ("name:tortillas", "sid-tortillas", "Taco Tortillas"),
         ],
     )
@@ -74,10 +75,17 @@ def client(tmp_path):
             "Chicken Breast",
             [{"sku": "chicken", "name": "Chicken 500g", "price": 5.0, "pack_value": 500, "pack_unit": "g"}],
         )
+        seed_candidates(
+            s,
+            "name:chicken stock paste",
+            "Chicken Stock Paste",
+            [{"sku": "stock", "name": "Chicken Stock Paste", "price": 1.0, "pack_value": 100, "pack_unit": "g"}],
+        )
         for key, sku in (
             ("name:pasta", "pasta"),
             ("name:lentils", "lentils"),
             ("name:chicken", "chicken"),
+            ("name:chicken stock paste", "stock"),
         ):
             service.save_decision(
                 s,
@@ -99,7 +107,7 @@ def client(tmp_path):
         italian.ingredients = [
             RecipeIngredient(name="Pasta", source_ingredient_id="sid-pasta", position=2, amount=180, unit="grams", amount_g=180, canonical_unit="g"),
             RecipeIngredient(name="Lentils", source_ingredient_id="sid-lentils", position=1, amount=1, unit="carton(s)", amount_g=250, canonical_unit="g"),
-            RecipeIngredient(name="Placeholder Spice", source_ingredient_id="sid-spice", position=3, amount=0, unit="sachet(s)", amount_g=0, canonical_unit="g"),
+            RecipeIngredient(name="Chicken Stock Paste", source_ingredient_id="sid-chicken-stock", position=3, amount=0, unit="sachet(s)", amount_g=0),
         ]
         italian.steps = [RecipeStep(index=1, instructions_text="Boil pasta")]
         italian.nutrition = [RecipeNutrition(name="Protein", amount=50, unit="g")]
@@ -192,10 +200,9 @@ def test_protein_include_filter(client):
 
 
 def test_exclude_ingredient(client):
-    # Excluding chicken removes the Mexican recipe, leaving the Italian.
+    # Excluding chicken is broad and also catches stock paste.
     data = client.get("/api/recipes", params={"exclude": "chicken"}).json()
-    assert data["total"] == 1
-    assert data["items"][0]["name"] == "Creamy Veggie Pasta"
+    assert data["total"] == 0
 
 
 def test_exclude_unmapped_recipes(client):
@@ -237,7 +244,6 @@ def test_detail_shape_and_image(client):
     detail = client.get(f"/api/recipes/{rid}").json()
     assert detail["name"] == "Creamy Veggie Pasta"
     assert [i["name"] for i in detail["ingredients"]] == ["Lentils", "Pasta"]
-    assert "Placeholder Spice" not in [i["name"] for i in detail["ingredients"]]
     # Canonical grams flow through, incl. the count->grams conversion.
     lentils = next(i for i in detail["ingredients"] if i["name"] == "Lentils")
     assert lentils["amount_g"] == 250
@@ -272,6 +278,7 @@ def test_facets(client):
     assert "Milk" in exclude_values and "chicken" in exclude_values and "unmapped" in exclude_values
     # Chicken appears as a protein facet (the Mexican recipe has it).
     assert any(p["value"] == "chicken" for p in f["proteins"])
+    assert next(p["count"] for p in f["proteins"] if p["value"] == "chicken") == 1
     assert {s["value"] for s in f["sorts"]} >= {
         "popular",
         "protein_ratio",

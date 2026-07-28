@@ -141,12 +141,16 @@ def planner_client(tmp_path):
                 RecipeIngredient(name="Unknown", source_ingredient_id="sid-unknown-2", amount=1, unit="each", amount_g=25),
             ],
         )
+        unpriceable_only = _recipe(
+            "Saffron Rice",
+            [RecipeIngredient(name="Saffron", source_ingredient_id=SID_SAFFRON, amount=1, unit="each", amount_g=1)],
+        )
         hidden = _recipe(
             "Hidden Rice",
             [RecipeIngredient(name="Rice", source_ingredient_id=SID_RICE, amount=100, unit="g", amount_g=100)],
             curated=0,
         )
-        s.add_all([pinned, shared, standalone, gap_heavy, hidden])
+        s.add_all([pinned, shared, standalone, gap_heavy, unpriceable_only, hidden])
         s.commit()
         ids = {
             "pinned": pinned.id,
@@ -233,6 +237,15 @@ def test_basket_rejects_unknown_or_uncurated_recipes(planner_client):
     )
     assert missing.status_code == 400
     assert hidden.status_code == 400
+
+
+def test_browse_excludes_recipes_with_pricing_gaps(planner_client):
+    client, _ = planner_client
+    data = client.get("/api/recipes", params={"exclude": "unmapped"}).json()
+
+    assert data["total"] == 2
+    assert {item["name"] for item in data["items"]} == {"Rice Patties", "Bean Stew"}
+    assert all(item["intrinsic_gap_count"] == 0 for item in data["items"])
 
 
 def test_suggestions_rank_shared_marginal_cost_first(planner_client):
