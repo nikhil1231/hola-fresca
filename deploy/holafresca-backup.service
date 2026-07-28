@@ -1,19 +1,30 @@
 [Unit]
-Description=HolaFresca backup (mapping export + database snapshot)
+Description=HolaFresca backup (mapping export + database snapshot + offsite sync)
+# Nothing to sync to if the network is not up yet.
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/Documents/Programming/AI/HolaFresca
-# Two ExecStart lines run in order and the unit fails if either does. The export
-# is cheap and refreshes exports/*.csv for git; the snapshot is the disaster
-# copy. Both open the database read-only, so a run can never damage what it is
+# ExecStart lines run in order and the unit fails if any does. The export is
+# cheap and refreshes exports/*.csv for git; the snapshot is the disaster copy.
+# Both open the database read-only, so a run can never damage what it is
 # protecting, and VACUUM INTO is safe while the app is serving on :8100.
 ExecStart=%h/Documents/Programming/AI/HolaFresca/.venv/bin/python -m app.backup export-mappings
 ExecStart=%h/Documents/Programming/AI/HolaFresca/.venv/bin/python -m app.backup snapshot
-# ~16 s of mostly-gzip on a 260 MB database. Yield to anything interactive
-# rather than stutter the machine if it fires while it is in use.
+# Offsite copy. --max-age matches the local retention, so sync mirrors the same
+# 7-day window rather than deleting anything the pruner has not already dropped.
+# Leading "-" so a flat battery of a wifi connection cannot mark the whole unit
+# failed and mask the fact that the local backup above succeeded — the local
+# copy is the one that must never silently stop.
+ExecStart=-%h/.local/bin/rclone sync %h/backups/holafresca "gdrive:HolaFresca Backups/snapshots" --max-age 7d --stats-one-line
+# ~16 s of mostly-gzip on a 260 MB database, then an upload. Yield to anything
+# interactive rather than stutter the machine if it fires while it is in use.
 Nice=10
 IOSchedulingClass=idle
+# The upload is the slow part and it is not worth blocking a shutdown over.
+TimeoutStartSec=30min
 
 [Install]
 WantedBy=default.target

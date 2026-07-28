@@ -44,10 +44,16 @@ because it is tracked, `git reset --hard` restores it instead of losing it.
 
 ## Backups
 
-`holafresca-backup.{service,timer}` run `python -m app.backup` daily: the mapping
-export into `exports/*.csv`, then a gzipped whole-database snapshot into
-`~/backups/holafresca/`, keeping the newest 7. Roughly 32 MB per snapshot from a
-260 MB database, ~16 s. Both steps open the database read-only.
+`holafresca-backup.{service,timer}` run daily: the mapping export into
+`exports/*.csv`, a gzipped whole-database snapshot into `~/backups/holafresca/`
+keeping the newest 7, then an `rclone sync` of that directory to Google Drive.
+Roughly 32 MB per snapshot from a 260 MB database, ~16 s to make and ~5 s to
+upload. Both local steps open the database read-only.
+
+The sync line is prefixed `-` so a network failure cannot mark the unit failed
+and mask a local backup that did succeed — the on-disk copy is the one that must
+never silently stop. `--max-age 7d` mirrors the local retention rather than
+letting `sync` delete anything the pruner has not already dropped.
 
 `OnCalendar=03:00` with `Persistent=true`: the laptop is usually off then, so in
 practice most runs happen shortly after the next boot, which is the intent — a
@@ -58,12 +64,24 @@ is one database and backing up the main one covers both.
 
 ```sh
 systemctl --user start holafresca-backup.service   # run now
-python -m app.backup status                        # what exists, how big
+python -m app.backup status                        # what exists locally
 journalctl --user -u holafresca-backup.service     # what happened
+rclone lsl "gdrive:HolaFresca Backups/snapshots"   # what made it offsite
 ```
 
 Restoring is `gunzip -c <snapshot> > data/holafresca.db` with the app stopped.
 Verify with `PRAGMA integrity_check` before trusting it.
+
+Drive holds `snapshots/` (rolling 7 days) and `raw-cache/`, a one-off zip of
+`data/raw/` — 25,636 payloads, ~100 MB. The raw cache is re-scrapeable in
+principle but that means 16k requests against HelloFresh, so it is worth the
+one-time upload; it changes rarely enough not to belong in the daily job.
+
+The `gdrive` remote uses OAuth user credentials against a personal Google Cloud
+project. A service account cannot work here: files it uploads are owned by the
+service account, which has zero storage quota, and the escapes Google documents
+(Shared Drives, domain-wide delegation) both need Workspace rather than a
+consumer account. rclone lives at `~/.local/bin/rclone`, outside the repo.
 
 Committing `exports/` is deliberately left manual — the timer refreshes the CSVs
 but does not commit, because writing to whatever branch happens to be checked out
