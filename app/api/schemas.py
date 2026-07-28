@@ -40,6 +40,7 @@ class PaginatedRecipes(BaseModel):
 
 
 class IngredientOut(BaseModel):
+    ingredient_key: str | None = None
     name: str
     amount: float | None = None
     unit: str | None = None

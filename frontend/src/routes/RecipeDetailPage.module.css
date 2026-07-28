@@ -43,3 +43,60 @@
   line-height: 1.6;
   padding-top: 2px;
 }
+.macroDot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 999px;
+  background: var(--macro-color);
+  vertical-align: 0.08em;
+}
+
+.costBadge {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.portionStepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 36px;
+  padding: 3px;
+  border: 1px solid var(--mantine-color-gray-2);
+  border-radius: 999px;
+  background: var(--mantine-color-white);
+}
+
+.portionCount {
+  min-width: 24px;
+  text-align: center;
+  line-height: 1;
+}
+
+.ingredientsTable th:first-child,
+.ingredientsTable td:first-child {
+  padding-left: 8px;
+}
+
+.ingredientRow {
+  cursor: pointer;
+}
+
+.ingredientRow:hover {
+  box-shadow: inset 3px 0 var(--mantine-color-fresh-6);
+}
+
+.ingredientRow:hover td {
+  background: transparent !important;
+}
+
+.quantityCell {
+  width: 96px;
+  vertical-align: top;
+}
+
+.ingPlaceholder {
+  flex-shrink: 0;
+}

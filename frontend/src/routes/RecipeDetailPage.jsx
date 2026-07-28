@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ActionIcon,
@@ -16,6 +16,7 @@ import {
   SegmentedControl,
   SimpleGrid,
   Skeleton,
+  Table,
   Stack,
   Text,
   ThemeIcon,
@@ -32,15 +33,29 @@ import {
   IconExternalLink,
   IconFlag,
   IconFlame,
+  IconMinus,
+  IconPhoto,
+  IconPlus,
+  IconBasketPlus,
   IconStarFilled,
+  IconTrash,
   IconUsers,
 } from '@tabler/icons-react'
 
 import {
   useAuditRecipe,
+  usePlannerBasket,
   useRecipe,
   useRevertRecipeEdits,
 } from '../hooks/useRecipeQueries.js'
+import {
+  DEFAULT_PORTIONS,
+  MAX_PORTIONS,
+  MAX_RECIPES_PER_WEEK,
+  MIN_PORTIONS,
+  toPlannerSelections,
+  useWeeklyPlan,
+} from '../hooks/useWeeklyPlan.js'
 import classes from './RecipeDetailPage.module.css'
 
 const MACRO_LABELS = {
@@ -48,6 +63,28 @@ const MACRO_LABELS = {
   protein_g: 'Protein',
   carbs_g: 'Carbs',
   fat_g: 'Fat',
+}
+
+const MACRO_COLORS = {
+  Energy: 'var(--mantine-color-yellow-5)',
+  Protein: 'var(--mantine-color-green-6)',
+  Carbs: 'var(--mantine-color-blue-6)',
+  Fat: 'var(--mantine-color-red-6)',
+}
+
+const money = new Intl.NumberFormat('en-GB', {
+  style: 'currency',
+  currency: 'GBP',
+})
+
+function formatMoney(value) {
+  return money.format(value ?? 0)
+}
+
+function formatSignedMoney(value) {
+  if (value == null) return null
+  const absolute = Math.abs(value)
+  return `${value < 0 ? '-' : '+'}${formatMoney(absolute)}`
 }
 
 const DIFFICULTY = { 1: 'Easy', 2: 'Medium', 3: 'Hard' }
@@ -180,10 +217,89 @@ function scaledQuantity(ing, factor) {
   return ''
 }
 
+function splitQuantityLabel(label) {
+  const match = label.match(/^(.*) \((.+)\)$/)
+  if (!match) return { quantity: label, estimate: null }
+  return { quantity: match[1], estimate: match[2] }
+}
+
+function ingredientCostByKey(basket, recipeId) {
+  const costs = new Map()
+  for (const line of basket?.lines ?? []) {
+    const contribution = line.contributions?.find((c) => c.recipe_id === recipeId)
+    if (!contribution) continue
+
+    let cost = 0
+    if (line.need_qty != null && line.capacity_qty) {
+      cost = line.cost * ((contribution.quantity ?? 0) / line.capacity_qty)
+    } else if (line.capacity_g) {
+      cost = line.cost * ((contribution.grams ?? 0) / line.capacity_g)
+    }
+    costs.set(line.key, (costs.get(line.key) ?? 0) + cost)
+  }
+  return costs
+}
+
+function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove }) {
+  if (!entry) {
+    return (
+      <Button
+        color="fresh"
+        leftSection={<IconBasketPlus size={17} />}
+        disabled={disabled}
+        onClick={() => !disabled && onAdd?.()}
+      >
+        Add to this week
+      </Button>
+    )
+  }
+
+  const portions = entry.portions
+  return (
+    <Group gap="xs" wrap="nowrap">
+      <Group gap={4} wrap="nowrap" className={classes.portionStepper}>
+        <Tooltip label="Decrease portions" withArrow>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            radius="xl"
+            disabled={portions <= MIN_PORTIONS}
+            aria-label="Decrease portions"
+            onClick={() => onPortionsChange?.(portions - 1)}
+          >
+            <IconMinus size={16} />
+          </ActionIcon>
+        </Tooltip>
+        <Text fw={700} size="sm" className={classes.portionCount}>
+          {portions}
+        </Text>
+        <Tooltip label="Increase portions" withArrow>
+          <ActionIcon
+            variant="subtle"
+            color="fresh"
+            radius="xl"
+            disabled={portions >= MAX_PORTIONS}
+            aria-label="Increase portions"
+            onClick={() => onPortionsChange?.(portions + 1)}
+          >
+            <IconPlus size={16} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
+      <Tooltip label="Remove recipe" withArrow>
+        <ActionIcon color="red" variant="filled" radius="xl" aria-label="Remove recipe" onClick={onRemove}>
+          <IconTrash size={17} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
+  )
+}
+
 function MacroStat({ label, value, unit, corrected }) {
   return (
     <Paper withBorder radius="md" p="sm" className={classes.macro}>
       <Text fz="xl" fw={700}>
+        <span className={classes.macroDot} style={{ '--macro-color': MACRO_COLORS[label] }} />
         {value == null ? '—' : `${Math.round(value)}`}
         <Text span fz="sm" c="dimmed" fw={500}>
           {unit}
@@ -335,9 +451,36 @@ function MacroNotes({ audit, edits }) {
 
 export default function RecipeDetailPage() {
   const { id } = useParams()
+  const recipeId = Number(id)
   const navigate = useNavigate()
   const { data: recipe, isLoading, isError } = useRecipe(id)
   const [servingsOverride, setServingsOverride] = useState(null)
+  const {
+    upcomingWeekStart,
+    getWeekRecipes,
+    getRecipeEntry,
+    addRecipeToWeek,
+    removeRecipeFromWeek,
+    setRecipePortions,
+  } = useWeeklyPlan()
+  const upcomingRecipes = useMemo(
+    () => getWeekRecipes(upcomingWeekStart),
+    [getWeekRecipes, upcomingWeekStart],
+  )
+  const plannerEntry = getRecipeEntry(recipeId, upcomingWeekStart)
+  const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
+  const currentSelections = useMemo(() => toPlannerSelections(upcomingRecipes), [upcomingRecipes])
+  const withRecipeSelections = useMemo(() => {
+    if (!recipe || plannerEntry) return currentSelections
+    return [...currentSelections, { recipe_id: recipe.id, portions: DEFAULT_PORTIONS }]
+  }, [currentSelections, plannerEntry, recipe])
+  const withoutRecipeSelections = useMemo(
+    () => currentSelections.filter((selection) => selection.recipe_id !== recipeId),
+    [currentSelections, recipeId],
+  )
+  const { data: currentBasket } = usePlannerBasket(currentSelections)
+  const { data: withRecipeBasket } = usePlannerBasket(withRecipeSelections)
+  const { data: withoutRecipeBasket } = usePlannerBasket(withoutRecipeSelections)
   // Keyed on the route param, so these sit above the loading/error returns below
   // and are never called conditionally.
   const audit = useAuditRecipe(id)
@@ -370,6 +513,17 @@ export default function RecipeDetailPage() {
   const baseYield = recipe.base_yield || 2
   const servings = servingsOverride ?? baseYield
   const factor = servings / baseYield
+  const basketForRecipe = plannerEntry ? currentBasket : withRecipeBasket
+  const ingredientCosts = ingredientCostByKey(basketForRecipe, recipe.id)
+  const marginalTotal = plannerEntry
+    ? currentBasket && withoutRecipeBasket
+      ? currentBasket.cost - withoutRecipeBasket.cost
+      : null
+    : currentBasket && withRecipeBasket
+      ? withRecipeBasket.cost - currentBasket.cost
+      : null
+  const marginalPortions = plannerEntry?.portions ?? DEFAULT_PORTIONS
+  const marginalPerPortion = marginalTotal == null ? null : marginalTotal / marginalPortions
 
   // What each corrected macro used to say. Edits arrive oldest-first, so the
   // first entry for a field holds the original source value even if it has since
@@ -423,6 +577,23 @@ export default function RecipeDetailPage() {
                 {recipe.headline}
               </Text>
             )}
+
+            <Group gap="sm" mt="xs">
+              <PlannerControls
+                entry={plannerEntry}
+                disabled={!plannerEntry && upcomingWeekFull}
+                onAdd={() => addRecipeToWeek(recipe, upcomingWeekStart)}
+                onRemove={() => removeRecipeFromWeek(upcomingWeekStart, recipe.id)}
+                onPortionsChange={(portions) =>
+                  setRecipePortions(upcomingWeekStart, recipe.id, portions)
+                }
+              />
+              {marginalPerPortion != null && (
+                <Badge color="fresh" variant="light" radius="sm" size="lg" className={classes.costBadge}>
+                  {formatSignedMoney(marginalPerPortion)} pp
+                </Badge>
+              )}
+            </Group>
 
             <Group gap="lg" mt="xs">
               {recipe.avg_rating != null && (
@@ -520,66 +691,98 @@ export default function RecipeDetailPage() {
                 data={SERVINGS.map((n) => ({ label: SERVINGS_LABELS[n], value: String(n) }))}
               />
             </div>
-            <Stack gap="xs">
-              {recipe.ingredients.filter(hasDisplayQuantity).map((ing, i) => {
-                const quantity = scaledQuantity(ing, factor)
-                return (
-                  <Group key={i} gap="sm" wrap="nowrap" align="flex-start">
-                    {ing.image_url && (
-                      <Image src={ing.image_url} w={36} h={36} radius="sm" className={classes.ingImg} />
-                    )}
-                    <Text size="sm">
-                      {quantity && (
-                        <Text span fw={600}>
-                          {quantity}{' '}
-                        </Text>
-                      )}
-                      {ing.name}
-                      {ing.unmapped && (
-                        <Tooltip label="Not mapped to a basket product" withArrow>
-                          <ThemeIcon
-                            component="span"
-                            variant="light"
-                            color="yellow"
-                            size="sm"
-                            radius="xl"
-                            className={classes.ingredientWarning}
-                            data-darkreader-ignore="true"
-                            style={{
-                              backgroundColor: 'rgb(255, 243, 191)',
-                              color: 'rgb(124, 77, 0)',
-                            }}
-                            aria-label="Unmapped ingredient"
-                          >
-                            <IconAlertTriangle size={13} />
-                          </ThemeIcon>
-                        </Tooltip>
-                      )}
-                      {estimatedPotent(ing) && (
-                        <Tooltip
-                          label="Quantity is our estimate — the source ships this pre-portioned and states no weight. Easy to overdo, so add to taste."
-                          withArrow
-                          multiline
-                          w={260}
-                        >
-                          <ThemeIcon
-                            component="span"
-                            variant="light"
-                            color="orange"
-                            size="sm"
-                            radius="xl"
-                            className={classes.ingredientWarning}
-                            aria-label="Estimated quantity, easy to overdo"
-                          >
-                            <IconFlame size={13} />
-                          </ThemeIcon>
-                        </Tooltip>
-                      )}
-                    </Text>
-                  </Group>
-                )
-              })}
-            </Stack>
+            <Table.ScrollContainer minWidth={320}>
+              <Table verticalSpacing="xs" className={classes.ingredientsTable}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th />
+                    <Table.Th>Qty</Table.Th>
+                    <Table.Th>Item</Table.Th>
+                    <Table.Th ta="right">Cost</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {recipe.ingredients.filter(hasDisplayQuantity).map((ing, i) => {
+                    const { quantity, estimate } = splitQuantityLabel(scaledQuantity(ing, factor))
+                    const cost = ing.ingredient_key ? ingredientCosts.get(ing.ingredient_key) : null
+                    const canOpenMapping = Boolean(ing.ingredient_key)
+                    return (
+                      <Table.Tr
+                        key={i}
+                        className={canOpenMapping ? classes.ingredientRow : undefined}
+                        onClick={() =>
+                          canOpenMapping && navigate(`/mapping/${encodeURIComponent(ing.ingredient_key)}`)
+                        }
+                      >
+                        <Table.Td w={42}>
+                          {ing.image_url ? (
+                            <Image src={ing.image_url} w={34} h={34} radius="sm" className={classes.ingImg} />
+                          ) : (
+                            <ThemeIcon variant="light" color="gray" size={34} radius="sm" className={classes.ingPlaceholder}>
+                              <IconPhoto size={17} />
+                            </ThemeIcon>
+                          )}
+                        </Table.Td>
+                        <Table.Td className={classes.quantityCell}>
+                          <Text size="sm" fw={600}>{quantity}</Text>
+                          {estimate && <Text size="xs" c="dimmed">({estimate})</Text>}
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm" fw={500}>
+                            {ing.name}
+                            {ing.unmapped && (
+                              <Tooltip label="Not mapped to a basket product" withArrow>
+                                <ThemeIcon
+                                  component="span"
+                                  variant="light"
+                                  color="yellow"
+                                  size="sm"
+                                  radius="xl"
+                                  className={classes.ingredientWarning}
+                                  data-darkreader-ignore="true"
+                                  style={{
+                                    backgroundColor: 'rgb(255, 243, 191)',
+                                    color: 'rgb(124, 77, 0)',
+                                  }}
+                                  aria-label="Unmapped ingredient"
+                                >
+                                  <IconAlertTriangle size={13} />
+                                </ThemeIcon>
+                              </Tooltip>
+                            )}
+                            {estimatedPotent(ing) && (
+                              <Tooltip
+                                label="Quantity is our estimate - the source ships this pre-portioned and states no weight. Easy to overdo, so add to taste."
+                                withArrow
+                                multiline
+                                w={260}
+                              >
+                                <ThemeIcon
+                                  component="span"
+                                  variant="light"
+                                  color="orange"
+                                  size="sm"
+                                  radius="xl"
+                                  className={classes.ingredientWarning}
+                                  aria-label="Estimated quantity, easy to overdo"
+                                >
+                                  <IconFlame size={13} />
+                                </ThemeIcon>
+                              </Tooltip>
+                            )}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text size="xs" c="dimmed" fw={600}>
+                            {cost == null ? '-' : formatMoney(cost)}
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    )
+                  })}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
 
             {recipe.allergens.length > 0 && (
               <>

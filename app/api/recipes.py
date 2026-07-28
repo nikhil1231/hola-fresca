@@ -234,27 +234,42 @@ def _alias_roots(rows: list[IngredientMapping]) -> dict[str, str]:
     return roots
 
 
-def _unmapped_ingredient_ids(
+def _ingredient_keys(
     session: Session,
     ingredients: list[RecipeIngredient],
     csv_path: Path | None,
-) -> set[int]:
+) -> dict[int, str]:
     sid_index = load_source_id_index(csv_path)
     mapping_rows = list(
         session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == RETAILER))
     )
     roots = _alias_roots(mapping_rows)
+    keys: dict[int, str] = {}
+    for ingredient in ingredients:
+        if not _has_display_quantity(ingredient):
+            continue
+        raw_key = sid_index.get(ingredient.source_ingredient_id or "")
+        if raw_key is not None:
+            keys[ingredient.id] = roots.get(raw_key, raw_key)
+    return keys
+
+
+def _unmapped_ingredient_ids(
+    session: Session,
+    ingredients: list[RecipeIngredient],
+    csv_path: Path | None,
+) -> set[int]:
+    ingredient_keys = _ingredient_keys(session, ingredients, csv_path)
+    mapping_rows = list(
+        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == RETAILER))
+    )
     by_key = {row.ingredient_key: row for row in mapping_rows}
     unmapped: set[int] = set()
     for ingredient in ingredients:
         if not _has_display_quantity(ingredient):
             continue
-        raw_key = sid_index.get(ingredient.source_ingredient_id or "")
-        if raw_key is None:
-            unmapped.add(ingredient.id)
-            continue
-        root = roots.get(raw_key, raw_key)
-        row = by_key.get(root)
+        key = ingredient_keys.get(ingredient.id)
+        row = by_key.get(key) if key else None
         if row is None or row.status != "approved":
             unmapped.add(ingredient.id)
     return unmapped
@@ -436,6 +451,7 @@ def get_recipe(
         )
         if _has_display_quantity(ingredient)
     ]
+    ingredient_keys = _ingredient_keys(session, ingredients, csv_path)
     unmapped_ingredient_ids = _unmapped_ingredient_ids(session, ingredients, csv_path)
     return RecipeDetail(
         id=recipe.id,
@@ -463,6 +479,7 @@ def get_recipe(
         allergens=[a.name for a in recipe.allergens],
         ingredients=[
             IngredientOut(
+                ingredient_key=ingredient_keys.get(i.id),
                 name=i.name,
                 amount=i.amount,
                 unit=i.unit,
