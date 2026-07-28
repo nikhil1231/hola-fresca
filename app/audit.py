@@ -243,7 +243,8 @@ COMPOSITION_SYSTEM = (
     "- Use standard reference values (McCance & Widdowson / USDA style). Do not "
     "guess wildly; if an ingredient is a negligible seasoning, give its real values "
     "anyway (they are small).\n"
-    "- Return one entry per ingredient, in the order given, echoing the name.\n"
+    "- Return one entry per ingredient, in the order given. Echo the name exactly "
+    "as written, without the weight in brackets.\n"
     "- Do NOT compute totals or per-serving values. Per-100g only."
 )
 
@@ -370,6 +371,17 @@ def composition_blockers(recipe: Recipe, typical: dict[str, float] | None = None
     return blockers
 
 
+def _composition_key(name: str) -> str:
+    """Normalise an ingredient name for matching a model's echo back to a line.
+
+    The prompt lists each ingredient with its weight — ``- Leek (150 g)`` — so
+    asking the model to echo "the name" gets ``Leek`` from one run and
+    ``Leek (150 g)`` from the next. Dropping a trailing parenthetical settles it
+    without loosening the match enough for two different ingredients to collide.
+    """
+    return re.sub(r"\s*\([^)]*\)\s*$", "", name or "").strip().lower()
+
+
 def macros_from_composition(
     ingredients: list[RecipeIngredient], composition: dict, servings: int
 ) -> dict[str, float] | None:
@@ -380,14 +392,20 @@ def macros_from_composition(
     whole recipe: coverage is judged against all of it, because the ingredients
     left out are precisely the ones that would skew the answer.
     """
-    by_name = {
-        (entry.get("name") or "").strip().lower(): entry
-        for entry in composition.get("ingredients", [])
-    }
+    entries = composition.get("ingredients", [])
+    by_name: dict[str, dict] = {}
+    for entry in entries:
+        by_name.setdefault(_composition_key(entry.get("name") or ""), entry)
     totals = {"energy_kcal": 0.0, "protein_g": 0.0, "fat_g": 0.0, "carbs_g": 0.0}
     matched = 0
-    for ing in ingredients:
-        entry = by_name.get(ing.name.strip().lower())
+    for position, ing in enumerate(ingredients):
+        entry = by_name.get(_composition_key(ing.name))
+        # The schema asks for one entry per ingredient in the order given, so when
+        # a name still will not match, position is better evidence than discarding
+        # the whole answer — but only when there is exactly one entry per
+        # ingredient to be positional about.
+        if entry is None and len(entries) == len(ingredients):
+            entry = entries[position]
         if entry is None or not ing.amount_g:
             continue
         matched += 1
@@ -409,17 +427,25 @@ def check_against_composition(
     *,
     model: str | None = None,
     typical: dict[str, float] | None = None,
-) -> list[Finding]:
-    """Recompute the macros from the ingredients and correct whatever disagrees."""
+) -> list[Finding] | None:
+    """Recompute the macros from the ingredients and correct whatever disagrees.
+
+    Returns ``None`` when the check could not be carried out — no usable
+    ingredients, or an answer covering too little of the recipe to sum. That is
+    emphatically not the same as finding nothing wrong, and reporting it as one is
+    how a recipe stating 79 g of protein against 16 g of ingredients came back
+    "looks correct": the model had echoed the names with their weights attached,
+    nothing matched, and an empty finding list read as a clean bill of health.
+    """
     edible = edible_ingredients(recipe)
     if not edible or composition_blockers(recipe, typical):
-        return []
+        return None
     composition = completer(
         COMPOSITION_SYSTEM, build_composition_prompt(edible), COMPOSITION_SCHEMA
     )
     computed = macros_from_composition(edible, composition, recipe.base_yield or 2)
     if computed is None:
-        return []
+        return None
 
     findings: list[Finding] = []
     for field_name, value in computed.items():
@@ -557,24 +583,42 @@ def audit_recipe(
     # off — an inconsistency is already explained by the numbers themselves.
     if not findings:
         concerns = check_plausibility(recipe)
-        if concerns and result.ingredient_gaps:
+        # A hand-raised flag is itself a reason to look. The plausibility checks
+        # are a cost gate — they decide whether one model call is worth paying for
+        # unprompted — not a second opinion on a person's report, and they were
+        # never calibrated to be one. Mushroom and Pancetta Risotto states 79 g of
+        # protein per serving against ingredients holding around 16 g, and passes
+        # every one of them: its macros agree with each other to 3%, it is not
+        # vegetarian, and 10.8 g per 100 kcal sits under the "more than food
+        # allows" line. Answering that report with "looks correct" without having
+        # run the one check that could settle it is the failure worth fixing.
+        reasons = concerns or (["flagged by hand"] if recipe.flagged_suspicious else [])
+        if reasons and result.ingredient_gaps:
             # The one check that could settle it needs quantities this recipe does
             # not have. Say so instead of computing a confident underestimate.
             result.verdict = "inconclusive"
             log.info(
                 "recipe %d: %s, but ingredients are unusable: %s",
-                recipe_id, concerns, result.ingredient_gaps,
+                recipe_id, reasons, result.ingredient_gaps,
             )
-        elif concerns:
+        elif reasons:
             result.checked.append("ingredient composition")
             if completer is None:
                 result.verdict = "inconclusive"
-                log.info("recipe %d: %s, but no completer available", recipe_id, concerns)
+                log.info("recipe %d: %s, but no completer available", recipe_id, reasons)
             else:
                 result.used_llm = True
-                findings = check_against_composition(
+                computed = check_against_composition(
                     recipe, completer, model=model, typical=typical
                 )
+                if computed is None:
+                    result.verdict = "inconclusive"
+                    log.info(
+                        "recipe %d: %s, but the composition answer did not cover it",
+                        recipe_id, reasons,
+                    )
+                else:
+                    findings = computed
 
     edits = apply_findings(session, recipe, findings, model=model)
     recipe.audited_at = _utcnow()

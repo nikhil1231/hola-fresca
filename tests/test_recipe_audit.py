@@ -461,3 +461,104 @@ def test_flagging_is_separate_from_the_computed_heuristic(factory):
         # The question has been answered, so the flag clears; the audit stamp stays.
         assert after.flagged_suspicious == 0
         assert after.audited_at is not None
+
+
+# --------------------------------------------------------------------------
+# Answering a human's report
+# --------------------------------------------------------------------------
+
+def _risotto(session):
+    """Mushroom and Pancetta Risotto (16571): 79 g of protein, ~16 g of ingredients.
+
+    The shape that defeated every heuristic — the macros agree with each other to
+    3%, the dish is not vegetarian, and 10.8 g of protein per 100 kcal sits under
+    the "more than food allows" line.
+    """
+    return make_recipe(
+        session,
+        energy_kcal=729, protein_g=79, carbs_g=87, fat_g=10,
+        base_yield=4,
+        ingredients=[
+            ("Leek", 150), ("Vine Tomatoes", 180), ("Chestnut Mushrooms", 150),
+            ("Risotto Rice", 350), ("British Smoked Bacon Lardons", 180),
+            ("Mangetout", 80),
+        ],
+    )
+
+
+def test_a_hand_flagged_recipe_is_checked_even_when_nothing_looks_wrong(factory):
+    """The heuristics decide whether to spend a model call unprompted.
+
+    They are not a second opinion on a person's report. Someone who flags a recipe
+    has already supplied the reason to look.
+    """
+    with factory() as s:
+        r = _risotto(s)
+        assert audit.check_macro_arithmetic(r) == []
+        assert audit.check_plausibility(r) == []  # nothing a heuristic can see
+
+        audit.flag_recipe(s, r.id)
+        # ~1.5 g protein per 100 g across the board: nowhere near 79 g a serving.
+        completer = constant_completer(
+            kcal_per_100g=120, protein_per_100g=1.5, fat_per_100g=1, carbs_per_100g=20
+        )
+        result = audit.audit_recipe(s, r.id, completer=completer)
+        assert result.used_llm is True
+        assert result.verdict == "corrected"
+        assert s.get(Recipe, r.id).protein_g < 20
+
+
+def test_an_unflagged_recipe_with_nothing_wrong_costs_no_model_call(factory):
+    """The cost gate still holds for anything nobody has complained about."""
+    with factory() as s:
+        r = _risotto(s)
+
+        def explode(system, user, schema):  # pragma: no cover - must not be called
+            raise AssertionError("no model call should be made")
+
+        result = audit.audit_recipe(s, r.id, completer=explode)
+        assert result.used_llm is False
+        assert result.verdict == "ok"
+
+
+def test_a_name_echoed_with_its_weight_still_matches(factory):
+    """The prompt shows "- Leek (150 g)", so the echo sometimes carries the weight.
+
+    Matching on the exact string meant a whole answer went unmatched, which the
+    audit then reported as "looks correct".
+    """
+    with factory() as s:
+        r = _risotto(s)
+        audit.flag_recipe(s, r.id)
+
+        def echoes_the_weight(system, user, schema):
+            return {"ingredients": [
+                {
+                    "name": f"{i.name} ({i.amount_g:.0f} g)",
+                    "kcal_per_100g": 120, "protein_per_100g": 1.5,
+                    "fat_per_100g": 1, "carbs_per_100g": 20,
+                }
+                for i in r.ingredients
+            ]}
+
+        result = audit.audit_recipe(s, r.id, completer=echoes_the_weight)
+        assert result.verdict == "corrected"
+        assert s.get(Recipe, r.id).protein_g < 20
+
+
+def test_an_answer_it_could_not_use_is_inconclusive_not_ok(factory):
+    """Failing to check must never read the same as having checked and found nothing."""
+    with factory() as s:
+        r = _risotto(s)
+        audit.flag_recipe(s, r.id)
+
+        def unusable(system, user, schema):
+            return {"ingredients": [{
+                "name": "Something Else Entirely", "kcal_per_100g": 100,
+                "protein_per_100g": 10, "fat_per_100g": 5, "carbs_per_100g": 8,
+            }]}
+
+        result = audit.audit_recipe(s, r.id, completer=unusable)
+        assert result.verdict == "inconclusive"
+        assert result.findings == []
+        assert s.get(Recipe, r.id).protein_g == 79  # nothing guessed at
