@@ -17,6 +17,7 @@ import MappingAliasesPage from './routes/MappingAliasesPage.jsx'
 import MappingManualPage from './routes/MappingManualPage.jsx'
 import MappingPage from './routes/MappingPage.jsx'
 import MappingReviewPage from './routes/MappingReviewPage.jsx'
+import OcadoPage from './routes/OcadoPage.jsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +41,7 @@ createRoot(document.getElementById('root')).render(
               <Route path="mapping/aliases" element={<MappingAliasesPage />} />
               <Route path="mapping/manual" element={<MappingManualPage />} />
               <Route path="mapping/:key" element={<MappingReviewPage />} />
+              <Route path="ocado" element={<OcadoPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

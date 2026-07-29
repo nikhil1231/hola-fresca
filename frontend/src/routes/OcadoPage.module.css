@@ -1,0 +1,61 @@
+.pageStack {
+  min-height: calc(100vh - 128px);
+}
+
+.titleIcon {
+  color: var(--mantine-color-fresh-7);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(420px, 1.25fr);
+  gap: var(--mantine-spacing-lg);
+  align-items: start;
+}
+
+.panel {
+  border: 1px solid var(--mantine-color-gray-3);
+  border-radius: 8px;
+  background: var(--mantine-color-white);
+  padding: var(--mantine-spacing-md);
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.stat {
+  border: 1px solid var(--mantine-color-gray-2);
+  border-radius: 8px;
+  padding: var(--mantine-spacing-sm);
+  min-height: 76px;
+}
+
+.slotGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--mantine-spacing-sm);
+}
+
+.slotButton {
+  min-height: 96px;
+  white-space: normal;
+}
+
+.dayHeading {
+  border-top: 1px solid var(--mantine-color-gray-2);
+  padding-top: var(--mantine-spacing-md);
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+

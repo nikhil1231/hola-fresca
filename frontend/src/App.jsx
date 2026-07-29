@@ -15,6 +15,7 @@ function pageMetaForPath(pathname) {
   // Must stay below the exact sub-page paths above, which it would swallow.
   if (pathname.startsWith('/mapping/')) return PAGE_LAST_UPDATED.mappingReview
   if (pathname === '/mapping') return PAGE_LAST_UPDATED.mapping
+  if (pathname === '/ocado') return PAGE_LAST_UPDATED.basket
   if (pathname.startsWith('/recipes/')) return PAGE_LAST_UPDATED.recipeDetail
   return PAGE_LAST_UPDATED.browse
 }

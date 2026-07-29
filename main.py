@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.mapping import router as mapping_router
+from app.api.ocado import router as ocado_router
 from app.api.planner import router as planner_router
 from app.api.recipes import router as recipes_router
 
@@ -15,6 +16,7 @@ app = FastAPI(title="HolaFresca")
 app.include_router(recipes_router)
 app.include_router(mapping_router)
 app.include_router(planner_router)
+app.include_router(ocado_router)
 
 # Windows can report Vite's module bundles as text/plain via the registry-backed
 # mimetypes table, which modern browsers reject for <script type="module">.

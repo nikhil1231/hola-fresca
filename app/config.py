@@ -35,6 +35,11 @@ OPENAI_MODEL = os.environ.get("HOLAFRESCA_OPENAI_MODEL", "gpt-5.6-luna")
 # ingredient list — and does the arithmetic itself, so a small model is enough.
 AUDIT_MODEL = os.environ.get("HOLAFRESCA_AUDIT_MODEL", "gpt-5.4-mini")
 
+# Ocado login is deliberately isolated to the auth ladder; normal basket and
+# slot calls use the persisted session cookie jar.
+OCADO_EMAIL = os.environ.get("OCADO_EMAIL")
+OCADO_PASSWORD = os.environ.get("OCADO_PASSWORD")
+
 
 def db_url(path: Path | None = None) -> str:
     """Return a SQLAlchemy URL for the SQLite database at ``path``."""

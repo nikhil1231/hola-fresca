@@ -493,3 +493,55 @@ class ManualProductOut(BaseModel):
 
 class ManualProductListOut(BaseModel):
     items: list[ManualProductOut] = Field(default_factory=list)
+
+
+# --- Ocado basket/session ----------------------------------------------------
+
+class OcadoLoginOut(BaseModel):
+    status: str
+
+
+class OcadoOtpIn(BaseModel):
+    code: str = Field(min_length=1)
+
+
+class PushLineOut(BaseModel):
+    sku: str
+    quantity: int
+    name: str | None = None
+
+
+class OcadoPushResultOut(BaseModel):
+    applied: list[PushLineOut] = Field(default_factory=list)
+    dropped: list[PushLineOut] = Field(default_factory=list)
+    unmapped: list[str] = Field(default_factory=list)
+    deltas: dict[str, int] = Field(default_factory=dict)
+
+
+class OcadoBasketOut(BaseModel):
+    raw: dict
+
+
+class OcadoSlotOut(BaseModel):
+    slot_id: str
+    start: str | None = None
+    end: str | None = None
+    day: str | None = None
+    available: bool = False
+    eco: bool = False
+    price: float | None = None
+    raw: dict | None = None
+
+
+class OcadoSlotsOut(BaseModel):
+    items: list[OcadoSlotOut] = Field(default_factory=list)
+
+
+class OcadoReserveIn(BaseModel):
+    slot_id: str
+    ddid: str | None = None
+    region: str | None = None
+
+
+class OcadoReserveOut(BaseModel):
+    raw: dict

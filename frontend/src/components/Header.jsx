@@ -65,6 +65,9 @@ export default function Header() {
               <NavLink to="/mapping" className={navClass}>
                 Mapping
               </NavLink>
+              <NavLink to="/ocado" className={navClass}>
+                Ocado
+              </NavLink>
             </Group>
           </Group>
           <SearchBox />
