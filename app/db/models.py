@@ -138,6 +138,23 @@ class Recipe(Base):
     allergens: Mapped[list["RecipeAllergen"]] = relationship(
         back_populates="recipe", cascade="all, delete-orphan"
     )
+    personal_rating: Mapped["PersonalRecipeRating | None"] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class PersonalRecipeRating(Base):
+    __tablename__ = "personal_recipe_ratings"
+    __table_args__ = (
+        CheckConstraint("rating >= 1 AND rating <= 5", name="ck_personal_rating_range"),
+    )
+
+    recipe_id: Mapped[int] = mapped_column(ForeignKey("recipes.id"), primary_key=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    recipe: Mapped[Recipe] = relationship(back_populates="personal_rating")
 
 
 class RecipeIngredient(Base):

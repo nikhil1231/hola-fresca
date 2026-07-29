@@ -291,3 +291,42 @@ def test_facets(client):
         "vegetarian", "pescatarian", "dairy_free", "gluten_free", "low_carb",
     }
     assert isinstance(cuisine_labels, set)
+
+
+def test_personal_rating_round_trip(client):
+    rid = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]["id"]
+
+    detail = client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 4}).json()
+    assert detail["personal_rating"] == 4
+
+    listed = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]
+    assert listed["personal_rating"] == 4
+
+    updated = client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 2}).json()
+    assert updated["personal_rating"] == 2
+
+    cleared = client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": None}).json()
+    assert cleared["personal_rating"] is None
+
+
+def test_personal_rating_filter_returns_only_rated(client):
+    italian = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]
+    mexican = client.get("/api/recipes", params={"cuisine": "Mexican"}).json()["items"][0]
+
+    assert client.get("/api/recipes", params={"rated": "true"}).json()["total"] == 0
+
+    client.put(f"/api/recipes/{mexican['id']}/personal-rating", json={"rating": 5})
+    data = client.get("/api/recipes", params={"rated": "true"}).json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == mexican["id"]
+    assert data["items"][0]["personal_rating"] == 5
+    assert data["items"][0]["id"] != italian["id"]
+
+
+def test_personal_rating_rejects_invalid_and_hidden_recipes(client):
+    rid = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]["id"]
+
+    assert client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 0}).status_code == 422
+    assert client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 6}).status_code == 422
+    assert client.put("/api/recipes/3/personal-rating", json={"rating": 4}).status_code == 404

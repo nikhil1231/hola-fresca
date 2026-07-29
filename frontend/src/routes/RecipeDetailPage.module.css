@@ -13,6 +13,23 @@
   color: var(--mantine-color-yellow-6);
 }
 
+.ratingStack {
+  line-height: 1;
+}
+
+.personalStar,
+.personalStarActive {
+  forced-color-adjust: none;
+  color-scheme: light only;
+  color: rgb(173, 181, 189) !important;
+}
+
+.personalStar:hover,
+.personalStarActive,
+.personalStarActive:hover {
+  color: rgb(0, 0, 0) !important;
+}
+
 .macro {
   text-align: center;
 }

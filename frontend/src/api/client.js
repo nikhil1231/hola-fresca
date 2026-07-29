@@ -29,6 +29,16 @@ async function postJSON(path, body) {
   return res.json()
 }
 
+async function putJSON(path, body) {
+  const res = await fetch(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await responseError(res)
+  return res.json()
+}
+
 // Filter params that are arrays (repeatable query params) vs scalars.
 const ARRAY_KEYS = new Set(['cuisine', 'diet', 'tag', 'protein', 'exclude'])
 
@@ -80,6 +90,10 @@ export function fetchPlannerSuggestions({
 
 export function fetchRecipe(id) {
   return getJSON(`/api/recipes/${id}`)
+}
+
+export function setPersonalRecipeRating(id, rating) {
+  return putJSON(`/api/recipes/${id}/personal-rating`, { rating })
 }
 
 // Flags the macros as suspicious and starts a background audit; poll the

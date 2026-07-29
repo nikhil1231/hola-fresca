@@ -230,6 +230,13 @@ export default function RecipeCard({
               </Group>
             </Badge>
           )}
+          {recipe.personal_rating != null && (
+            <Badge className={classes.personalRatingBadge} variant="filled" radius="sm">
+              <Group gap={3} wrap="nowrap">
+                <IconStarFilled size={11} /> {recipe.personal_rating}
+              </Group>
+            </Badge>
+          )}
           {basketBadge && (
             <span className={classes.marginalBadgeWrap}>
               <Badge

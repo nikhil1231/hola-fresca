@@ -7,6 +7,7 @@ import {
   Pill,
   SegmentedControl,
   Stack,
+  Switch,
   Text,
 } from '@mantine/core'
 
@@ -114,6 +115,15 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
           />
         </Section>
       )}
+
+      <Section label="Personal">
+        <Switch
+          color="dark"
+          label="Rated"
+          checked={Boolean(filters.rated)}
+          onChange={(event) => setScalar('rated', event.currentTarget.checked ? 'true' : null)}
+        />
+      </Section>
 
       <Divider />
 

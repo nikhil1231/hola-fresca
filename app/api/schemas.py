@@ -11,6 +11,10 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class PersonalRatingIn(BaseModel):
+    rating: int | None = Field(default=None, ge=1, le=5)
+
+
 class RecipeCard(BaseModel):
     id: int
     name: str
@@ -23,6 +27,7 @@ class RecipeCard(BaseModel):
     difficulty: int | None = None
     avg_rating: float | None = None
     ratings_count: int | None = None
+    personal_rating: int | None = None
     cuisines: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     intrinsic_score: float | None = None
@@ -96,6 +101,7 @@ class RecipeDetail(BaseModel):
 
     avg_rating: float | None = None
     ratings_count: int | None = None
+    personal_rating: int | None = None
 
     cuisines: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
@@ -190,6 +196,7 @@ class PlannerFiltersIn(BaseModel):
     min_protein_ratio: float | None = None
     max_kcal: float | None = None
     difficulty: int | None = None
+    rated: bool = False
     exclude: list[str] = Field(default_factory=list)
 
 

@@ -20,6 +20,7 @@ from app.api.schemas import (
     NumericRange,
     NutritionOut,
     PaginatedRecipes,
+    PersonalRatingIn,
     RecipeCard,
     RecipeDetail,
     RecipeEditOut,
@@ -27,6 +28,7 @@ from app.api.schemas import (
 )
 from app.db.models import (
     IngredientMapping,
+    PersonalRecipeRating,
     Recipe,
     RecipeAllergen,
     RecipeCuisine,
@@ -93,6 +95,7 @@ def _apply_filters(
     max_kcal: float | None,
     difficulty: int | None,
     exclude: list[str],
+    rated: bool = False,
 ) -> Select:
     stmt = stmt.where(Recipe.curated == 1)
     if q:
@@ -138,7 +141,22 @@ def _apply_filters(
         stmt = stmt.where(Recipe.energy_kcal.is_not(None), Recipe.energy_kcal <= max_kcal)
     if difficulty is not None:
         stmt = stmt.where(Recipe.difficulty == difficulty)
+    if rated:
+        stmt = stmt.where(Recipe.personal_rating.has())
     return stmt
+
+
+def _personal_rating_value(r: Recipe) -> int | None:
+    return r.personal_rating.rating if r.personal_rating is not None else None
+
+
+def _personal_rating_map(session: Session, recipe_ids: list[int]) -> dict[int, int]:
+    if not recipe_ids:
+        return {}
+    rows = session.scalars(
+        select(PersonalRecipeRating).where(PersonalRecipeRating.recipe_id.in_(recipe_ids))
+    ).all()
+    return {row.recipe_id: row.rating for row in rows}
 
 
 def _round_money(value: float) -> float:
@@ -151,6 +169,7 @@ def _to_card(
     intrinsic_score: float | None = None,
     intrinsic_cost: float | None = None,
     intrinsic_gap_count: int = 0,
+    personal_rating: int | None = None,
 ) -> RecipeCard:
     # A derived diet chip (most specific first) plus source attribute chips.
     chips: list[str] = []
@@ -171,6 +190,7 @@ def _to_card(
         difficulty=r.difficulty,
         avg_rating=r.avg_rating,
         ratings_count=r.ratings_count,
+        personal_rating=personal_rating if personal_rating is not None else _personal_rating_value(r),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in r.cuisines],
         tags=list(dict.fromkeys(chips)),  # dedupe, preserve order
         intrinsic_score=intrinsic_score,
@@ -330,6 +350,7 @@ def list_recipes(
     max_kcal: float | None = None,
     difficulty: int | None = None,
     exclude: list[str] = Query(default_factory=list),
+    rated: bool = False,
     exclude_id: list[int] = Query(default_factory=list),
     sort: str = facet_cfg.DEFAULT_SORT,
     page: int = Query(default=1, ge=1),
@@ -342,7 +363,7 @@ def list_recipes(
     filters = dict(
         q=q, cuisine=cuisine, diet=diet, tag=tag, protein=protein, max_time=max_time,
         min_protein=min_protein, min_protein_ratio=min_protein_ratio, max_kcal=max_kcal,
-        difficulty=difficulty, exclude=exclude,
+        difficulty=difficulty, exclude=exclude, rated=rated,
     )
     exclude_unmapped = "unmapped" in exclude
     excluded_recipe_ids = set(exclude_id)
@@ -472,6 +493,7 @@ def get_recipe(
         protein_energy_ratio=recipe.protein_energy_ratio,
         avg_rating=recipe.avg_rating,
         ratings_count=recipe.ratings_count,
+        personal_rating=_personal_rating_value(recipe),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in recipe.cuisines],
         tags=list(dict.fromkeys(
             _CHIP_LABELS[t.type] for t in recipe.tags if t.type in _CHIP_LABELS
@@ -522,6 +544,28 @@ def get_recipe(
         ],
     )
 
+
+@router.put("/recipes/{recipe_id}/personal-rating", response_model=RecipeDetail)
+def set_personal_rating(
+    recipe_id: int,
+    body: PersonalRatingIn,
+    session: Session = Depends(get_session),
+    csv_path: Path | None = Depends(get_planner_csv_path),
+) -> RecipeDetail:
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or not recipe.curated:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    existing = session.get(PersonalRecipeRating, recipe_id)
+    if body.rating is None:
+        if existing is not None:
+            session.delete(existing)
+    elif existing is None:
+        session.add(PersonalRecipeRating(recipe_id=recipe_id, rating=body.rating))
+    else:
+        existing.rating = body.rating
+    session.commit()
+    return get_recipe(recipe_id, session, csv_path)
 
 # --------------------------------------------------------------------------
 # Macro audit

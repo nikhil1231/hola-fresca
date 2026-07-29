@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
-from app.api.recipes import _apply_filters, _recipe_ids_with_pricing_gaps, _to_card
+from app.api.recipes import _apply_filters, _personal_rating_map, _recipe_ids_with_pricing_gaps, _to_card
 from app.api.schemas import (
     BasketIn,
     BasketContributionOut,
@@ -213,12 +213,13 @@ def suggestions(
         ).all()
         by_id = {recipe.id: recipe for recipe in rows}
 
+    personal_ratings = _personal_rating_map(session, page_ids)
     items = []
     for candidate in page_scores:
         recipe = by_id.get(candidate.recipe_id)
         if recipe is None:
             continue
-        card = _to_card(recipe).model_dump()
+        card = _to_card(recipe, personal_rating=personal_ratings.get(recipe.id)).model_dump()
         available = candidate.available
         items.append(
             RecipeSuggestionCard(

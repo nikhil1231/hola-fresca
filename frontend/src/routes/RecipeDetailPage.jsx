@@ -45,6 +45,7 @@ import {
 import {
   useAuditRecipe,
   usePlannerBasket,
+  usePersonalRecipeRating,
   useRecipe,
   useRevertRecipeEdits,
 } from '../hooks/useRecipeQueries.js'
@@ -295,6 +296,47 @@ function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove })
   )
 }
 
+function PersonalRatingControl({ value, onSet, pending }) {
+  const [hovered, setHovered] = useState(null)
+  const displayValue = hovered ?? value ?? 0
+
+  return (
+    <Group gap={1} wrap="nowrap" role="radiogroup" aria-label="Personal rating">
+      {Array.from({ length: 5 }).map((_, index) => {
+        const starValue = index + 1
+        const active = starValue <= displayValue
+        return (
+          <ActionIcon
+            key={starValue}
+            type="button"
+            variant="transparent"
+            color="gray"
+            size="xs"
+            radius="xl"
+            disabled={pending}
+            data-darkreader-ignore="true"
+            className={active ? classes.personalStarActive : classes.personalStar}
+            aria-label={
+              value === starValue
+                ? `Clear ${starValue} star personal rating`
+                : `Set ${starValue} star personal rating`
+            }
+            aria-checked={value === starValue}
+            role="radio"
+            onMouseEnter={() => setHovered(starValue)}
+            onMouseLeave={() => setHovered(null)}
+            onFocus={() => setHovered(starValue)}
+            onBlur={() => setHovered(null)}
+            onClick={() => onSet(value === starValue ? null : starValue)}
+          >
+            <IconStarFilled size={14} />
+          </ActionIcon>
+        )
+      })}
+    </Group>
+  )
+}
+
 function MacroStat({ label, value, unit, corrected }) {
   return (
     <Paper withBorder radius="md" p="sm" className={classes.macro}>
@@ -498,6 +540,7 @@ export default function RecipeDetailPage() {
   // and are never called conditionally.
   const audit = useAuditRecipe(id)
   const revert = useRevertRecipeEdits(id)
+  const personalRating = usePersonalRecipeRating(id)
 
   if (isLoading) {
     return (
@@ -607,18 +650,25 @@ export default function RecipeDetailPage() {
               )}
             </Group>
 
-            <Group gap="lg" mt="xs">
-              {recipe.avg_rating != null && (
-                <Group gap={6} wrap="nowrap">
-                  <IconStarFilled size={18} className={classes.star} />
-                  <Text fw={600}>{recipe.avg_rating.toFixed(1)}</Text>
-                  {recipe.ratings_count != null && (
-                    <Text c="dimmed" size="sm">
-                      ({recipe.ratings_count.toLocaleString()})
-                    </Text>
-                  )}
-                </Group>
-              )}
+            <Group gap="lg" mt="xs" align="flex-start">
+              <Stack gap={2} className={classes.ratingStack}>
+                {recipe.avg_rating != null && (
+                  <Group gap={6} wrap="nowrap">
+                    <IconStarFilled size={18} className={classes.star} />
+                    <Text fw={600}>{recipe.avg_rating.toFixed(1)}</Text>
+                    {recipe.ratings_count != null && (
+                      <Text c="dimmed" size="sm">
+                        ({recipe.ratings_count.toLocaleString()})
+                      </Text>
+                    )}
+                  </Group>
+                )}
+                <PersonalRatingControl
+                  value={recipe.personal_rating}
+                  pending={personalRating.isPending}
+                  onSet={(rating) => personalRating.mutate(rating)}
+                />
+              </Stack>
               {recipe.total_time_min != null && (
                 <Group gap={6} wrap="nowrap">
                   <IconClock size={18} />
@@ -681,6 +731,12 @@ export default function RecipeDetailPage() {
         </Group>
         <MacroMenu audit={audit} revert={revert} hasEdits={(recipe.edits ?? []).length > 0} />
       </Group>
+
+      {personalRating.isError && (
+        <Alert color="red" variant="light">
+          {personalRating.error?.message ?? "Couldn't save your rating."}
+        </Alert>
+      )}
 
       <MacroNotes audit={audit} edits={recipe.edits ?? []} />
 

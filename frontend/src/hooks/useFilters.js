@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom'
 const ARRAY_KEYS = ['cuisine', 'diet', 'tag', 'protein', 'exclude']
 // Keys stored as single numeric params.
 const NUMBER_KEYS = ['max_time', 'min_protein', 'min_protein_ratio', 'max_kcal', 'difficulty']
+const BOOLEAN_KEYS = ['rated']
 
 export const DEFAULT_SORT = 'best_fit'
 const DEFAULT_EXCLUDES = ['unmapped']
@@ -28,6 +29,9 @@ export function parseFilters(searchParams) {
     const value = searchParams.get(key)
     if (value != null && value !== '') filters[key] = Number(value)
   }
+  for (const key of BOOLEAN_KEYS) {
+    if (searchParams.get(key) === 'true') filters[key] = true
+  }
   return filters
 }
 
@@ -42,6 +46,7 @@ export function countActiveFilters(filters) {
       : values.length
   }
   for (const key of NUMBER_KEYS) if (filters[key] != null) n += 1
+  for (const key of BOOLEAN_KEYS) if (filters[key]) n += 1
   return n
 }
 

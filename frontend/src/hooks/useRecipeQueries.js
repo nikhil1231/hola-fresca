@@ -10,6 +10,7 @@ import {
   fetchRecipes,
   flagRecipe,
   revertRecipeEdits,
+  setPersonalRecipeRating,
 } from '../api/client.js'
 
 const PAGE_SIZE = 24
@@ -129,6 +130,18 @@ export function useRevertRecipeEdits(id) {
   return useMutation({
     mutationFn: () => revertRecipeEdits(id),
     onSuccess: (data) => qc.setQueryData(['recipe', id], data),
+  })
+}
+
+export function usePersonalRecipeRating(id) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (rating) => setPersonalRecipeRating(id, rating),
+    onSuccess: (data) => {
+      qc.setQueryData(['recipe', id], data)
+      qc.invalidateQueries({ queryKey: ['recipes'] })
+      qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
+    },
   })
 }
 
