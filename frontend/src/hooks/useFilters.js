@@ -10,6 +10,13 @@ const BOOLEAN_KEYS = ['rated', 'wishlisted']
 export const DEFAULT_SORT = 'best_fit'
 const DEFAULT_EXCLUDES = ['unmapped']
 const SHOW_UNMAPPED_KEY = 'show_unmapped'
+// An absent course param means mains, both here and in the API. Spelling that
+// out in the parsed filters is what lets the chips show Mains as selected and
+// still toggle against the same list the user is looking at.
+const DEFAULT_COURSES = ['main']
+// Keys whose parsed value has defaults folded in, so a toggle has to read the
+// parsed list rather than the raw query string.
+const DEFAULTED_KEYS = new Set(['exclude', 'course'])
 
 // Parse the URL search params into a plain filters object used by the API layer.
 export function parseFilters(searchParams) {
@@ -23,6 +30,7 @@ export function parseFilters(searchParams) {
     if (key === 'exclude' && searchParams.get(SHOW_UNMAPPED_KEY) !== '1') {
       if (!values.includes('unmapped')) values.unshift('unmapped')
     }
+    if (key === 'course' && values.length === 0) values.push(...DEFAULT_COURSES)
     if (values.length) filters[key] = values
   }
   for (const key of NUMBER_KEYS) {
@@ -41,8 +49,12 @@ export function countActiveFilters(filters) {
   let n = 0
   for (const key of ARRAY_KEYS) {
     const values = filters[key] ?? []
-    n += key === 'exclude'
-      ? values.filter((value) => !DEFAULT_EXCLUDES.includes(value)).length
+    // The defaults are not choices the user made, so they do not light up the
+    // "Clear all" badge on an untouched page.
+    const defaults =
+      key === 'exclude' ? DEFAULT_EXCLUDES : key === 'course' ? DEFAULT_COURSES : []
+    n += defaults.length
+      ? values.filter((value) => !defaults.includes(value)).length
       : values.length
   }
   for (const key of NUMBER_KEYS) if (filters[key] != null) n += 1
@@ -72,11 +84,17 @@ export function useFilters() {
     (key, value) => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
-        const current = key === 'exclude' ? parseFilters(next).exclude ?? [] : next.getAll(key)
+        const current = DEFAULTED_KEYS.has(key)
+          ? parseFilters(next)[key] ?? []
+          : next.getAll(key)
         next.delete(key)
-        const updated = current.includes(value)
+        let updated = current.includes(value)
           ? current.filter((v) => v !== value)
           : [...current, value]
+        // Turning every course off would show mains anyway, since that is what
+        // an empty list means to the API — so the chips would disagree with the
+        // results. Snap back to the default instead.
+        if (key === 'course' && updated.length === 0) updated = DEFAULT_COURSES
         for (const v of updated) next.append(key, v)
         if (key === 'exclude') {
           if (updated.includes('unmapped')) next.delete(SHOW_UNMAPPED_KEY)

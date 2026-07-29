@@ -39,8 +39,11 @@ async function putJSON(path, body) {
   return res.json()
 }
 
-// Filter params that are arrays (repeatable query params) vs scalars.
-const ARRAY_KEYS = new Set(['cuisine', 'diet', 'tag', 'protein', 'exclude'])
+// Filter params that are arrays (repeatable query params) vs scalars. Anything
+// missing here is stringified instead, which for an array means "main,side" —
+// one value the API has never heard of, so the filter silently does nothing.
+// Keep in sync with ARRAY_KEYS in hooks/useFilters.js.
+const ARRAY_KEYS = new Set(['cuisine', 'diet', 'tag', 'protein', 'exclude', 'course'])
 
 // Build a URLSearchParams from a plain filter object, expanding arrays into
 // repeated keys and dropping empty values.

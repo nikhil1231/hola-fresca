@@ -90,9 +90,7 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
         <Section label="Course">
           <ChipFilter
             options={facets.courses}
-            /* Nothing selected means mains, which is what the API does with an
-               empty course list -- so the chip has to look selected too. */
-            selected={filters.course ?? ['main']}
+            selected={filters.course ?? []}
             onToggle={(v) => toggleArrayValue('course', v)}
           />
         </Section>
@@ -114,16 +112,6 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
             options={facets.proteins}
             selected={filters.protein ?? []}
             onToggle={(v) => toggleArrayValue('protein', v)}
-          />
-        </Section>
-      )}
-
-      {facets.attributes.length > 0 && (
-        <Section label="Attributes">
-          <ChipFilter
-            options={facets.attributes}
-            selected={filters.tag ?? []}
-            onToggle={(v) => toggleArrayValue('tag', v)}
           />
         </Section>
       )}
