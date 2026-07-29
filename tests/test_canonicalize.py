@@ -229,10 +229,16 @@ def test_trace_repair_needs_real_evidence_for_the_portion(tmp_path, monkeypatch)
 
 
 def test_trace_repair_refuses_an_absurd_multiplier(tmp_path, monkeypatch):
-    """A stray 4 must not become four portions of anything."""
+    """A stray 4 must not become four portions of anything.
+
+    It becomes one. 4 g of green beans against a 150 g norm is a placeholder by
+    the ratio test, so the line is repaired — but as a count of what the source
+    ships, which is one recipe's worth, never as four of them.
+    """
     lines = [("Green Beans", 150, "grams")] * 20 + [("Green Beans", 4, "grams")]
     s, stats = _trace_fixture(tmp_path, monkeypatch, lines)
-    assert stats["repaired"] == 0
+    assert stats["repaired"] == 1
+    assert all(i.amount == 150 for i in s.query(RecipeIngredient).all())
 
 
 def test_trace_repair_is_idempotent(tmp_path, monkeypatch):
@@ -347,6 +353,73 @@ def test_scattered_evidence_is_not_a_norm_however_much_of_it_there_is(tmp_path, 
     )
     assert stats["repaired"] == 0
     assert _amount_for(s, "Mystery Item", base_yield=2)[0] == 1  # left as it was
+
+
+def test_a_placeholder_is_judged_against_its_own_norm_not_a_flat_cutoff(tmp_path, monkeypatch):
+    """4 g of gnocchi and 4 g of parmesan are the same number and different facts.
+
+    Gnocchi is 633 g in a four-serving recipe, so 4 g is a placeholder. Parmesan
+    is 40 g, so 4 g is a garnish. No absolute cutoff separates them; the ratio to
+    the ingredient's own norm does, and it is the reason 41 recipes stayed broken
+    under the old flat three-gram cap.
+    """
+    corpus = (
+        [(2, [("Gnocchi", 320, "grams")]) for _ in range(5)]
+        + [(2, [("Parmesan Cheese", 40, "grams")]) for _ in range(5)]
+    )
+    s, stats = _yield_fixture(tmp_path, monkeypatch, corpus + [(2, [
+        ("Gnocchi", 4, "grams"),
+        ("Parmesan Cheese", 4, "grams"),
+    ])])
+    assert stats["repaired"] == 1
+    assert _amount_for(s, "Gnocchi", base_yield=2)[0] == 320       # placeholder, repaired
+    assert _amount_for(s, "Parmesan Cheese", base_yield=2)[0] == 4  # a real garnish
+
+
+def test_a_weight_at_a_tenth_of_its_norm_is_left_alone(tmp_path, monkeypatch):
+    """The boundary is exclusive, so a line exactly on it keeps its own figure.
+
+    4 g of dried apricots against a 40 g norm sits precisely here, and it is a
+    real quantity — about one apricot.
+    """
+    corpus = [(2, [("Dried Apricots", 40, "grams")]) for _ in range(5)]
+    s, stats = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(2, [("Dried Apricots", 4, "grams")])]
+    )
+    assert stats["repaired"] == 0
+
+
+def test_a_placeholder_above_the_old_cap_is_still_reached(tmp_path, monkeypatch):
+    """12 g of potato against a 180 g norm — the largest of the 41, and no longer
+    hidden by either the three-gram multiplier cap or the ten-gram scan bound."""
+    corpus = [(2, [("Potato", 180, "grams")]) for _ in range(5)]
+    s, stats = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(2, [("Potato", 12, "grams")])]
+    )
+    assert stats["repaired"] == 1
+    assert _amount_for(s, "Potato", base_yield=2)[0] == 180
+
+
+def test_the_repair_fixes_exactly_what_the_audit_refuses_to_price(tmp_path, monkeypatch):
+    """The invariant behind sharing one constant across the two modules.
+
+    Every quantity the audit would block on is one this pass corrects, so no
+    recipe can sit permanently between them — distrusted by the audit and
+    unreachable by the repair, which is where all 41 of them were.
+    """
+    from app.audit import composition_blockers, typical_weights
+
+    corpus = [(2, [("Cavolo Nero", 300, "grams")]) for _ in range(5)]
+    s, _ = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(2, [("Cavolo Nero", 4, "grams")])]
+    )
+    for ing in s.query(RecipeIngredient).all():
+        ing.amount_g = ing.amount
+    s.commit()
+
+    for recipe in {i.recipe for i in s.query(RecipeIngredient).all()}:
+        blockers = composition_blockers(recipe, typical_weights(s, recipe))
+        assert not any("implausible quantity" in b for b in blockers)
 
 
 def test_the_reference_table_answers_for_an_ingredient_the_corpus_cannot(tmp_path, monkeypatch):

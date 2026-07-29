@@ -55,7 +55,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app import config
-from app.canonicalize import _MASS_UNITS, expected_grams, normalize_name, per_serving_norms
+from app.canonicalize import (
+    _MASS_UNITS,
+    IMPLAUSIBLY_SMALL_RATIO,
+    expected_grams,
+    normalize_name,
+    per_serving_norms,
+)
 from app.classify import macros_suspect, protein_energy_ratio
 from app.db.models import Recipe, RecipeEdit, RecipeIngredient
 from app.mapping.openai_client import Completer
@@ -80,14 +86,6 @@ MIN_PLAUSIBLE_KCAL = 250
 # Vegetarian servings realistically top out around here; see
 # classify.macros_implausible_for_veg.
 MAX_VEG_PROTEIN_G = 50
-# A weight this far below what the same ingredient normally weighs is a
-# placeholder rather than a quantity: "Green Beans, 1 g" against a 150 g norm.
-#
-# The test has to be relative, not a flat threshold. Small gram amounts are
-# perfectly real — 5 g of sesame seeds, 2.5 g of sugar in a sauce — and flagging
-# those is crying wolf. What marks "Green Beans, 1 g" out is not that it is small
-# but that it is 150 times smaller than every other line for the same ingredient.
-IMPLAUSIBLY_SMALL_RATIO = 0.1
 # How far the ingredients may fall short of the dish's own plated weight before
 # they are the unreliable party rather than the macros. The corpus sits at 1.03
 # with a 1st percentile of 0.80, so this is well outside normal variation: at

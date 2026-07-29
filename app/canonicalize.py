@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from statistics import median
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Recipe, RecipeIngredient
@@ -335,8 +335,27 @@ _MIN_GRAM_EVIDENCE = 4
 # it. Wide enough for real portion variation, narrow enough that two clusters
 # masquerading as one norm fail the test.
 _MEDIAN_SPREAD = 0.35
-# The largest multiple of a portion a trace amount is allowed to mean. "3" reads
-# as three portions; beyond that the number is noise, not a quantity.
+# A weight this far below what the same ingredient normally weighs is a
+# placeholder rather than a quantity.
+#
+# The test has to be relative. Small gram amounts are perfectly real — 5 g of
+# sesame seeds against a 30 g norm, 4 g of parmesan against 40 g — and an
+# absolute cutoff cannot tell those from "4 g of Gnocchi" against a norm of
+# 633 g. It was an absolute cutoff before, at three grams, and the difference
+# between the two readings is 41 recipes: everything from 4 g of cavolo nero to
+# 12 g of potato sat above the line and stayed broken, while the ratio puts them
+# two orders of magnitude below their own norm.
+#
+# Shared with :mod:`app.audit`, deliberately and not by coincidence. It is the
+# same predicate on both sides — the audit refuses to price a quantity this far
+# below its norm, and this pass repairs one — so what the audit distrusts and
+# what the repair fixes are the same set by construction, and no line can be
+# permanently stuck between them.
+IMPLAUSIBLY_SMALL_RATIO = 0.1
+# The largest multiple of a portion a *fractional* trace amount is allowed to
+# mean. "1.5" reads as one and a half portions; beyond that the number is noise.
+# Whole numbers never reach this — see _placeholder_quantity, where a count is
+# read as one recipe's worth rather than as a multiple of one.
 _MAX_PORTION_MULTIPLE = 3.0
 # What a recipe serves when it does not say. 15,219 of the corpus's 15,982
 # recipes are two-serving, so this is the norm rather than a neutral guess.
@@ -405,59 +424,73 @@ def repair_trace_amounts(session: Session) -> dict[str, int]:
     recipe page as "4g of steak". But the corpus does say what each of them
     weighs a head, and that — scaled to this recipe's yield — is the answer.
 
-    Two guards keep a real weight intact. The amount must be small enough to be a
-    stand-in rather than a quantity (``_MAX_PORTION_MULTIPLE``), which is what
-    leaves 5 g of sesame seeds alone; and the norm must come from stated weights
-    that agree with each other (:func:`_stable_median`), so an ingredient the
-    corpus cannot speak for is left as it is rather than guessed about.
+    Two guards keep a real weight intact. The amount must be small *relative to
+    its own norm* (``IMPLAUSIBLY_SMALL_RATIO``), which is what leaves 5 g of
+    sesame seeds and 4 g of parmesan alone while catching 4 g of gnocchi against
+    a norm of 633 g; and the norm must come from stated weights that agree with
+    each other (:func:`_stable_median`), so an ingredient the corpus cannot speak
+    for is left as it is rather than guessed about.
 
     Idempotent: a repaired line is no longer a trace amount, so a second run skips
     it. The raw payload remains the source of record if it ever needs rebuilding.
     """
     rows = session.execute(
         select(
+            RecipeIngredient.id,
             RecipeIngredient.name,
             RecipeIngredient.unit,
             RecipeIngredient.amount,
             Recipe.base_yield,
         ).join(Recipe, Recipe.id == RecipeIngredient.recipe_id)
     ).all()
-    norms = per_serving_norms(rows)
+    norms = per_serving_norms([(name, unit, amount, y) for _, name, unit, amount, y in rows])
 
-    suspects = session.execute(
-        select(RecipeIngredient, Recipe.base_yield)
-        .join(Recipe, Recipe.id == RecipeIngredient.recipe_id)
-        .where(
-            RecipeIngredient.unit.in_(sorted(_MASS_UNITS)),
-            RecipeIngredient.amount > 0,
-            RecipeIngredient.amount < _GRAMS_THRESHOLD,
-        )
-    ).all()
-    stats = {"examined": 0, "repaired": 0}
-    for ing, base_yield in suspects:
-        stats["examined"] += 1
-        if ing.amount is None or ing.amount > _MAX_PORTION_MULTIPLE:
+    # Decided over the plain rows, so the whole corpus can be weighed without
+    # loading 85,000 ORM objects to find the sixty that need writing. There is no
+    # amount ceiling on the scan: the ratio is the whole test, and any bound
+    # would be a second, weaker one hiding behind it.
+    examined = 0
+    repairs: dict[int, float] = {}
+    for ing_id, name, unit, amount, base_yield in rows:
+        if unit not in _MASS_UNITS or amount is None or amount <= 0:
             continue
-        expected = expected_grams(norms, ing.name, base_yield)
-        if expected is None:
-            # The corpus cannot vouch for this ingredient — Kalettes appears five
-            # times in total, so there is no median to trust. Fall back to what
-            # the reference says one whole item weighs, which is the same claim
-            # the placeholder is making, and read the amount as a count of them.
-            # Restricted to amounts of one or two, because past that a small
-            # number is more likely a real weight than a stand-in.
-            if ing.amount > _PLACEHOLDER_MAX:
-                continue
-            per_item = _grams_per_unit(ing.name, _COUNT_UNIT)
-            if per_item is None:
-                continue
-            ing.amount = round(ing.amount * per_item, 1)
-            stats["repaired"] += 1
-            continue
-        ing.amount = round(_placeholder_quantity(ing.amount, expected), 1)
-        stats["repaired"] += 1
+        examined += 1
+        repaired = _repaired_amount(name, amount, expected_grams(norms, name, base_yield))
+        if repaired is not None:
+            repairs[ing_id] = repaired
+
+    for chunk in range(0, len(repairs), _WRITE_CHUNK):
+        ids = list(repairs)[chunk:chunk + _WRITE_CHUNK]
+        for ing in session.scalars(
+            select(RecipeIngredient).where(RecipeIngredient.id.in_(ids))
+        ):
+            ing.amount = repairs[ing.id]
     session.flush()
-    return stats
+    return {"examined": examined, "repaired": len(repairs)}
+
+
+# SQLite caps the parameters in one statement; the id list is chunked under it.
+_WRITE_CHUNK = 500
+
+
+def _repaired_amount(name: str, amount: float, expected: float | None) -> float | None:
+    """The quantity this line should carry, or None to leave it as it is."""
+    if expected is None:
+        # The corpus cannot vouch for this ingredient — Kalettes appears five
+        # times in total, so there is no median to trust, and with no norm there
+        # is no ratio to test either. Fall back to what the reference says one
+        # whole item weighs, which is the same claim the placeholder is making,
+        # and read the amount as a count of them. Restricted to a small absolute
+        # amount, because that is the only evidence left.
+        if amount >= _GRAMS_THRESHOLD or amount > _PLACEHOLDER_MAX:
+            return None
+        per_item = _grams_per_unit(name, _COUNT_UNIT)
+        return None if per_item is None else round(amount * per_item, 1)
+    if amount >= expected * IMPLAUSIBLY_SMALL_RATIO:
+        return None
+    if not float(amount).is_integer() and amount > _MAX_PORTION_MULTIPLE:
+        return None
+    return round(_placeholder_quantity(amount, expected), 1)
 
 
 def _placeholder_quantity(amount: float, expected: float) -> float:
