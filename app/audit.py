@@ -15,6 +15,30 @@ ordered cheapest-first, because most bad data does not need a model to spot:
    in Python, so the result is auditable line by line and the model never gets to
    assert a total.
 
+Which number is wrong
+---------------------
+Both steps assume the ingredient quantities are right and the macros might not
+be. That assumption is load-bearing, and when it fails the pass does real damage:
+Seared Steak with Crispy Potato Salad records its flank steak as 2 g, so the
+composition sum came to 140 kcal and 4.8 g of protein, and four correct source
+macros were "corrected" down to match a missing steak.
+
+So the quantities are audited too, and nothing is corrected until they hold up.
+Three independent tests, because a weight can fail in three ways:
+
+* :func:`composition_blockers` — a line with no weight, or one its own corpus
+  norm contradicts. Catches a single wrong ingredient.
+* :func:`check_mass_balance` — the whole list against the plated weight the
+  source states. Catches a list that is individually plausible and collectively
+  too light.
+* :func:`implausible_serving` — the computed total against what a meal can be.
+  Catches what the other two cannot, when the corpus has no norm for the
+  ingredient and the source states no serving weight.
+
+Any of them firing makes the verdict ``inconclusive`` and names the quantity at
+fault, which is the honest answer: the macros may well be fine, and the thing
+that needs fixing is upstream in :mod:`app.canonicalize`.
+
 Every correction is written as a :class:`~app.db.models.RecipeEdit` carrying the
 value it replaced, so any of this is reversible.
 """
@@ -24,7 +48,6 @@ import logging
 import re
 import threading
 import uuid
-from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -32,7 +55,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app import config
-from app.canonicalize import _MASS_UNITS, normalize_name, _typical_grams_by_name
+from app.canonicalize import _MASS_UNITS, expected_grams, normalize_name, per_serving_norms
 from app.classify import macros_suspect, protein_energy_ratio
 from app.db.models import Recipe, RecipeEdit, RecipeIngredient
 from app.mapping.openai_client import Completer
@@ -65,9 +88,12 @@ MAX_VEG_PROTEIN_G = 50
 # those is crying wolf. What marks "Green Beans, 1 g" out is not that it is small
 # but that it is 150 times smaller than every other line for the same ingredient.
 IMPLAUSIBLY_SMALL_RATIO = 0.1
-# Below this many stated weights there is no norm to compare against, so nothing
-# is claimed either way.
-MIN_WEIGHT_EVIDENCE = 20
+# How far the ingredients may fall short of the dish's own plated weight before
+# they are the unreliable party rather than the macros. The corpus sits at 1.03
+# with a 1st percentile of 0.80, so this is well outside normal variation: at
+# this ratio a fifth of the dish is simply not in the ingredient list, and any
+# nutrition total summed from it is short by construction. See check_mass_balance.
+MIN_MASS_BALANCE = 0.75
 
 
 def _utcnow() -> datetime:
@@ -307,26 +333,39 @@ def edible_ingredients(recipe: Recipe) -> list[RecipeIngredient]:
 
 
 def typical_weights(session: Session, recipe: Recipe) -> dict[str, float]:
-    """Median stated weight for each of this recipe's ingredients, corpus-wide.
+    """What this recipe should weigh out of each of its ingredients, corpus-wide.
 
     Scoped to the names in hand rather than the whole table, so an on-demand audit
-    stays a small query.
+    stays a small query, and expressed in grams for *this* recipe's yield so the
+    caller can compare it against the line in front of it.
+
+    The norms come from :func:`app.canonicalize.per_serving_norms`, the same
+    function the trace-amount repair reads, so a quantity the repair pass would
+    correct is a quantity this pass distrusts. They disagreed before, and the gap
+    was where the damage happened: an ingredient with real but thin evidence was
+    invisible here, so a placeholder weight sailed through as a fact and the
+    macros were "corrected" down to it.
     """
     names = {i.name for i in recipe.ingredients}
     if not names:
         return {}
     rows = session.execute(
-        select(RecipeIngredient.name, RecipeIngredient.unit, RecipeIngredient.amount).where(
-            RecipeIngredient.name.in_(sorted(names))
+        select(
+            RecipeIngredient.name,
+            RecipeIngredient.unit,
+            RecipeIngredient.amount,
+            Recipe.base_yield,
         )
+        .join(Recipe, Recipe.id == RecipeIngredient.recipe_id)
+        .where(RecipeIngredient.name.in_(sorted(names)))
     ).all()
-    supported = Counter(
-        normalize_name(name)
-        for name, unit, amount in rows
-        if name and unit in _MASS_UNITS and amount is not None and amount >= 10
-    )
-    medians = _typical_grams_by_name(rows)
-    return {k: v for k, v in medians.items() if supported[k] >= MIN_WEIGHT_EVIDENCE}
+    norms = per_serving_norms(rows)
+    scaled = {}
+    for name in names:
+        grams = expected_grams(norms, name, recipe.base_yield)
+        if grams is not None:
+            scaled[normalize_name(name)] = grams
+    return scaled
 
 
 def composition_blockers(recipe: Recipe, typical: dict[str, float] | None = None) -> list[str]:
@@ -342,6 +381,11 @@ def composition_blockers(recipe: Recipe, typical: dict[str, float] | None = None
     is trustworthy however small, because the source chose that unit on purpose
     ("Sugar for the Sauce, ½ tsp" really is 2.5 g). And an ingredient with no
     established norm is left alone rather than guessed about.
+
+    Three nets, because one ingredient's weight and the whole list's weight fail
+    independently: a missing amount, a quantity its own corpus norm contradicts,
+    and — from :func:`check_mass_balance` — a list that is individually plausible
+    but collectively too light for the dish the source describes.
 
     Checked *before* the model call, so an unanswerable question costs nothing.
     """
@@ -368,7 +412,42 @@ def composition_blockers(recipe: Recipe, typical: dict[str, float] | None = None
             )
     if suspect:
         blockers.append(f"implausible quantity for {', '.join(sorted(suspect))}")
+
+    shortfall = check_mass_balance(recipe)
+    if shortfall:
+        blockers.append(shortfall)
     return blockers
+
+
+def check_mass_balance(recipe: Recipe) -> str | None:
+    """Whether the ingredients account for what the source says the dish weighs.
+
+    ``serving_size_g`` is the one quantity here that comes from the source and is
+    derived from nothing we compute — it is what the finished dish weighs on the
+    plate. Summing our gram amounts against ``serving_size_g x base_yield`` is
+    therefore an independent audit of the ingredient list as a whole, and it
+    catches the case the per-ingredient norms cannot: every line individually
+    plausible, but the dish still missing a fifth of its mass.
+
+    This is the check that decides *which* of two disagreeing numbers to believe.
+    A composition total built from an ingredient list that is 40% short is short
+    by 40% too, and correcting the macros to it moves a right number onto a wrong
+    one. Returns the concern, or None when the ingredients account for the dish —
+    or when the source states no serving weight and the question cannot be asked.
+    """
+    target = (recipe.serving_size_g or 0) * (recipe.base_yield or 0)
+    if not target:
+        return None
+    weighed = sum(i.amount_g or 0 for i in edible_ingredients(recipe))
+    if not weighed:
+        return None
+    ratio = weighed / target
+    if ratio >= MIN_MASS_BALANCE:
+        return None
+    return (
+        f"ingredients weigh {weighed:.0f} g against a dish of {target:.0f} g "
+        f"({ratio:.0%}), so the list is missing mass"
+    )
 
 
 def _composition_key(name: str) -> str:
@@ -421,31 +500,82 @@ def macros_from_composition(
     return {k: round(v / per_serving, 1) for k, v in totals.items()}
 
 
+@dataclass
+class CompositionCheck:
+    """The outcome of the composition pass: corrections, or why there are none."""
+
+    findings: list[Finding] | None = None
+    # Set when the ingredients, not the macros, are the thing that does not add
+    # up. Reported to the caller so "we could not check" never reads as "checked
+    # and found nothing".
+    blocker: str | None = None
+
+    def __iter__(self):
+        """Iterate the findings, so a caller can treat this as the list it wraps."""
+        return iter(self.findings or [])
+
+
+def implausible_serving(computed: dict[str, float], recipe: Recipe) -> str | None:
+    """Whether the ingredients sum to something too small to be a meal.
+
+    The mirror of the guard in :func:`check_macro_arithmetic`, and the same
+    threshold: a main course is not 140 kcal. When the ingredients imply one, the
+    ingredient list is what is wrong — a weight missing, or a placeholder standing
+    in for a quantity — and rewriting four good macros down to match it turns one
+    bad number into four.
+
+    This is the net that catches what the per-ingredient norms and the mass
+    balance cannot: an ingredient the corpus has never stated a weight for, in a
+    recipe whose source gives no serving weight either. There is no evidence to
+    check the list against, so the only signal left is that its total is not food.
+    """
+    implied = computed.get("energy_kcal")
+    stated = recipe.energy_kcal
+    if implied is None or implied >= MIN_PLAUSIBLE_KCAL:
+        return None
+    if stated is None or stated < MIN_PLAUSIBLE_KCAL:
+        return None
+    return (
+        f"ingredients imply only {implied:.0f} kcal a serving against a stated "
+        f"{stated:.0f}, which is too little to be a meal — the quantities are "
+        f"the unreliable party, not the macros"
+    )
+
+
 def check_against_composition(
     recipe: Recipe,
     completer: Completer,
     *,
     model: str | None = None,
     typical: dict[str, float] | None = None,
-) -> list[Finding] | None:
+) -> CompositionCheck:
     """Recompute the macros from the ingredients and correct whatever disagrees.
 
-    Returns ``None`` when the check could not be carried out — no usable
-    ingredients, or an answer covering too little of the recipe to sum. That is
-    emphatically not the same as finding nothing wrong, and reporting it as one is
-    how a recipe stating 79 g of protein against 16 g of ingredients came back
-    "looks correct": the model had echoed the names with their weights attached,
-    nothing matched, and an empty finding list read as a clean bill of health.
+    Returns a check with ``findings`` of ``None`` when it could not be carried
+    out — no usable ingredients, an answer covering too little of the recipe to
+    sum, or a total too small to be a meal. That is emphatically not the same as
+    finding nothing wrong, and reporting it as one is how a recipe stating 79 g of
+    protein against 16 g of ingredients came back "looks correct": the model had
+    echoed the names with their weights attached, nothing matched, and an empty
+    finding list read as a clean bill of health.
     """
     edible = edible_ingredients(recipe)
-    if not edible or composition_blockers(recipe, typical):
-        return None
+    blockers = composition_blockers(recipe, typical)
+    if not edible or blockers:
+        return CompositionCheck(blocker=blockers[0] if blockers else None)
     composition = completer(
         COMPOSITION_SYSTEM, build_composition_prompt(edible), COMPOSITION_SCHEMA
     )
     computed = macros_from_composition(edible, composition, recipe.base_yield or 2)
     if computed is None:
-        return None
+        return CompositionCheck()
+
+    # The ingredients answered, and the answer is not a meal. Believing it here is
+    # the failure this whole pass exists to avoid, so it stops at the last gate
+    # rather than the first.
+    impossible = implausible_serving(computed, recipe)
+    if impossible:
+        return CompositionCheck(blocker=impossible)
 
     findings: list[Finding] = []
     for field_name, value in computed.items():
@@ -478,7 +608,7 @@ def check_against_composition(
                 source="llm",
             )
         )
-    return findings
+    return CompositionCheck(findings=findings)
 
 
 # --------------------------------------------------------------------------
@@ -611,14 +741,19 @@ def audit_recipe(
                 computed = check_against_composition(
                     recipe, completer, model=model, typical=typical
                 )
-                if computed is None:
+                if computed.findings is None:
                     result.verdict = "inconclusive"
+                    # A blocker names the ingredients as the problem, which is a
+                    # finding about the recipe and belongs in the report rather
+                    # than only in the log.
+                    if computed.blocker and computed.blocker not in result.ingredient_gaps:
+                        result.ingredient_gaps.append(computed.blocker)
                     log.info(
-                        "recipe %d: %s, but the composition answer did not cover it",
-                        recipe_id, reasons,
+                        "recipe %d: %s, but the composition answer did not settle it: %s",
+                        recipe_id, reasons, computed.blocker or "it did not cover the recipe",
                     )
                 else:
-                    findings = computed
+                    findings = computed.findings
 
     edits = apply_findings(session, recipe, findings, model=model)
     recipe.audited_at = _utcnow()

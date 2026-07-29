@@ -314,6 +314,143 @@ def test_an_ingredient_with_no_established_norm_is_not_judged(factory):
         assert audit.composition_blockers(r, audit.typical_weights(s, r)) == []
 
 
+def test_a_norm_stands_on_thin_evidence_that_agrees_with_itself(factory):
+    """Six consistent weights are enough to call a 2 g steak a placeholder.
+
+    This is the gap the whole failure went through: Flank Steak is stated six
+    times corpus-wide, the old threshold wanted twenty, so the audit had no norm
+    to judge the line against and treated 2 g as a fact.
+    """
+    with factory() as s:
+        r = make_recipe(s, energy_kcal=523, protein_g=44, carbs_g=47, fat_g=19)
+        r.ingredients = [make_ingredient("Flank Steak", 2, "grams", 2)]
+        s.commit()
+        seed_corpus_norm(s, "Flank Steak", 300, lines=6)
+
+        blockers = audit.composition_blockers(r, audit.typical_weights(s, r))
+        assert any("Flank Steak" in b and "typically 300" in b for b in blockers)
+
+
+def test_a_placeholder_quantity_is_not_a_reason_to_rewrite_the_macros(factory):
+    """The reported failure, end to end.
+
+    Seared Steak with Crispy Potato Salad records its flank steak as 2 g. The
+    audit summed the ingredients, got 140 kcal and 4.8 g of protein, and wrote
+    all four source macros down to match — reporting a correction while the
+    actual fault was a missing steak. The quantities have to be doubted first.
+    """
+    with factory() as s:
+        r = make_recipe(s, energy_kcal=523, protein_g=44, carbs_g=47, fat_g=19)
+        r.ingredients = [
+            make_ingredient("Flank Steak", 2, "grams", 2),
+            make_ingredient("Red Potato", 180, "grams", 180),
+        ]
+        s.commit()
+        seed_corpus_norm(s, "Flank Steak", 300, lines=6)
+        audit.flag_recipe(s, r.id)
+
+        called = []
+
+        def spy(system, user, schema):
+            called.append(user)
+            return {"ingredients": []}
+
+        result = audit.audit_recipe(s, r.id, completer=spy)
+
+        assert called == []  # not a question worth asking of a 2 g steak
+        assert result.verdict == "inconclusive"
+        assert result.findings == []
+        assert any("Flank Steak" in g for g in result.ingredient_gaps)
+        after = s.get(Recipe, r.id)
+        assert (after.energy_kcal, after.protein_g) == (523, 44)  # untouched
+
+
+def test_a_dish_lighter_than_its_plated_weight_cannot_price_its_macros(factory):
+    """Every line plausible on its own, and the list still missing a third of the dish.
+
+    The per-ingredient norms cannot see this — each weight is ordinary. Only the
+    source's own serving weight says the list is incomplete.
+    """
+    with factory() as s:
+        r = make_recipe(
+            s, energy_kcal=800, protein_g=50, carbs_g=70, fat_g=30,
+            serving_size_g=500,
+            ingredients=[("Chicken", 300), ("Rice", 300)],
+        )
+        assert audit.check_mass_balance(r) is not None
+        assert any("missing mass" in b for b in audit.composition_blockers(r, {}))
+
+
+def test_a_dish_that_weighs_what_it_should_is_not_blocked(factory):
+    with factory() as s:
+        r = make_recipe(
+            s, energy_kcal=800, protein_g=50, carbs_g=70, fat_g=30,
+            serving_size_g=500,
+            ingredients=[("Chicken", 500), ("Rice", 520)],
+        )
+        assert audit.check_mass_balance(r) is None
+
+
+def test_no_stated_serving_weight_means_the_question_is_not_asked(factory):
+    """Two thirds of the damage happened on recipes that state no plated weight.
+
+    Absence of the check must read as "cannot say", never as "passed".
+    """
+    with factory() as s:
+        r = make_recipe(
+            s, energy_kcal=800, protein_g=50, carbs_g=70, fat_g=30,
+            ingredients=[("Chicken", 2)],
+        )
+        assert audit.check_mass_balance(r) is None
+
+
+def test_ingredients_that_do_not_add_up_to_a_meal_are_the_thing_thats_wrong(factory):
+    """The last net, for when there is no evidence to check the quantities against.
+
+    No corpus norm for the ingredient and no stated serving weight, so both
+    earlier tests are silent. What remains is that 140 kcal is not a main course
+    — and four macros agreeing with each other are better evidence than one
+    ingredient list that does not.
+    """
+    with factory() as s:
+        r = make_recipe(
+            s, energy_kcal=523, protein_g=44, carbs_g=47, fat_g=19,
+            ingredients=[("Obscure Cut", 2), ("Red Potato", 180)],
+        )
+        audit.flag_recipe(s, r.id)
+        completer = constant_completer(
+            kcal_per_100g=70, protein_per_100g=2, fat_per_100g=1, carbs_per_100g=14
+        )
+        result = audit.audit_recipe(s, r.id, completer=completer)
+
+        assert result.verdict == "inconclusive"
+        assert result.findings == []
+        assert any("too little to be a meal" in g for g in result.ingredient_gaps)
+        assert s.get(Recipe, r.id).protein_g == 44
+
+
+def test_a_real_macro_error_is_still_corrected(factory):
+    """The other case, which must keep working: quantities fine, macros wrong.
+
+    Nothing above may turn the pass into one that never corrects anything —
+    "inconclusive" is only the right answer when the ingredients cannot support
+    the sum.
+    """
+    with factory() as s:
+        r = make_recipe(
+            s, energy_kcal=2100, protein_g=150, carbs_g=100, fat_g=120,
+            serving_size_g=1000,
+            ingredients=[("Chicken", 1000), ("Potatoes", 1000)],
+        )
+        completer = constant_completer(
+            kcal_per_100g=100, protein_per_100g=10, fat_per_100g=5, carbs_per_100g=8
+        )
+        result = audit.audit_recipe(s, r.id, completer=completer, model="cheap-model")
+
+        assert result.verdict == "corrected"
+        assert s.get(Recipe, r.id).energy_kcal == pytest.approx(1000)
+
+
 def test_equipment_is_not_a_missing_ingredient_weight(factory):
     """The source lists skewers among the ingredients; they have no weight to miss.
 

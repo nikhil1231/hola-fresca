@@ -22,11 +22,12 @@ import re
 from collections import Counter, defaultdict
 from functools import lru_cache
 from pathlib import Path
+from statistics import median
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import RecipeIngredient
+from app.db.models import Recipe, RecipeIngredient
 
 _REFERENCE_PATH = Path(__file__).parent / "data" / "ingredient_grams.json"
 _SPICE_DOSE_PATH = Path(__file__).parent / "data" / "ingredient_spice_doses.json"
@@ -324,71 +325,157 @@ def backfill_units(session: Session) -> dict[str, int]:
     return filled
 
 
-# A trace weight is only re-read when the corpus states a real weight for that
-# ingredient this many times, so the median stands on actual evidence.
-_MIN_GRAM_EVIDENCE = 20
+# A trace weight is only re-read against a median built from at least this many
+# stated weights *that agree with each other*; see _stable_median. A flat count
+# threshold was the gate before, set at 20, and it was too blunt in both
+# directions: it let a scattered 20 through and turned away Flank Steak, stated
+# six times and landing on 150 g a head in five of them.
+_MIN_GRAM_EVIDENCE = 4
+# How far a stated weight may sit from the median before it stops corroborating
+# it. Wide enough for real portion variation, narrow enough that two clusters
+# masquerading as one norm fail the test.
+_MEDIAN_SPREAD = 0.35
 # The largest multiple of a portion a trace amount is allowed to mean. "3" reads
 # as three portions; beyond that the number is noise, not a quantity.
 _MAX_PORTION_MULTIPLE = 3.0
+# What a recipe serves when it does not say. 15,219 of the corpus's 15,982
+# recipes are two-serving, so this is the norm rather than a neutral guess.
+_DEFAULT_YIELD = 2
+
+
+def _stable_median(values: list[float], *, min_n: int = _MIN_GRAM_EVIDENCE) -> float | None:
+    """The median of ``values``, or None when they are too few or too scattered.
+
+    Thin evidence is usable exactly when it agrees with itself. Six readings that
+    cluster are a norm; twenty that disagree are not, however impressive the
+    count — which is the failure mode a bare ``len()`` threshold cannot see and
+    this one rejects.
+    """
+    if len(values) < min_n:
+        return None
+    mid = median(values)
+    if not mid:
+        return None
+    agreeing = sum(1 for v in values if abs(v - mid) <= _MEDIAN_SPREAD * mid)
+    return mid if agreeing * 2 >= len(values) else None
+
+
+def per_serving_norms(rows) -> dict[str, float]:
+    """Grams *per serving* each name is stated at, where the corpus agrees on one.
+
+    ``rows`` are ``(name, unit, amount, base_yield)``. Dividing by the recipe's
+    own yield is what makes a weight from a four-serving recipe comparable with
+    one from a two-serving recipe: Flank Steak is stated at 300 g, 450 g and
+    600 g across yields of 2, 3 and 4, which is one figure — 150 g a head — not
+    three. Medianing the raw line amounts instead reads that spread as
+    disagreement and lands on 300, a number that is only correct for half the
+    corpus.
+    """
+    per_serving: dict[str, list[float]] = defaultdict(list)
+    for name, unit, amount, base_yield in rows:
+        if not name or unit not in _MASS_UNITS or amount is None:
+            continue
+        if amount < _GRAMS_THRESHOLD:
+            continue
+        # A recipe that does not state its yield is read as the corpus norm rather
+        # than discarded; 488 of them say nothing, and their weights are still
+        # evidence.
+        per_serving[normalize_name(name)].append(amount / (base_yield or _DEFAULT_YIELD))
+    norms = {}
+    for key, values in per_serving.items():
+        norm = _stable_median(values)
+        if norm is not None:
+            norms[key] = norm
+    return norms
+
+
+def expected_grams(norms: dict[str, float], name: str, base_yield: int | None) -> float | None:
+    """What a recipe of this size normally uses of ``name``, or None if unknown."""
+    norm = norms.get(normalize_name(name))
+    return None if norm is None else norm * (base_yield or _DEFAULT_YIELD)
 
 
 def repair_trace_amounts(session: Session) -> dict[str, int]:
-    """Re-read a placeholder gram weight as a multiple of a typical portion.
+    """Re-read a placeholder gram weight as the quantity a recipe this size uses.
 
     Some lines survive :func:`repair_contradicted_units` still wrong, because the
     ingredient has no countable unit anywhere to re-read them against: Green Beans
-    is ``grams`` on all 1,278 of its lines, so an unlabelled "1" stays 1 g. But the
-    corpus does say what green beans usually weigh — 150 g — and "1" plainly means
-    one portion of them.
+    is ``grams`` on all 1,278 of its lines, so an unlabelled "1" stays 1 g, and
+    Flank Steak is ``grams`` on all 25 of its, so "2" stays 2 g and reaches the
+    recipe page as "4g of steak". But the corpus does say what each of them
+    weighs a head, and that — scaled to this recipe's yield — is the answer.
 
-    So the amount is rewritten as ``multiplier x median``. Only ingredients with
-    ``_MIN_GRAM_EVIDENCE`` real stated weights qualify, which is what keeps a
-    genuine 5 g of sesame seeds intact, and the multiplier is capped so a stray
-    large number cannot invent a kilogram.
+    Two guards keep a real weight intact. The amount must be small enough to be a
+    stand-in rather than a quantity (``_MAX_PORTION_MULTIPLE``), which is what
+    leaves 5 g of sesame seeds alone; and the norm must come from stated weights
+    that agree with each other (:func:`_stable_median`), so an ingredient the
+    corpus cannot speak for is left as it is rather than guessed about.
 
     Idempotent: a repaired line is no longer a trace amount, so a second run skips
     it. The raw payload remains the source of record if it ever needs rebuilding.
     """
     rows = session.execute(
-        select(RecipeIngredient.name, RecipeIngredient.unit, RecipeIngredient.amount)
+        select(
+            RecipeIngredient.name,
+            RecipeIngredient.unit,
+            RecipeIngredient.amount,
+            Recipe.base_yield,
+        ).join(Recipe, Recipe.id == RecipeIngredient.recipe_id)
     ).all()
-    typical = _typical_grams_by_name(rows)
-    support: dict[str, int] = defaultdict(int)
-    for name, unit, amount in rows:
-        if name and unit in _MASS_UNITS and amount is not None and amount >= _GRAMS_THRESHOLD:
-            support[normalize_name(name)] += 1
+    norms = per_serving_norms(rows)
 
-    suspects = session.scalars(
-        select(RecipeIngredient).where(
+    suspects = session.execute(
+        select(RecipeIngredient, Recipe.base_yield)
+        .join(Recipe, Recipe.id == RecipeIngredient.recipe_id)
+        .where(
             RecipeIngredient.unit.in_(sorted(_MASS_UNITS)),
             RecipeIngredient.amount > 0,
             RecipeIngredient.amount < _GRAMS_THRESHOLD,
         )
-    )
+    ).all()
     stats = {"examined": 0, "repaired": 0}
-    for ing in suspects:
+    for ing, base_yield in suspects:
         stats["examined"] += 1
-        key = normalize_name(ing.name)
-        portion = typical.get(key)
-        if portion is None or support.get(key, 0) < _MIN_GRAM_EVIDENCE:
+        if ing.amount is None or ing.amount > _MAX_PORTION_MULTIPLE:
+            continue
+        expected = expected_grams(norms, ing.name, base_yield)
+        if expected is None:
             # The corpus cannot vouch for this ingredient — Kalettes appears five
             # times in total, so there is no median to trust. Fall back to what
             # the reference says one whole item weighs, which is the same claim
-            # the placeholder is making. Restricted to amounts of one or two,
-            # because past that a small number is more likely a real weight than
-            # a stand-in, and to the flat by_name tier, which is the only one that
-            # means "one of these" rather than "one container of these".
-            if ing.amount is None or ing.amount > _PLACEHOLDER_MAX:
+            # the placeholder is making, and read the amount as a count of them.
+            # Restricted to amounts of one or two, because past that a small
+            # number is more likely a real weight than a stand-in.
+            if ing.amount > _PLACEHOLDER_MAX:
                 continue
-            portion = _reference()["by_name"].get(key)
-            if portion is None:
+            per_item = _grams_per_unit(ing.name, _COUNT_UNIT)
+            if per_item is None:
                 continue
-        if ing.amount is None or ing.amount > _MAX_PORTION_MULTIPLE:
+            ing.amount = round(ing.amount * per_item, 1)
+            stats["repaired"] += 1
             continue
-        ing.amount = round(ing.amount * portion, 1)
+        ing.amount = round(_placeholder_quantity(ing.amount, expected), 1)
         stats["repaired"] += 1
     session.flush()
     return stats
+
+
+def _placeholder_quantity(amount: float, expected: float) -> float:
+    """Read a placeholder against what a recipe this size normally uses.
+
+    A whole number is a count of what the source ships — two steaks, one bag of
+    beans — and not a number of recipes' worth. Two steaks in a two-person recipe
+    is still one recipe's worth of steak, so the corpus norm answers it outright
+    and the count adds no multiple: reading "2" as two portions is what turned
+    300 g of flank steak into 600 g. The source is not consistent enough to say
+    otherwise, writing "1" for the same ingredient at both two and four servings.
+
+    A fraction is the one reading that unambiguously scales, because nothing is
+    shipped in halves: "0.5" against a 25 g norm really is half a portion.
+    """
+    if amount >= 1 and float(amount).is_integer():
+        return expected
+    return amount * expected
 
 
 def repair_contradicted_units(session: Session) -> dict[str, int]:

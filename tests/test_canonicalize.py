@@ -242,6 +242,127 @@ def test_trace_repair_is_idempotent(tmp_path, monkeypatch):
     assert again["repaired"] == 0
 
 
+def _yield_fixture(tmp_path, monkeypatch, recipes):
+    """Build one recipe per ``(base_yield, lines)`` pair, then run the repair.
+
+    The trace repair reads weights across yields, so its fixture has to be able
+    to state them: the same ingredient at 300 g in a two-serving recipe and 600 g
+    in a four-serving one is one norm, not two.
+    """
+    monkeypatch.setattr(app_config, "DB_PATH", tmp_path / "y.db")
+    engine = make_engine(tmp_path / "y.db")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    with factory() as s:
+        for n, (base_yield, lines) in enumerate(recipes):
+            r = Recipe(
+                source="hellofresh", source_id=f"r{n}", url="u", name=f"R{n}",
+                base_yield=base_yield,
+            )
+            r.ingredients = [
+                RecipeIngredient(source_ingredient_id=f"i{m}", name=name, amount=amount, unit=unit)
+                for m, (name, amount, unit) in enumerate(lines)
+            ]
+            s.add(r)
+        s.commit()
+        stats = repair_trace_amounts(s)
+        s.commit()
+        return s, stats
+
+
+def _amount_for(session, name, *, base_yield):
+    rows = [
+        i for i in session.query(RecipeIngredient).all()
+        if i.name == name and i.recipe.base_yield == base_yield
+    ]
+    return sorted(i.amount for i in rows)
+
+
+def test_a_placeholder_count_is_one_recipes_worth_not_several(tmp_path, monkeypatch):
+    """"Flank Steak, 2 g" is two steaks, which is one two-person recipe's worth.
+
+    The real case behind this: the source ships two steaks for two people and
+    states no unit, so the amount landed as 2 g and the recipe page offered "4g
+    of steak". Reading the 2 as two portions is the opposite error and just as
+    wrong — 600 g of steak for two. What the corpus actually says is 150 g a
+    head, and that is what a two-serving recipe should get.
+    """
+    corpus = [(2, [("Flank Steak", 300, "grams")]) for _ in range(6)]
+    s, stats = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(2, [("Flank Steak", 2, "grams")])]
+    )
+    assert stats["repaired"] == 1
+    assert _amount_for(s, "Flank Steak", base_yield=2) == [300] * 7
+
+
+def test_a_placeholder_scales_with_the_recipes_own_yield(tmp_path, monkeypatch):
+    """The same placeholder means more food in a recipe that serves more people."""
+    corpus = [(2, [("Flank Steak", 300, "grams")]) for _ in range(6)]
+    s, _ = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(4, [("Flank Steak", 1, "grams")])]
+    )
+    assert _amount_for(s, "Flank Steak", base_yield=4) == [600]
+
+
+def test_a_norm_reads_across_yields_rather_than_averaging_them(tmp_path, monkeypatch):
+    """300 g at two servings and 600 g at four are one figure, not two.
+
+    Medianing the stated amounts directly reads that as a spread and lands on a
+    number correct for neither. Per serving they agree exactly.
+    """
+    corpus = (
+        [(2, [("Flank Steak", 300, "grams")]) for _ in range(3)]
+        + [(4, [("Flank Steak", 600, "grams")]) for _ in range(3)]
+    )
+    s, _ = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(2, [("Flank Steak", 1, "grams")])]
+    )
+    assert _amount_for(s, "Flank Steak", base_yield=2) == [300] * 4
+
+
+def test_thin_evidence_counts_when_it_agrees_with_itself(tmp_path, monkeypatch):
+    """Six consistent weights are a norm; the old flat threshold of 20 said no.
+
+    That threshold is why the steak line survived every repair pass and reached
+    the page as 4 g.
+    """
+    corpus = [(2, [("Pork Fillet", 250, "grams")]) for _ in range(5)]
+    s, stats = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(2, [("Pork Fillet", 1, "grams")])]
+    )
+    assert stats["repaired"] == 1
+    assert _amount_for(s, "Pork Fillet", base_yield=2) == [250] * 6
+
+
+def test_scattered_evidence_is_not_a_norm_however_much_of_it_there_is(tmp_path, monkeypatch):
+    """Weights that disagree with each other cannot vouch for a placeholder.
+
+    The guard a bare count cannot give: these twenty lines would clear any
+    threshold, and their median still describes none of them.
+    """
+    scattered = [10, 20, 30, 400, 500, 600] * 4
+    corpus = [(2, [("Mystery Item", g, "grams")]) for g in scattered]
+    s, stats = _yield_fixture(
+        tmp_path, monkeypatch, corpus + [(2, [("Mystery Item", 1, "grams")])]
+    )
+    assert stats["repaired"] == 0
+    assert _amount_for(s, "Mystery Item", base_yield=2)[0] == 1  # left as it was
+
+
+def test_the_reference_table_answers_for_an_ingredient_the_corpus_cannot(tmp_path, monkeypatch):
+    """With no corpus norm at all, what one item weighs is still on record.
+
+    Reached through the full gram-per-unit stack rather than its flat name table,
+    so the keyword tier is available: nothing lists "Corn Tortilla" by name, but
+    "tortilla" is there at 40 g.
+    """
+    s, stats = _yield_fixture(
+        tmp_path, monkeypatch, [(2, [("Corn Tortilla", 2, "grams")])]
+    )
+    assert stats["repaired"] == 1
+    assert _amount_for(s, "Corn Tortilla", base_yield=2) == [80]
+
+
 def test_to_grams_rejects_implausible_counts():
     """A count unit on a large amount is a mislabelled gram weight."""
     # 670 shanks would be 100kg of lamb; the source means 670g.
