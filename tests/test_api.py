@@ -377,3 +377,38 @@ def test_personal_rating_rejects_invalid_and_hidden_recipes(client):
     assert client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 0}).status_code == 422
     assert client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 6}).status_code == 422
     assert client.put("/api/recipes/4/personal-rating", json={"rating": 4}).status_code == 404
+
+
+def test_wishlist_round_trip(client):
+    rid = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]["id"]
+
+    detail = client.put(f"/api/recipes/{rid}/wishlist", json={"wishlisted": True}).json()
+    assert detail["wishlisted"] is True
+
+    listed = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]
+    assert listed["wishlisted"] is True
+
+    cleared = client.put(f"/api/recipes/{rid}/wishlist", json={"wishlisted": False}).json()
+    assert cleared["wishlisted"] is False
+
+    listed = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]
+    assert listed["wishlisted"] is False
+
+
+def test_wishlist_filter_returns_only_wishlisted(client):
+    italian = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]
+    mexican = client.get("/api/recipes", params={"cuisine": "Mexican"}).json()["items"][0]
+
+    assert client.get("/api/recipes", params={"wishlisted": "true"}).json()["total"] == 0
+
+    client.put(f"/api/recipes/{mexican['id']}/wishlist", json={"wishlisted": True})
+    data = client.get("/api/recipes", params={"wishlisted": "true"}).json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == mexican["id"]
+    assert data["items"][0]["wishlisted"] is True
+    assert data["items"][0]["id"] != italian["id"]
+
+
+def test_wishlist_rejects_hidden_recipes(client):
+    assert client.put("/api/recipes/4/wishlist", json={"wishlisted": True}).status_code == 404

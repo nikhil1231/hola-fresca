@@ -162,6 +162,9 @@ class Recipe(Base):
     personal_rating: Mapped["PersonalRecipeRating | None"] = relationship(
         back_populates="recipe", cascade="all, delete-orphan", uselist=False
     )
+    wishlist_entry: Mapped["PersonalRecipeWishlist | None"] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class PersonalRecipeRating(Base):
@@ -176,6 +179,15 @@ class PersonalRecipeRating(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     recipe: Mapped[Recipe] = relationship(back_populates="personal_rating")
+
+
+class PersonalRecipeWishlist(Base):
+    __tablename__ = "personal_recipe_wishlist"
+
+    recipe_id: Mapped[int] = mapped_column(ForeignKey("recipes.id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    recipe: Mapped[Recipe] = relationship(back_populates="wishlist_entry")
 
 
 class RecipeIngredient(Base):

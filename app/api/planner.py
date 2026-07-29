@@ -12,6 +12,7 @@ from app.api.recipes import (
     _filtered_recipe_ids,
     _personal_rating_map,
     _recipe_ids_with_pricing_gaps,
+    _wishlist_map,
     _to_card,
 )
 from app.api.schemas import (
@@ -215,12 +216,17 @@ def suggestions(
         by_id = {recipe.id: recipe for recipe in rows}
 
     personal_ratings = _personal_rating_map(session, page_ids)
+    wishlist = _wishlist_map(session, page_ids)
     items = []
     for candidate in page_scores:
         recipe = by_id.get(candidate.recipe_id)
         if recipe is None:
             continue
-        card = _to_card(recipe, personal_rating=personal_ratings.get(recipe.id)).model_dump()
+        card = _to_card(
+            recipe,
+            personal_rating=personal_ratings.get(recipe.id),
+            wishlisted=wishlist.get(recipe.id, False),
+        ).model_dump()
         available = candidate.available
         items.append(
             RecipeSuggestionCard(

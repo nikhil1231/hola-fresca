@@ -4,6 +4,7 @@ import {
   IconClock,
   IconFlame,
   IconGauge,
+  IconHeartFilled,
   IconMinus,
   IconPlus,
   IconStarFilled,
@@ -236,6 +237,13 @@ export default function RecipeCard({
                 <IconStarFilled size={11} /> {recipe.personal_rating}
               </Group>
             </Badge>
+          )}
+          {recipe.wishlisted && (
+            <Tooltip label="On your wishlist" withArrow>
+              <span className={classes.wishlistBadge} aria-label="On your wishlist">
+                <IconHeartFilled size={15} />
+              </span>
+            </Tooltip>
           )}
           {basketBadge && (
             <span className={classes.marginalBadgeWrap}>

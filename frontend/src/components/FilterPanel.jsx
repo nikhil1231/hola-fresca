@@ -117,12 +117,22 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
       )}
 
       <Section label="Personal">
-        <Switch
-          color="dark"
-          label="Rated"
-          checked={Boolean(filters.rated)}
-          onChange={(event) => setScalar('rated', event.currentTarget.checked ? 'true' : null)}
-        />
+        <Stack gap="xs">
+          <Switch
+            color="dark"
+            label="Rated"
+            checked={Boolean(filters.rated)}
+            onChange={(event) => setScalar('rated', event.currentTarget.checked ? 'true' : null)}
+          />
+          <Switch
+            color="fresh"
+            label="Wishlist"
+            checked={Boolean(filters.wishlisted)}
+            onChange={(event) =>
+              setScalar('wishlisted', event.currentTarget.checked ? 'true' : null)
+            }
+          />
+        </Stack>
       </Section>
 
       <Divider />

@@ -27,10 +27,12 @@ from app.api.schemas import (
     RecipeDetail,
     RecipeEditOut,
     StepOut,
+    WishlistIn,
 )
 from app.db.models import (
     IngredientMapping,
     PersonalRecipeRating,
+    PersonalRecipeWishlist,
     Recipe,
     RecipeAllergen,
     RecipeCuisine,
@@ -158,6 +160,7 @@ def _apply_filters(
     difficulty: int | None,
     exclude: list[str],
     rated: bool = False,
+    wishlisted: bool = False,
 ) -> Select:
     stmt = stmt.where(Recipe.curated == 1)
     if cuisine:
@@ -202,6 +205,8 @@ def _apply_filters(
         stmt = stmt.where(Recipe.difficulty == difficulty)
     if rated:
         stmt = stmt.where(Recipe.personal_rating.has())
+    if wishlisted:
+        stmt = stmt.where(Recipe.wishlist_entry.has())
     return stmt
 
 
@@ -218,6 +223,21 @@ def _personal_rating_map(session: Session, recipe_ids: list[int]) -> dict[int, i
     return {row.recipe_id: row.rating for row in rows}
 
 
+def _wishlisted_value(r: Recipe) -> bool:
+    return r.wishlist_entry is not None
+
+
+def _wishlist_map(session: Session, recipe_ids: list[int]) -> dict[int, bool]:
+    if not recipe_ids:
+        return {}
+    rows = session.scalars(
+        select(PersonalRecipeWishlist.recipe_id).where(
+            PersonalRecipeWishlist.recipe_id.in_(recipe_ids)
+        )
+    ).all()
+    return {recipe_id: True for recipe_id in rows}
+
+
 def _round_money(value: float) -> float:
     return round(value, 2)
 
@@ -229,6 +249,7 @@ def _to_card(
     intrinsic_cost: float | None = None,
     intrinsic_gap_count: int = 0,
     personal_rating: int | None = None,
+    wishlisted: bool | None = None,
 ) -> RecipeCard:
     # A derived diet chip (most specific first) plus source attribute chips.
     chips: list[str] = []
@@ -250,6 +271,7 @@ def _to_card(
         avg_rating=_shown_rating(r),
         ratings_count=_shown_ratings_count(r),
         personal_rating=personal_rating if personal_rating is not None else _personal_rating_value(r),
+        wishlisted=wishlisted if wishlisted is not None else _wishlisted_value(r),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in r.cuisines],
         tags=list(dict.fromkeys(chips)),  # dedupe, preserve order
         intrinsic_score=intrinsic_score,
@@ -410,6 +432,7 @@ def list_recipes(
     difficulty: int | None = None,
     exclude: list[str] = Query(default_factory=list),
     rated: bool = False,
+    wishlisted: bool = False,
     exclude_id: list[int] = Query(default_factory=list),
     sort: str = facet_cfg.DEFAULT_SORT,
     page: int = Query(default=1, ge=1),
@@ -422,7 +445,7 @@ def list_recipes(
     filters = dict(
         q=q, cuisine=cuisine, diet=diet, tag=tag, protein=protein, max_time=max_time,
         min_protein=min_protein, min_protein_ratio=min_protein_ratio, max_kcal=max_kcal,
-        difficulty=difficulty, exclude=exclude, rated=rated,
+        difficulty=difficulty, exclude=exclude, rated=rated, wishlisted=wishlisted,
     )
     exclude_unmapped = "unmapped" in exclude
     excluded_recipe_ids = set(exclude_id)
@@ -564,6 +587,7 @@ def get_recipe(
         avg_rating=_shown_rating(recipe),
         ratings_count=_shown_ratings_count(recipe),
         personal_rating=_personal_rating_value(recipe),
+        wishlisted=_wishlisted_value(recipe),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in recipe.cuisines],
         tags=list(dict.fromkeys(
             _CHIP_LABELS[t.type] for t in recipe.tags if t.type in _CHIP_LABELS
@@ -634,6 +658,26 @@ def set_personal_rating(
         session.add(PersonalRecipeRating(recipe_id=recipe_id, rating=body.rating))
     else:
         existing.rating = body.rating
+    session.commit()
+    return get_recipe(recipe_id, session, csv_path)
+
+
+@router.put("/recipes/{recipe_id}/wishlist", response_model=RecipeDetail)
+def set_wishlist(
+    recipe_id: int,
+    body: WishlistIn,
+    session: Session = Depends(get_session),
+    csv_path: Path | None = Depends(get_planner_csv_path),
+) -> RecipeDetail:
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or not recipe.curated:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    existing = session.get(PersonalRecipeWishlist, recipe_id)
+    if body.wishlisted and existing is None:
+        session.add(PersonalRecipeWishlist(recipe_id=recipe_id))
+    elif not body.wishlisted and existing is not None:
+        session.delete(existing)
     session.commit()
     return get_recipe(recipe_id, session, csv_path)
 

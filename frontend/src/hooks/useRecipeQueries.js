@@ -11,6 +11,7 @@ import {
   flagRecipe,
   revertRecipeEdits,
   setPersonalRecipeRating,
+  setRecipeWishlist,
 } from '../api/client.js'
 
 const PAGE_SIZE = 24
@@ -137,6 +138,18 @@ export function usePersonalRecipeRating(id) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (rating) => setPersonalRecipeRating(id, rating),
+    onSuccess: (data) => {
+      qc.setQueryData(['recipe', id], data)
+      qc.invalidateQueries({ queryKey: ['recipes'] })
+      qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
+    },
+  })
+}
+
+export function useRecipeWishlist(id) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (wishlisted) => setRecipeWishlist(id, wishlisted),
     onSuccess: (data) => {
       qc.setQueryData(['recipe', id], data)
       qc.invalidateQueries({ queryKey: ['recipes'] })

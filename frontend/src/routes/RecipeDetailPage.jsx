@@ -33,6 +33,8 @@ import {
   IconExternalLink,
   IconFlag,
   IconFlame,
+  IconHeart,
+  IconHeartFilled,
   IconMinus,
   IconPhoto,
   IconPlus,
@@ -47,6 +49,7 @@ import {
   usePlannerBasket,
   usePersonalRecipeRating,
   useRecipe,
+  useRecipeWishlist,
   useRevertRecipeEdits,
 } from '../hooks/useRecipeQueries.js'
 import {
@@ -346,6 +349,28 @@ function PersonalRatingControl({ value, onSet, pending }) {
   )
 }
 
+function WishlistButton({ wishlisted, pending, onToggle }) {
+  const label = wishlisted ? 'Remove from wishlist' : 'Add to wishlist'
+
+  return (
+    <Tooltip label={label} withArrow>
+      <ActionIcon
+        type="button"
+        variant={wishlisted ? 'filled' : 'light'}
+        color={wishlisted ? 'red' : 'gray'}
+        radius="xl"
+        size="lg"
+        disabled={pending}
+        aria-label={label}
+        aria-pressed={wishlisted}
+        onClick={() => onToggle(!wishlisted)}
+      >
+        {wishlisted ? <IconHeartFilled size={19} /> : <IconHeart size={19} />}
+      </ActionIcon>
+    </Tooltip>
+  )
+}
+
 function MacroStat({ label, value, unit, corrected }) {
   return (
     <Paper withBorder radius="md" p="sm" className={classes.macro}>
@@ -553,6 +578,7 @@ export default function RecipeDetailPage() {
   const audit = useAuditRecipe(id)
   const revert = useRevertRecipeEdits(id)
   const personalRating = usePersonalRecipeRating(id)
+  const wishlist = useRecipeWishlist(id)
 
   if (isLoading) {
     return (
@@ -659,6 +685,11 @@ export default function RecipeDetailPage() {
                   setRecipePortions(upcomingWeekStart, recipe.id, portions)
                 }
               />
+              <WishlistButton
+                wishlisted={recipe.wishlisted}
+                pending={wishlist.isPending}
+                onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
+              />
               {marginalPerPortion != null && (
                 <Tooltip
                   label={
@@ -762,6 +793,12 @@ export default function RecipeDetailPage() {
       {personalRating.isError && (
         <Alert color="red" variant="light">
           {personalRating.error?.message ?? "Couldn't save your rating."}
+        </Alert>
+      )}
+
+      {wishlist.isError && (
+        <Alert color="red" variant="light">
+          {wishlist.error?.message ?? "Couldn't update your wishlist."}
         </Alert>
       )}
 

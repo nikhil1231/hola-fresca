@@ -96,6 +96,10 @@ export function setPersonalRecipeRating(id, rating) {
   return putJSON(`/api/recipes/${id}/personal-rating`, { rating })
 }
 
+export function setRecipeWishlist(id, wishlisted) {
+  return putJSON(`/api/recipes/${id}/wishlist`, { wishlisted })
+}
+
 // Flags the macros as suspicious and starts a background audit; poll the
 // returned job_id with fetchAuditJob until it is no longer 'running'.
 export async function flagRecipe(id) {

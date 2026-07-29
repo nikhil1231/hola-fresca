@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router-dom'
 const ARRAY_KEYS = ['cuisine', 'diet', 'tag', 'protein', 'exclude']
 // Keys stored as single numeric params.
 const NUMBER_KEYS = ['max_time', 'min_protein', 'min_protein_ratio', 'max_kcal', 'difficulty']
-const BOOLEAN_KEYS = ['rated']
+const BOOLEAN_KEYS = ['rated', 'wishlisted']
 
 export const DEFAULT_SORT = 'best_fit'
 const DEFAULT_EXCLUDES = ['unmapped']

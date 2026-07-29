@@ -15,6 +15,10 @@ class PersonalRatingIn(BaseModel):
     rating: int | None = Field(default=None, ge=1, le=5)
 
 
+class WishlistIn(BaseModel):
+    wishlisted: bool
+
+
 class RecipeCard(BaseModel):
     id: int
     name: str
@@ -28,6 +32,7 @@ class RecipeCard(BaseModel):
     avg_rating: float | None = None
     ratings_count: int | None = None
     personal_rating: int | None = None
+    wishlisted: bool = False
     cuisines: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     intrinsic_score: float | None = None
@@ -102,6 +107,7 @@ class RecipeDetail(BaseModel):
     avg_rating: float | None = None
     ratings_count: int | None = None
     personal_rating: int | None = None
+    wishlisted: bool = False
 
     cuisines: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
@@ -197,6 +203,7 @@ class PlannerFiltersIn(BaseModel):
     max_kcal: float | None = None
     difficulty: int | None = None
     rated: bool = False
+    wishlisted: bool = False
     exclude: list[str] = Field(default_factory=list)
 
 
