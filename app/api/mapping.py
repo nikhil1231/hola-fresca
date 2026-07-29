@@ -85,8 +85,12 @@ def _example_recipes(session: Session, source_ids: list[str], limit: int = 4):
         .where(Recipe.curated == 1, RecipeIngredient.source_ingredient_id.in_(source_ids))
         .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
         .order_by(
-            Recipe.ratings_count.desc().nullslast(),
-            Recipe.avg_rating.desc().nullslast(),
+            func.coalesce(Recipe.effective_ratings_count, Recipe.ratings_count)
+            .desc()
+            .nullslast(),
+            func.coalesce(Recipe.effective_rating, Recipe.avg_rating)
+            .desc()
+            .nullslast(),
             Recipe.id,
         )
         .distinct()

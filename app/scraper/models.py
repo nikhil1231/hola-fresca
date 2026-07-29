@@ -77,12 +77,28 @@ class NormalizedRecipe:
     fat_g: float | None = None
     carbs_g: float | None = None
 
+    # Per-revision popularity, as the source states it for this exact version.
     avg_rating: float | None = None
     ratings_count: int | None = None
     favorites_count: int | None = None
+    # Lineage-wide popularity: the same dish across every revision of it, which
+    # is what the source's own page displays. See classify.effective_ratings.
+    aggregate_rating: float | None = None
+    aggregate_ratings_count: int | None = None
+
     is_addon: bool = False
     source_created_at: str | None = None
     source_updated_at: str | None = None
+
+    # Revision identity. ``family_code`` is the source's own dish id with the
+    # revision suffix removed, so every version of a dish shares one key; it is
+    # None when the source's code doesn't carry one. ``source_active`` marks the
+    # revision the source currently serves.
+    unique_recipe_code: str | None = None
+    family_code: str | None = None
+    cloned_from: str | None = None
+    source_active: bool = False
+    source_published: bool = False
 
     ingredients: list[NormalizedIngredient] = field(default_factory=list)
     steps: list[NormalizedStep] = field(default_factory=list)

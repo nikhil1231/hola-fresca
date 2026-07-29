@@ -70,15 +70,33 @@ INTRINSIC_PORTIONS = 4
 # Attribute tag types that become display chips on a card, with friendly labels.
 _CHIP_LABELS = dict(facet_cfg.ATTRIBUTE_TAGS)
 
+# Popularity sorts and the rating shown on a card use the effective figures —
+# the dish's whole lineage, matching what the source's own page shows — falling
+# back to the per-revision columns on a database that predates the backfill.
+_EFFECTIVE_RATING = func.coalesce(Recipe.effective_rating, Recipe.avg_rating)
+_EFFECTIVE_RATINGS_COUNT = func.coalesce(
+    Recipe.effective_ratings_count, Recipe.ratings_count
+)
+
 _SORT_COLUMNS = {
-    "popular": nullslast(Recipe.ratings_count.desc()),
-    "rating": nullslast(Recipe.avg_rating.desc()),
+    "popular": nullslast(_EFFECTIVE_RATINGS_COUNT.desc()),
+    "rating": nullslast(_EFFECTIVE_RATING.desc()),
     "protein_high": nullslast(Recipe.protein_g.desc()),
     "protein_ratio": nullslast(Recipe.protein_energy_ratio.desc()),
     "kcal_low": nullslast(Recipe.energy_kcal.asc()),
     "time_low": nullslast(Recipe.total_time_min.asc()),
     "newest": nullslast(Recipe.source_created_at.desc()),
 }
+
+
+def _shown_rating(r: Recipe) -> float | None:
+    return r.effective_rating if r.effective_rating is not None else r.avg_rating
+
+
+def _shown_ratings_count(r: Recipe) -> int | None:
+    if r.effective_ratings_count is not None:
+        return r.effective_ratings_count
+    return r.ratings_count
 
 
 def _apply_filters(
@@ -188,8 +206,8 @@ def _to_card(
         protein_energy_ratio=r.protein_energy_ratio,
         total_time_min=r.total_time_min,
         difficulty=r.difficulty,
-        avg_rating=r.avg_rating,
-        ratings_count=r.ratings_count,
+        avg_rating=_shown_rating(r),
+        ratings_count=_shown_ratings_count(r),
         personal_rating=personal_rating if personal_rating is not None else _personal_rating_value(r),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in r.cuisines],
         tags=list(dict.fromkeys(chips)),  # dedupe, preserve order
@@ -491,8 +509,8 @@ def get_recipe(
         fat_g=recipe.fat_g,
         carbs_g=recipe.carbs_g,
         protein_energy_ratio=recipe.protein_energy_ratio,
-        avg_rating=recipe.avg_rating,
-        ratings_count=recipe.ratings_count,
+        avg_rating=_shown_rating(recipe),
+        ratings_count=_shown_ratings_count(recipe),
         personal_rating=_personal_rating_value(recipe),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in recipe.cuisines],
         tags=list(dict.fromkeys(

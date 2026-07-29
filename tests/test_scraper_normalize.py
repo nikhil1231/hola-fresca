@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from app.scraper.sources.hellofresh import HelloFreshSource, RecipeExtractionError
+from app.scraper.sources.hellofresh import (
+    HelloFreshSource,
+    RecipeExtractionError,
+    family_code,
+)
 from app.scraper.util import parse_iso8601_duration_minutes, strip_html
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -52,6 +56,43 @@ def test_curation_signal_fields(source: HelloFreshSource) -> None:
     assert recipe.avg_rating and 3.0 < recipe.avg_rating < 3.5
     assert recipe.is_addon is False
     assert recipe.source_created_at and recipe.source_created_at.startswith("2025-12-15")
+
+
+def test_lineage_ratings_are_kept_alongside_the_revision_ratings(source: HelloFreshSource) -> None:
+    """The page shows the lineage figures; the revision's own are a different,
+    much smaller sample and both have to survive normalisation."""
+    recipe = source.normalize(_load("hellofresh_complete.json"), url="")
+    assert recipe.aggregate_ratings_count == 2292
+    assert recipe.aggregate_rating and 4.3 < recipe.aggregate_rating < 4.4
+    assert recipe.ratings_count == 422
+
+
+def test_revision_identity_fields(source: HelloFreshSource) -> None:
+    recipe = source.normalize(_load("hellofresh_complete.json"), url="")
+    assert recipe.unique_recipe_code == "R17041-18"
+    assert recipe.family_code == "R17041"
+    assert recipe.cloned_from == "648732d18425987db35df396"
+    assert recipe.source_active is True
+    assert recipe.source_published is True
+
+
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        ("R17179-1", "R17179"),
+        ("R17179-3", "R17179"),
+        ("QR1947-2", "QR1947"),
+        ("  R500-7  ", "R500"),
+        # Bundles and uncoded rows carry no dish family and must fall through to
+        # the name-based dedup rather than colliding on a bogus key.
+        ("", None),
+        (None, None),
+        ("NRC-ASL19820-24964-1", None),
+        ("F4LAO-BUND2273437592", None),
+    ],
+)
+def test_family_code_parsing(code, expected) -> None:
+    assert family_code(code) == expected
 
 
 def test_ingredients_joined_with_base_yield_amounts(source: HelloFreshSource) -> None:

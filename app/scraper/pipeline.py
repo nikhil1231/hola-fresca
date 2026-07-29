@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.canonicalize import to_grams
 from app.classify import (
     diet_flags,
+    effective_ratings,
     macros_implausible_for_veg,
     macros_suspect,
     protein_energy_ratio,
@@ -401,10 +402,23 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
         avg_rating=recipe.avg_rating,
         ratings_count=recipe.ratings_count,
         favorites_count=recipe.favorites_count,
+        aggregate_rating=recipe.aggregate_rating,
+        aggregate_ratings_count=recipe.aggregate_ratings_count,
         is_addon=1 if recipe.is_addon else 0,
         source_created_at=_parse_dt(recipe.source_created_at),
         source_updated_at=_parse_dt(recipe.source_updated_at),
+        unique_recipe_code=recipe.unique_recipe_code,
+        family_code=recipe.family_code,
+        cloned_from=recipe.cloned_from,
+        source_active=1 if recipe.source_active else 0,
+        source_published=1 if recipe.source_published else 0,
         scraped_at=datetime.now(timezone.utc),
+    )
+    row.effective_rating, row.effective_ratings_count = effective_ratings(
+        recipe.avg_rating,
+        recipe.ratings_count,
+        recipe.aggregate_rating,
+        recipe.aggregate_ratings_count,
     )
     row.ingredients = []
     for position, i in enumerate(recipe.ingredients, start=1):

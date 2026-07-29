@@ -30,7 +30,19 @@ def make_engine(db_path: Path | None = None) -> Engine:
 _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
     "recipe_ingredients": {"position": "INTEGER"},
     "ingredient_mappings": {"unit_kind": "TEXT DEFAULT 'mass'"},
-    "recipes": {"flagged_suspicious": "INTEGER DEFAULT 0", "audited_at": "DATETIME"},
+    "recipes": {
+        "flagged_suspicious": "INTEGER DEFAULT 0",
+        "audited_at": "DATETIME",
+        "aggregate_rating": "REAL",
+        "aggregate_ratings_count": "INTEGER",
+        "effective_rating": "REAL",
+        "effective_ratings_count": "INTEGER",
+        "unique_recipe_code": "VARCHAR(64)",
+        "family_code": "VARCHAR(64)",
+        "cloned_from": "VARCHAR(64)",
+        "source_active": "INTEGER DEFAULT 0",
+        "source_published": "INTEGER DEFAULT 0",
+    },
 }
 
 

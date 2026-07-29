@@ -461,8 +461,16 @@ def _load_recipes(
                 for k, g in sorted(grams.items(), key=lambda kv: -kv[1])
             ),
             total_time_min=recipe.total_time_min,
-            avg_rating=recipe.avg_rating,
-            ratings_count=recipe.ratings_count,
+            avg_rating=(
+                recipe.effective_rating
+                if recipe.effective_rating is not None
+                else recipe.avg_rating
+            ),
+            ratings_count=(
+                recipe.effective_ratings_count
+                if recipe.effective_ratings_count is not None
+                else recipe.ratings_count
+            ),
             energy_kcal=recipe.energy_kcal,
             protein_g=recipe.protein_g,
             fat_g=recipe.fat_g,

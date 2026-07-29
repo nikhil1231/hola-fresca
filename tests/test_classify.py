@@ -1,7 +1,31 @@
 """Tests for the derived per-recipe signals."""
 from __future__ import annotations
 
-from app.classify import diet_flags, macros_suspect, protein_energy_ratio
+from app.classify import (
+    diet_flags,
+    effective_ratings,
+    macros_suspect,
+    protein_energy_ratio,
+)
+
+
+def test_effective_ratings_prefers_the_broader_lineage_sample():
+    # The revision never ran long enough to be rated; the dish is well proven.
+    assert effective_ratings(0, 0, 4.47, 1788) == (4.47, 1788)
+    # Both populated: the lineage still spans more cooks than the revision.
+    assert effective_ratings(3.44, 508, 4.36, 719) == (4.36, 719)
+
+
+def test_effective_ratings_falls_back_to_the_revision():
+    # No lineage figures at all (an older payload) -> use what the row has.
+    assert effective_ratings(4.1, 300, None, None) == (4.1, 300)
+    assert effective_ratings(4.1, 300, 0.0, 0) == (4.1, 300)
+    # A lineage narrower than the revision itself is not a better sample.
+    assert effective_ratings(4.1, 300, 3.0, 12) == (4.1, 300)
+
+
+def test_effective_ratings_with_nothing_known():
+    assert effective_ratings(None, None, None, None) == (None, None)
 
 
 def test_protein_energy_ratio():

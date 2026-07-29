@@ -4,6 +4,7 @@
     python -m app.scraper fetch --limit 50
     python -m app.scraper normalize
     python -m app.scraper run --limit 50        # all three stages
+    python -m app.scraper backfill              # refresh source fields in place
     python -m app.scraper status
 
 The scraper is an offline job that writes into the same SQLite database the
@@ -45,6 +46,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "enrich",
         help="backfill units, convert amounts to grams, compute diet/macro/ratio fields",
+    )
+
+    sub.add_parser(
+        "backfill",
+        help="refresh source-stated fields (ratings, revision identity) from cached "
+             "payloads, without rebuilding recipes",
     )
 
     p_cur = sub.add_parser("curate", help="flag the active library (Profile A by default)")
@@ -120,6 +127,17 @@ def main(argv: list[str] | None = None) -> int:
             f"({100 * rep.ingredients_gram_resolved / max(rep.ingredients_total, 1):.0f}%)"
         )
 
+    if args.command == "backfill":
+        from app.scraper.backfill import backfill_source_fields
+
+        rep = backfill_source_fields(source, session_factory)
+        print(
+            f"backfill: {rep.updated} of {rep.examined} recipes updated "
+            f"({rep.ratings_corrected} rating counts corrected, "
+            f"{rep.families_resolved} dish families resolved, "
+            f"{rep.missing_raw} missing raw payloads, {rep.errors} errors)"
+        )
+
     if args.command == "curate":
         from app.scraper.curate import CurationRules, curate
 
@@ -128,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             min_avg_rating=args.min_stars,
             since_year=args.since_year,
             drop_addons=not args.keep_addons,
-            dedup_by_name=not args.no_dedup,
+            dedup_versions=not args.no_dedup,
             recent_days=args.recent_days,
             recent_min_ratings=args.recent_min_ratings,
         )

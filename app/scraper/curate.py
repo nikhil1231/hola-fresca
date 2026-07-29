@@ -6,9 +6,11 @@ curation can be re-run with different rules. Because the full raw payload store
 is also kept, the library can always be rebuilt from scratch.
 
 The default rules implement "Profile A — Proven": complete, cookable single
-meals that real people have rated, deduplicated to the newest version of each
-dish. The thresholds are parameters so the set can be widened or tightened
-without code changes.
+meals that real people have rated, deduplicated to one version of each dish —
+the one the source still serves. Popularity is judged on the dish's whole
+lineage rather than the individual revision, because a revision carries only
+the ratings it earned itself. The thresholds are parameters so the set can be
+widened or tightened without code changes.
 """
 from __future__ import annotations
 
@@ -39,7 +41,7 @@ class CurationRules:
     min_avg_rating: float = 0.0
     since_year: int | None = None
     drop_addons: bool = True
-    dedup_by_name: bool = True
+    dedup_versions: bool = True
     # Recency exception: recipes published within this many days need only
     # ``recent_min_ratings`` ratings, so new menu items surface before they've
     # accumulated the full rating count. Set recent_days=0 to disable.
@@ -72,6 +74,23 @@ def _is_recent(recipe: Recipe, days: int) -> bool:
     if days <= 0 or recipe.source_created_at is None:
         return False
     return (datetime.utcnow() - recipe.source_created_at) <= timedelta(days=days)
+
+
+def _ratings_count(recipe: Recipe) -> int:
+    """Ratings to judge popularity by, preferring the lineage-wide count.
+
+    Falls back to the per-revision count so a database that predates the
+    backfill still curates exactly as it did before.
+    """
+    if recipe.effective_ratings_count is not None:
+        return recipe.effective_ratings_count
+    return recipe.ratings_count or 0
+
+
+def _avg_rating(recipe: Recipe) -> float:
+    if recipe.effective_rating is not None:
+        return recipe.effective_rating
+    return recipe.avg_rating or 0.0
 
 
 def _has_nonzero_ingredient_amount(recipe: Recipe) -> bool:
@@ -114,7 +133,7 @@ def curate(
             if rules.drop_addons and r.is_addon:
                 report.cut_addon += 1
                 continue
-            ratings = r.ratings_count or 0
+            ratings = _ratings_count(r)
             if ratings < rules.min_ratings:
                 # Recency exception: newer recipes qualify with fewer ratings.
                 if _is_recent(r, rules.recent_days) and ratings >= rules.recent_min_ratings:
@@ -122,7 +141,7 @@ def curate(
                 else:
                     report.cut_unrated += 1
                     continue
-            if rules.min_avg_rating and (r.avg_rating or 0) < rules.min_avg_rating:
+            if rules.min_avg_rating and _avg_rating(r) < rules.min_avg_rating:
                 report.cut_low_stars += 1
                 continue
             if rules.since_year is not None:
@@ -132,8 +151,8 @@ def curate(
                     continue
             keep.append(r)
 
-        if rules.dedup_by_name:
-            keep = _dedup_newest_per_name(keep, report)
+        if rules.dedup_versions:
+            keep = _dedup_versions(keep, report)
 
         keep_ids = {r.id for r in keep}
         report.curated = len(keep_ids)
@@ -147,22 +166,33 @@ def curate(
     return report
 
 
-def _dedup_newest_per_name(recipes: list[Recipe], report: CurationReport) -> list[Recipe]:
+def _dedup_versions(recipes: list[Recipe], report: CurationReport) -> list[Recipe]:
+    """Collapse every revision of a dish down to the one worth cooking.
+
+    Sources revise a dish repeatedly and rename it as they go, so matching on the
+    name alone misses most duplicates. ``family_code`` is the source's own dish
+    id and catches them exactly; the name is the fallback for the minority of
+    rows that carry no usable code.
+    """
     groups: dict[str, list[Recipe]] = defaultdict(list)
     for r in recipes:
-        groups[(r.name or "").strip().lower()].append(r)
+        key = r.family_code or "name::" + (r.name or "").strip().lower()
+        groups[key].append(r)
 
     result: list[Recipe] = []
     for group in groups.values():
         if len(group) == 1:
             result.append(group[0])
             continue
-        # Newest by source creation date, tie-broken by popularity.
+        # The revision the source still serves wins outright — it is the one
+        # whose ingredients and method are current. Otherwise fall back to
+        # newest, then most-rated.
         best = max(
             group,
             key=lambda r: (
+                1 if r.source_active else 0,
                 r.source_created_at or _MIN_DT,
-                r.ratings_count or 0,
+                _ratings_count(r),
                 r.id,
             ),
         )

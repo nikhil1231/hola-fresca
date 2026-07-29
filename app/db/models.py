@@ -103,6 +103,27 @@ class Recipe(Base):
     source_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     source_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # The same dish's rating across every revision of it — what the source's own
+    # page shows. ``avg_rating``/``ratings_count`` above count only this exact
+    # revision, and sit at zero for versions that never ran long on the menu.
+    aggregate_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aggregate_ratings_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Whichever of the two is the broader sample; the number the app displays and
+    # curation judges by. See app.classify.effective_ratings.
+    effective_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    effective_ratings_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+
+    # Revision identity. ``family_code`` is shared by every version of a dish and
+    # is the key curation deduplicates on; ``source_active`` marks the version
+    # the source currently serves, which decides which one survives.
+    unique_recipe_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    family_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    cloned_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_active: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+    source_published: Mapped[bool] = mapped_column(Integer, default=0)
+
     # Curation flag: the active library the app/planner uses. Set by the
     # ``curate`` command; all recipes are retained regardless so curation can be
     # re-run with different rules.

@@ -48,6 +48,29 @@ def macros_implausible_for_veg(is_vegetarian: bool, protein_g: float | None) -> 
     return bool(is_vegetarian and protein_g and protein_g > 50)
 
 
+# --- popularity ------------------------------------------------------------
+
+def effective_ratings(
+    own_rating: float | None,
+    own_count: int | None,
+    aggregate_rating: float | None,
+    aggregate_count: int | None,
+) -> tuple[float | None, int | None]:
+    """Pick the rating a recipe should be judged and displayed by.
+
+    Sources version a dish: each revision carries its own rating counters, and a
+    revision that never ran long enough sits at zero forever even though the
+    dish itself is well established. The aggregate counters span the whole
+    lineage and are what the source's own page shows, so they win whenever they
+    are the broader sample; the per-revision numbers stay on the row untouched.
+    """
+    own_n = own_count or 0
+    agg_n = aggregate_count or 0
+    if agg_n > 0 and agg_n >= own_n:
+        return aggregate_rating, agg_n
+    return own_rating, (own_count if own_count is not None else None)
+
+
 # --- diet suitability ------------------------------------------------------
 
 # Meat/fish substitutes: cancel a meat/fish keyword hit ("Plant-Based Mince",

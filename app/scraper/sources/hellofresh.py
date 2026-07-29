@@ -30,6 +30,10 @@ _NEXT_DATA_RE = re.compile(
 _LOC_RE = re.compile(r"<loc>\s*([^<]+?)\s*</loc>")
 # HelloFresh ids are 24 hex characters; recipe URLs end in "-<id>".
 _ID_RE = re.compile(r"-([0-9a-f]{24})/?$")
+# ``uniqueRecipeCode`` is "<dish>-<revision>" (R17179-1, R17179-3, QR1947-2), so
+# the prefix identifies the dish across every version of it. Codes that don't
+# match this shape (empty, or the NRC-/F4LAO- bundle forms) have no family.
+_RECIPE_CODE_RE = re.compile(r"^([A-Za-z]+\d+)-(\d+)$")
 
 # Nutrition entry name -> IR field for the denormalised per-portion macros.
 _MACRO_FIELDS = {
@@ -42,6 +46,17 @@ _MACRO_FIELDS = {
 
 class RecipeExtractionError(ValueError):
     """Raised when a page does not contain a usable recipe payload."""
+
+
+def family_code(unique_recipe_code: str | None) -> str | None:
+    """The dish id shared by every revision of a recipe, or None if unavailable.
+
+    'R17179-1' and 'R17179-3' are two versions of one dish and both yield
+    'R17179'. Roughly a fifth of the catalogue carries a code that isn't in this
+    form — bundles, and rows with no code at all — and those get no family.
+    """
+    match = _RECIPE_CODE_RE.match((unique_recipe_code or "").strip())
+    return match.group(1) if match else None
 
 
 class HelloFreshSource:
@@ -86,6 +101,7 @@ class HelloFreshSource:
     def normalize(self, payload: Any, url: str) -> NormalizedRecipe:
         r = payload
         source_id = r.get("recipeId") or self.source_id_from_url(url) or ""
+        code = (r.get("uniqueRecipeCode") or "").strip()
 
         recipe = NormalizedRecipe(
             source=self.name,
@@ -103,9 +119,16 @@ class HelloFreshSource:
             avg_rating=_as_float(r.get("averageRating")),
             ratings_count=_as_int(r.get("ratingsCount")),
             favorites_count=_as_int(r.get("favoritesCount")),
+            aggregate_rating=_as_float(r.get("aggregateRating")),
+            aggregate_ratings_count=_as_int(r.get("aggregateRatingsCount")),
             is_addon=bool(r.get("isAddon")),
             source_created_at=r.get("createdAt") or None,
             source_updated_at=r.get("updatedAt") or None,
+            unique_recipe_code=code or None,
+            family_code=family_code(code),
+            cloned_from=r.get("clonedFrom") or None,
+            source_active=bool(r.get("active")),
+            source_published=bool(r.get("isPublished")),
         )
 
         recipe.ingredients = self._ingredients(r, recipe)
