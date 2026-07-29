@@ -18,12 +18,14 @@ KEY_SALT = "name:salt"
 KEY_MYSTERY = "name:mystery"
 KEY_SAFFRON = "name:saffron"
 KEY_BEANS = "name:beans"
+KEY_MACARONI = "name:macaroni"
 
 SID_RICE = "sid-rice"
 SID_SALT = "sid-salt"
 SID_MYSTERY = "sid-mystery"
 SID_SAFFRON = "sid-saffron"
 SID_BEANS = "sid-beans"
+SID_MACARONI = "sid-macaroni"
 
 
 def _recipe(name: str, ingredients: list[RecipeIngredient], *, curated: int = 1) -> Recipe:
@@ -52,6 +54,7 @@ def planner_client(tmp_path):
             (KEY_MYSTERY, SID_MYSTERY, "Mystery"),
             (KEY_SAFFRON, SID_SAFFRON, "Saffron"),
             (KEY_BEANS, SID_BEANS, "Beans"),
+            (KEY_MACARONI, SID_MACARONI, "Macaroni"),
         ],
     )
 
@@ -79,6 +82,12 @@ def planner_client(tmp_path):
             KEY_BEANS,
             "Beans",
             [{"sku": "beans", "name": "Beans 400g", "price": 2.0, "pack_value": 400, "pack_unit": "g"}],
+        )
+        seed_candidates(
+            s,
+            KEY_MACARONI,
+            "Macaroni",
+            [{"sku": "macaroni", "name": "Macaroni 500g", "price": 1.0, "pack_value": 500, "pack_unit": "g"}],
         )
 
         service.save_decision(
@@ -114,6 +123,14 @@ def planner_client(tmp_path):
                 accepted=[service.AcceptedInput(sku="beans", rank=1)],
             ),
         )
+        service.save_decision(
+            s,
+            gather_candidates(s, KEY_MACARONI),
+            service.DecisionInput(
+                status="approved",
+                accepted=[service.AcceptedInput(sku="macaroni", rank=1)],
+            ),
+        )
 
         pinned = _recipe(
             "Rice Bowl",
@@ -145,12 +162,19 @@ def planner_client(tmp_path):
             "Saffron Rice",
             [RecipeIngredient(name="Saffron", source_ingredient_id=SID_SAFFRON, amount=1, unit="each", amount_g=1)],
         )
+        speedy = _recipe(
+            "Speedy Cajun Style Chicken Macaroni",
+            [
+                RecipeIngredient(name="Rice", source_ingredient_id=SID_RICE, amount=100, unit="g", amount_g=100),
+                RecipeIngredient(name="Macaroni", source_ingredient_id=SID_MACARONI, amount=100, unit="g", amount_g=100),
+            ],
+        )
         hidden = _recipe(
             "Hidden Rice",
             [RecipeIngredient(name="Rice", source_ingredient_id=SID_RICE, amount=100, unit="g", amount_g=100)],
             curated=0,
         )
-        s.add_all([pinned, shared, standalone, gap_heavy, unpriceable_only, hidden])
+        s.add_all([pinned, shared, standalone, gap_heavy, unpriceable_only, speedy, hidden])
         s.commit()
         ids = {
             "pinned": pinned.id,
@@ -158,6 +182,7 @@ def planner_client(tmp_path):
             "standalone": standalone.id,
             "gap_heavy": gap_heavy.id,
             "hidden": hidden.id,
+            "speedy": speedy.id,
         }
 
     def _override_session():
@@ -243,8 +268,12 @@ def test_browse_excludes_recipes_with_pricing_gaps(planner_client):
     client, _ = planner_client
     data = client.get("/api/recipes", params={"exclude": "unmapped"}).json()
 
-    assert data["total"] == 2
-    assert {item["name"] for item in data["items"]} == {"Rice Patties", "Bean Stew"}
+    assert data["total"] == 3
+    assert {item["name"] for item in data["items"]} == {
+        "Rice Patties",
+        "Bean Stew",
+        "Speedy Cajun Style Chicken Macaroni",
+    }
     assert all(item["intrinsic_gap_count"] == 0 for item in data["items"])
 
 
@@ -258,9 +287,10 @@ def test_suggestions_rank_shared_marginal_cost_first(planner_client):
         },
     ).json()
 
-    assert data["total"] == 2
+    assert data["total"] == 3
     assert [item["name"] for item in data["items"]] == [
         "Rice Patties",
+        "Speedy Cajun Style Chicken Macaroni",
         "Bean Stew",
     ]
     assert data["items"][0]["marginal_score"] < 0.0
@@ -270,7 +300,7 @@ def test_suggestions_rank_shared_marginal_cost_first(planner_client):
 
     assert data["items"][0]["marginal_cost"] < data["items"][0]["standalone_cost"]
 
-    bean = data["items"][1]
+    bean = data["items"][2]
     assert bean["shared_ingredient_count"] == 0
     assert bean["marginal_score"] == bean["standalone_score"]
     assert bean["marginal_cost"] == bean["standalone_cost"]
@@ -294,6 +324,20 @@ def test_suggestions_apply_filters_and_pagination(planner_client):
     assert data["items"][0]["name"] == "Bean Stew"
 
 
+def test_suggestions_apply_fuzzy_search(planner_client):
+    client, ids = planner_client
+    data = client.post(
+        "/api/planner/suggestions",
+        json={
+            "selections": [{"recipe_id": ids["pinned"], "portions": 2}],
+            "filters": {"q": "speedy mac"},
+        },
+    ).json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["name"] == "Speedy Cajun Style Chicken Macaroni"
+
+
 def test_suggestions_can_exclude_unmapped_recipes(planner_client):
     client, ids = planner_client
     data = client.post(
@@ -304,5 +348,9 @@ def test_suggestions_can_exclude_unmapped_recipes(planner_client):
         },
     ).json()
 
-    assert data["total"] == 2
-    assert [item["name"] for item in data["items"]] == ["Rice Patties", "Bean Stew"]
+    assert data["total"] == 3
+    assert [item["name"] for item in data["items"]] == [
+        "Rice Patties",
+        "Speedy Cajun Style Chicken Macaroni",
+        "Bean Stew",
+    ]

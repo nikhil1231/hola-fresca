@@ -53,6 +53,7 @@ def client(tmp_path):
             ("name:chicken", "sid-chicken", "Chicken Breast"),
             ("name:chicken stock paste", "sid-chicken-stock", "Chicken Stock Paste"),
             ("name:tortillas", "sid-tortillas", "Taco Tortillas"),
+            ("name:macaroni", "sid-macaroni", "Macaroni"),
         ],
     )
 
@@ -81,11 +82,18 @@ def client(tmp_path):
             "Chicken Stock Paste",
             [{"sku": "stock", "name": "Chicken Stock Paste", "price": 1.0, "pack_value": 100, "pack_unit": "g"}],
         )
+        seed_candidates(
+            s,
+            "name:macaroni",
+            "Macaroni",
+            [{"sku": "mac", "name": "Macaroni 500g", "price": 1.0, "pack_value": 500, "pack_unit": "g"}],
+        )
         for key, sku in (
             ("name:pasta", "pasta"),
             ("name:lentils", "lentils"),
             ("name:chicken", "chicken"),
             ("name:chicken stock paste", "stock"),
+            ("name:macaroni", "mac"),
         ):
             service.save_decision(
                 s,
@@ -125,9 +133,20 @@ def client(tmp_path):
             RecipeIngredient(name="Taco Tortillas", source_ingredient_id="sid-tortillas", amount=6, unit="unit(s)"),
         ]
 
+        speedy = _make_recipe(
+            source_id="d", name="Speedy Cajun Style Chicken Macaroni", protein_g=25,
+            energy_kcal=700, total_time_min=30, difficulty=1, avg_rating=4.2,
+            ratings_count=700, protein_energy_ratio=3.5,
+        )
+        speedy.allergens = [RecipeAllergen(name="Milk")]
+        speedy.ingredients = [
+            RecipeIngredient(name="Chicken Breast", source_ingredient_id="sid-chicken", amount=200, unit="grams", amount_g=200),
+            RecipeIngredient(name="Macaroni", source_ingredient_id="sid-macaroni", amount=200, unit="grams", amount_g=200),
+        ]
+
         uncurated = _make_recipe(source_id="c", name="Hidden", curated=0)
 
-        s.add_all([italian, mexican, uncurated])
+        s.add_all([italian, mexican, speedy, uncurated])
         s.commit()
 
     def _override():
@@ -143,7 +162,7 @@ def client(tmp_path):
 
 def test_list_returns_only_curated(client):
     data = client.get("/api/recipes").json()
-    assert data["total"] == 2
+    assert data["total"] == 3
     names = {i["name"] for i in data["items"]}
     assert "Hidden" not in names
 
@@ -178,7 +197,7 @@ def test_filter_min_protein_ratio(client):
 
 def test_sort_protein_ratio(client):
     items = client.get("/api/recipes", params={"sort": "protein_ratio"}).json()["items"]
-    assert [i["protein_energy_ratio"] for i in items] == [8.3, 3.8]
+    assert [i["protein_energy_ratio"] for i in items] == [8.3, 3.8, 3.5]
 
 
 def test_filter_min_protein_and_max_time(client):
@@ -193,10 +212,13 @@ def test_exclude_allergen(client):
 
 
 def test_protein_include_filter(client):
-    # Only the Mexican recipe has a chicken ingredient.
+    # Both chicken dishes have chicken as a main ingredient.
     data = client.get("/api/recipes", params={"protein": "chicken"}).json()
-    assert data["total"] == 1
-    assert data["items"][0]["name"] == "Spicy Chicken Tacos"
+    assert data["total"] == 2
+    assert {item["name"] for item in data["items"]} == {
+        "Spicy Chicken Tacos",
+        "Speedy Cajun Style Chicken Macaroni",
+    }
 
 
 def test_exclude_ingredient(client):
@@ -207,20 +229,31 @@ def test_exclude_ingredient(client):
 
 def test_exclude_unmapped_recipes(client):
     data = client.get("/api/recipes", params={"exclude": "unmapped"}).json()
-    assert data["total"] == 1
-    assert data["items"][0]["name"] == "Creamy Veggie Pasta"
+    assert data["total"] == 2
+    assert {item["name"] for item in data["items"]} == {
+        "Creamy Veggie Pasta",
+        "Speedy Cajun Style Chicken Macaroni",
+    }
 
 
 def test_sort_protein_high(client):
     items = client.get("/api/recipes", params={"sort": "protein_high"}).json()["items"]
-    assert [i["protein_g"] for i in items] == [50, 30]
+    assert [i["protein_g"] for i in items] == [50, 30, 25]
 
 
 def test_sort_by_intrinsic_price(client):
     low = client.get("/api/recipes", params={"sort": "price_low"}).json()["items"]
     high = client.get("/api/recipes", params={"sort": "price_high"}).json()["items"]
-    assert [i["name"] for i in low] == ["Creamy Veggie Pasta", "Spicy Chicken Tacos"]
-    assert [i["name"] for i in high] == ["Spicy Chicken Tacos", "Creamy Veggie Pasta"]
+    assert [i["name"] for i in low] == [
+        "Creamy Veggie Pasta",
+        "Spicy Chicken Tacos",
+        "Speedy Cajun Style Chicken Macaroni",
+    ]
+    assert [i["name"] for i in high] == [
+        "Speedy Cajun Style Chicken Macaroni",
+        "Spicy Chicken Tacos",
+        "Creamy Veggie Pasta",
+    ]
     assert low[0]["intrinsic_score"] < low[1]["intrinsic_score"]
 
 
@@ -230,13 +263,27 @@ def test_search_query(client):
     assert data["items"][0]["name"] == "Spicy Chicken Tacos"
 
 
+def test_search_query_matches_split_partial_tokens(client):
+    data = client.get("/api/recipes", params={"q": "speedy mac"}).json()
+    assert data["total"] == 1
+    assert data["items"][0]["name"] == "Speedy Cajun Style Chicken Macaroni"
+
+
+def test_search_query_can_return_no_matches(client):
+    data = client.get("/api/recipes", params={"q": "banana pudding"}).json()
+    assert data["total"] == 0
+    assert data["items"] == []
+
+
 def test_pagination(client):
     page1 = client.get("/api/recipes", params={"page_size": 1, "page": 1}).json()
-    assert page1["total"] == 2
+    assert page1["total"] == 3
     assert len(page1["items"]) == 1
     assert page1["has_more"] is True
     page2 = client.get("/api/recipes", params={"page_size": 1, "page": 2}).json()
-    assert page2["has_more"] is False
+    assert page2["has_more"] is True
+    page3 = client.get("/api/recipes", params={"page_size": 1, "page": 3}).json()
+    assert page3["has_more"] is False
 
 
 def test_detail_shape_and_image(client):
@@ -255,8 +302,8 @@ def test_detail_shape_and_image(client):
 
 
 def test_detail_404_for_uncurated(client):
-    hidden = client.get("/api/recipes/3", params={})
-    # id 3 is the uncurated recipe; must be hidden.
+    hidden = client.get("/api/recipes/4", params={})
+    # id 4 is the uncurated recipe; must be hidden.
     assert hidden.status_code == 404
 
 
@@ -278,7 +325,7 @@ def test_facets(client):
     assert "Milk" in exclude_values and "chicken" in exclude_values and "unmapped" in exclude_values
     # Chicken appears as a protein facet (the Mexican recipe has it).
     assert any(p["value"] == "chicken" for p in f["proteins"])
-    assert next(p["count"] for p in f["proteins"] if p["value"] == "chicken") == 1
+    assert next(p["count"] for p in f["proteins"] if p["value"] == "chicken") == 2
     assert {s["value"] for s in f["sorts"]} >= {
         "popular",
         "protein_ratio",
@@ -329,4 +376,4 @@ def test_personal_rating_rejects_invalid_and_hidden_recipes(client):
 
     assert client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 0}).status_code == 422
     assert client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": 6}).status_code == 422
-    assert client.put("/api/recipes/3/personal-rating", json={"rating": 4}).status_code == 404
+    assert client.put("/api/recipes/4/personal-rating", json={"rating": 4}).status_code == 404

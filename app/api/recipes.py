@@ -5,8 +5,10 @@ Every endpoint is scoped to the curated active library (``Recipe.curated == 1``)
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from rapidfuzz import fuzz, utils
 from sqlalchemy import Select, and_, func, nullslast, or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -66,6 +68,7 @@ CARD_WIDTH = 500
 HERO_WIDTH = 1200
 MAX_PAGE_SIZE = 60
 INTRINSIC_PORTIONS = 4
+FUZZY_SEARCH_CUTOFF = 72
 
 # Attribute tag types that become display chips on a card, with friendly labels.
 _CHIP_LABELS = dict(facet_cfg.ATTRIBUTE_TAGS)
@@ -87,6 +90,47 @@ _SORT_COLUMNS = {
     "time_low": nullslast(Recipe.total_time_min.asc()),
     "newest": nullslast(Recipe.source_created_at.desc()),
 }
+
+
+def _search_text(name: str | None, headline: str | None) -> str:
+    return " ".join(part for part in (name, headline) if part)
+
+
+def _tokens(text: str | None) -> list[str]:
+    processed = utils.default_process(text or "")
+    return re.findall(r"\w+", processed or "")
+
+
+def _tokens_match(query: str, text: str) -> bool:
+    query_tokens = _tokens(query)
+    haystack = _tokens(text)
+    return bool(query_tokens) and bool(haystack) and all(
+        any(query_token in token for token in haystack)
+        for query_token in query_tokens
+    )
+
+
+def _fuzzy_search_match(query: str, name: str | None, headline: str | None) -> bool:
+    text = _search_text(name, headline)
+    if _tokens_match(query, text):
+        return True
+    return max(
+        fuzz.WRatio(query, text, processor=utils.default_process),
+        fuzz.partial_token_ratio(query, text, processor=utils.default_process),
+    ) >= FUZZY_SEARCH_CUTOFF
+
+
+def _filtered_recipe_ids(session: Session, filters: dict) -> list[int]:
+    q = (filters.get("q") or "").strip()
+    stmt = _apply_filters(select(Recipe.id, Recipe.name, Recipe.headline), **filters)
+    rows = session.execute(stmt).all()
+    if not q:
+        return [row.id for row in rows]
+    return [
+        row.id
+        for row in rows
+        if _fuzzy_search_match(q, row.name, row.headline)
+    ]
 
 
 def _shown_rating(r: Recipe) -> float | None:
@@ -116,9 +160,6 @@ def _apply_filters(
     rated: bool = False,
 ) -> Select:
     stmt = stmt.where(Recipe.curated == 1)
-    if q:
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(or_(Recipe.name.ilike(like), Recipe.headline.ilike(like)))
     if cuisine:
         stmt = stmt.where(Recipe.cuisines.any(RecipeCuisine.name.in_(cuisine)))
     # Diet filters map to derived boolean columns; ANDed (each must hold).
@@ -385,18 +426,19 @@ def list_recipes(
     )
     exclude_unmapped = "unmapped" in exclude
     excluded_recipe_ids = set(exclude_id)
-    filtered_candidate_ids: list[int] | None = None
-    if exclude_unmapped:
-        id_stmt = _apply_filters(select(Recipe.id), **filters)
-        if exclude_id:
-            id_stmt = id_stmt.where(Recipe.id.not_in(exclude_id))
-        filtered_candidate_ids = list(session.scalars(id_stmt).all())
-        excluded_recipe_ids.update(
-            _recipe_ids_with_pricing_gaps(filtered_candidate_ids, factory, csv_path)
-        )
-
-    if filtered_candidate_ids is not None:
-        total = sum(1 for recipe_id in filtered_candidate_ids if recipe_id not in excluded_recipe_ids)
+    candidate_ids: list[int] | None = None
+    if q or exclude_unmapped:
+        filtered_candidate_ids = _filtered_recipe_ids(session, filters)
+        if exclude_unmapped:
+            excluded_recipe_ids.update(
+                _recipe_ids_with_pricing_gaps(filtered_candidate_ids, factory, csv_path)
+            )
+        candidate_ids = [
+            recipe_id
+            for recipe_id in filtered_candidate_ids
+            if recipe_id not in excluded_recipe_ids
+        ]
+        total = len(candidate_ids)
     else:
         total_stmt = _apply_filters(select(func.count(Recipe.id)), **filters)
         if excluded_recipe_ids:
@@ -405,11 +447,7 @@ def list_recipes(
 
     effective_offset = offset if offset is not None else (page - 1) * page_size
     if sort in {"price_low", "price_high"}:
-        if filtered_candidate_ids is not None:
-            candidate_ids = [
-                recipe_id for recipe_id in filtered_candidate_ids if recipe_id not in excluded_recipe_ids
-            ]
-        else:
+        if candidate_ids is None:
             id_stmt = _apply_filters(select(Recipe.id), **filters)
             if excluded_recipe_ids:
                 id_stmt = id_stmt.where(Recipe.id.not_in(excluded_recipe_ids))
@@ -436,19 +474,33 @@ def list_recipes(
         rows = [by_id[recipe_id] for recipe_id in page_ids if recipe_id in by_id]
     else:
         order = _SORT_COLUMNS.get(sort, _SORT_COLUMNS[facet_cfg.DEFAULT_SORT])
-        stmt = (
-            _apply_filters(select(Recipe), **filters)
-            .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
-        )
-        if excluded_recipe_ids:
-            stmt = stmt.where(Recipe.id.not_in(excluded_recipe_ids))
-        stmt = (
-            stmt
-            .order_by(order, Recipe.id)
-            .offset(effective_offset)
-            .limit(page_size)
-        )
-        rows = session.scalars(stmt).all()
+        if candidate_ids is not None:
+            if candidate_ids:
+                stmt = (
+                    select(Recipe)
+                    .where(Recipe.id.in_(candidate_ids))
+                    .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
+                    .order_by(order, Recipe.id)
+                    .offset(effective_offset)
+                    .limit(page_size)
+                )
+                rows = session.scalars(stmt).all()
+            else:
+                rows = []
+        else:
+            stmt = (
+                _apply_filters(select(Recipe), **filters)
+                .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
+            )
+            if excluded_recipe_ids:
+                stmt = stmt.where(Recipe.id.not_in(excluded_recipe_ids))
+            stmt = (
+                stmt
+                .order_by(order, Recipe.id)
+                .offset(effective_offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(stmt).all()
         intrinsic = _intrinsic_prices(rows, factory, csv_path)
     items = [
         _to_card(

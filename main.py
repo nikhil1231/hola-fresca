@@ -1,4 +1,5 @@
 from pathlib import Path
+import mimetypes
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +15,12 @@ app = FastAPI(title="HolaFresca")
 app.include_router(recipes_router)
 app.include_router(mapping_router)
 app.include_router(planner_router)
+
+# Windows can report Vite's module bundles as text/plain via the registry-backed
+# mimetypes table, which modern browsers reject for <script type="module">.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
 
 
 class _NoCacheFrontendMiddleware(BaseHTTPMiddleware):
@@ -48,7 +55,7 @@ if _DIST.is_dir():
             try:
                 return await super().get_response(path, scope)
             except StarletteHTTPException as exc:
-                if exc.status_code == 404:
+                if exc.status_code == 404 and "." not in Path(path).name:
                     return await super().get_response("index.html", scope)
                 raise
 

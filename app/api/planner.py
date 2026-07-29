@@ -8,7 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
-from app.api.recipes import _apply_filters, _personal_rating_map, _recipe_ids_with_pricing_gaps, _to_card
+from app.api.recipes import (
+    _filtered_recipe_ids,
+    _personal_rating_map,
+    _recipe_ids_with_pricing_gaps,
+    _to_card,
+)
 from app.api.schemas import (
     BasketIn,
     BasketContributionOut,
@@ -169,11 +174,7 @@ def _candidate_ids(
     any of this; the filters only decide which of the ranked recipes are shown.
     """
     filters = body.filters.model_dump()
-    stmt = _apply_filters(select(Recipe.id), **filters)
-    if pinned_ids:
-        stmt = stmt.where(Recipe.id.not_in(pinned_ids))
-
-    candidate_ids = set(session.scalars(stmt).all())
+    candidate_ids = set(_filtered_recipe_ids(session, filters)) - pinned_ids
     if "unmapped" not in body.filters.exclude:
         return candidate_ids
 

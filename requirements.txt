@@ -6,3 +6,4 @@ sqlalchemy>=2.0
 playwright
 python-dotenv
 openai
+rapidfuzz

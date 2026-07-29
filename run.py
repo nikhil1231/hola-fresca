@@ -31,7 +31,7 @@ import uvicorn
 
 if __name__ == "__main__":
     host = os.environ.get("HOST", "0.0.0.0")
-    port = int(os.environ.get("PORT", "8100"))
+    port = int(os.environ.get("PORT", "8101"))
     reload = os.environ.get("UVICORN_RELOAD", "false").lower() in {"1", "true", "yes"}
     # Watch only the Python source. The default is the whole working directory,
     # which here includes data/ — a multi-gigabyte SQLite DB and raw payload cache
