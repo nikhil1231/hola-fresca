@@ -59,6 +59,28 @@ _COUNT_UNIT = "unit(s)"
 # gyozas). Above it the unit word is wrong and the amount is really grams —
 # "Lamb Shank, 670 unit(s)" is 670g, not 100kg of shank.
 _COUNT_MAX = 50.0
+# Containers are not counted like discrete things are. You cook twelve rashers or
+# a dozen tortillas, but nobody opens forty tins: a recipe wants one pot, or two,
+# and the corpus bears that out flatly — carton, ball, pouch and nest never
+# exceed 4 across 4,600 lines, and every pot/pack/tin/sachet/bunch line above 9
+# is a gram weight that lost its unit ("45 pot(s)" of curry paste is 45 g).
+#
+# So the ceiling has to be per unit rather than one global number. A single
+# threshold cannot hold both ends: set low enough to catch 10 bunches of
+# coriander it destroys 12 rashers of bacon, and set high enough to spare the
+# bacon it lets 45 pots through — which is exactly what 50.0 alone did.
+_CONTAINER_COUNT_MAX = 10.0
+_CONTAINER_UNITS = frozenset(
+    {
+        "sachet(s)", "bunch(es)", "carton(s)", "pot(s)", "pack(s)", "tin(s)",
+        "pouch(es)", "nest(s)", "ball(s)", "block(s)", "bag(s)", "box",
+    }
+)
+
+
+def _count_ceiling(unit: str | None) -> float:
+    """The most of ``unit`` a recipe could plausibly call for."""
+    return _CONTAINER_COUNT_MAX if unit in _CONTAINER_UNITS else _COUNT_MAX
 
 
 @lru_cache(maxsize=1)
@@ -156,7 +178,7 @@ def to_grams(name: str, amount: float | None, unit: str | None) -> tuple[float |
         return amount, _METRIC[unit]
     if unit in _SPOON:
         return round(amount * _SPOON[unit], 1), "g"
-    if amount >= _COUNT_MAX:
+    if amount >= _count_ceiling(unit):
         return amount, "g"
     per_unit = _grams_per_unit(name, unit)
     if per_unit is not None:
@@ -194,13 +216,17 @@ def is_mislabelled_weight(unit: str | None, amount: float | None) -> bool:
     a two-person traybake.
 
     So the label has to be corrected, not just worked around at conversion time.
+
+    What counts as "only a weight could be" depends on the unit: see
+    :func:`_count_ceiling`, which is far stricter for containers than for things
+    counted one by one.
     """
     return bool(
         unit
         and unit not in _MASS_UNITS
         and unit not in _SPOON
         and amount is not None
-        and amount >= _COUNT_MAX
+        and amount >= _count_ceiling(unit)
     )
 
 
@@ -536,11 +562,13 @@ def repair_contradicted_units(session: Session) -> dict[str, int]:
 
     # Already-stored counts carrying a weight, the mirror of the case below. Left
     # alone these keep their unit(s) label for ever, since nothing else revisits it.
+    # The query widens to the lowest ceiling any unit has and lets
+    # ``is_mislabelled_weight`` apply the right one per row.
     mislabelled = session.scalars(
         select(RecipeIngredient).where(
             RecipeIngredient.unit.not_in(sorted(_MASS_UNITS) + sorted(_SPOON)),
             RecipeIngredient.unit.is_not(None),
-            RecipeIngredient.amount >= _COUNT_MAX,
+            RecipeIngredient.amount >= min(_CONTAINER_COUNT_MAX, _COUNT_MAX),
         )
     )
     stats = {"examined": 0, "repaired": 0}

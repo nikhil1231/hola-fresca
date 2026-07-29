@@ -458,10 +458,45 @@ def test_to_grams_rejects_implausible_counts():
         ("grams", 600, False),
         ("tsp", 60, False),
         (None, 600, False),
+        # Containers are held to a much lower ceiling than discrete things. A
+        # recipe wants one pot of curry paste; "45" is the gram weight of the pot.
+        ("pot(s)", 45, True),
+        ("bunch(es)", 10, True),
+        ("pack(s)", 30, True),
+        ("tin(s)", 40, True),
+        ("sachet(s)", 15, True),
+        # ...but two or three of a container is ordinary cooking.
+        ("pot(s)", 2, False),
+        ("bunch(es)", 2, False),
+        ("nest(s)", 4, False),
+        # Discrete counts keep the high ceiling: these are all real quantities
+        # that a container-strength rule would have destroyed.
+        ("rasher(s)", 12, False),
+        ("unit(s)", 12, False),
+        ("unit(s)", 24, False),
+        ("slice(s)", 20, False),
     ],
 )
 def test_is_mislabelled_weight(unit, amount, expected):
     assert is_mislabelled_weight(unit, amount) is expected
+
+
+def test_container_and_discrete_ceilings_do_not_collide():
+    """The reason the ceiling is per unit: one global number cannot hold both.
+
+    Ten bunches of coriander is 10 g and twelve rashers of bacon is twelve
+    rashers, and the two amounts are only four apart.
+    """
+    assert is_mislabelled_weight("bunch(es)", 10) is True
+    assert is_mislabelled_weight("rasher(s)", 12) is False
+
+
+def test_to_grams_reads_an_over_ceiling_container_as_a_weight():
+    # 45 pots would be 1,350 g of curry paste; the line means 45 g.
+    assert to_grams("Thai Green Curry Paste", 45, "pot(s)") == (45.0, "g")
+    # One pot still converts through the reference table.
+    grams, unit = to_grams("Thai Green Curry Paste", 1, "pot(s)")
+    assert unit == "g" and grams and grams < 100
 
 
 def test_a_count_unit_carrying_a_weight_is_relabelled(tmp_path, monkeypatch):

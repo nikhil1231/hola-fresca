@@ -11,7 +11,7 @@ from statistics import median
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from app.canonicalize import _COUNT_MAX
+from app.canonicalize import is_mislabelled_weight
 from app.db.models import (
     IngredientMapping,
     IngredientMappingProduct,
@@ -199,8 +199,9 @@ def _derive_count_metadata(
         # "200 unit(s)" is a mislabelled gram weight, not two hundred of anything:
         # to_grams passes such amounts straight through, which would otherwise
         # contribute a per-unit weight of exactly 1 g and drag the median with it
-        # (Lamb Shank was deriving 1 g apiece this way).
-        if line.amount is not None and line.amount >= _COUNT_MAX:
+        # (Lamb Shank was deriving 1 g apiece this way). The same predicate the
+        # repair pass uses, so a line it relabels is a line this skips.
+        if is_mislabelled_weight(line.unit, line.amount):
             continue
         count_lines[root] += 1
         if not line.amount or line.amount <= 0 or not line.amount_g or line.amount_g <= 0:
