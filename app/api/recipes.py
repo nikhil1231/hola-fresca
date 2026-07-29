@@ -70,7 +70,18 @@ CARD_WIDTH = 500
 HERO_WIDTH = 1200
 MAX_PAGE_SIZE = 60
 INTRINSIC_PORTIONS = 4
-FUZZY_SEARCH_CUTOFF = 72
+# Minimum score a query token must reach against some token of a recipe before
+# that recipe counts as a match at all. 85 is where typo tolerance stops and
+# noise starts: it still reads "koren" as korean and "chikcen" as chicken, while
+# 88 loses both and 80 starts admitting unrelated words.
+FUZZY_SEARCH_CUTOFF = 85
+_EXACT_TOKEN = 100
+_PREFIX_TOKEN = 95
+_SUBSTRING_TOKEN = 90
+# Below this length a token is too short to correct safely; see _token_score.
+_MIN_FUZZY_TOKEN_LEN = 4
+# How much matching in the title outranks matching only in the headline.
+_TITLE_BONUS = 12.0
 
 # Attribute tag types that become display chips on a card, with friendly labels.
 _CHIP_LABELS = dict(facet_cfg.ATTRIBUTE_TAGS)
@@ -103,36 +114,108 @@ def _tokens(text: str | None) -> list[str]:
     return re.findall(r"\w+", processed or "")
 
 
-def _tokens_match(query: str, text: str) -> bool:
+def _token_score(query_token: str, haystack: list[str]) -> int:
+    """How well one query token is answered by a recipe's tokens, 0-100.
+
+    Graded rather than boolean so the ranking has something to work with: an
+    exact word beats a prefix, a prefix beats a word that merely contains it,
+    and anything else has to survive a typo check.
+    """
+    best = 0
+    for token in haystack:
+        if token == query_token:
+            return _EXACT_TOKEN
+        if token.startswith(query_token):
+            best = max(best, _PREFIX_TOKEN)
+        elif query_token in token:
+            best = max(best, _SUBSTRING_TOKEN)
+        elif len(query_token) >= _MIN_FUZZY_TOKEN_LEN:
+            # Only long tokens get typo tolerance. "bbq" is three characters and
+            # within edit distance of half the corpus; "korean" is not.
+            best = max(best, int(fuzz.ratio(query_token, token)))
+    return best
+
+
+def _relevance(query: str, name: str | None, headline: str | None) -> float | None:
+    """Relevance of one recipe to a query, or None when it is not a match.
+
+    Every query token must be answered by the title or the headline. That AND is
+    the whole point: scoring the query against the recipe as one blob is what let
+    "korean bbq noodles" return 344 recipes, because a single shared word —
+    "noodles" — was enough to carry the whole phrase, and enough of them tied at
+    a perfect score that the ordering was meaningless too.
+    """
     query_tokens = _tokens(query)
-    haystack = _tokens(text)
-    return bool(query_tokens) and bool(haystack) and all(
-        any(query_token in token for token in haystack)
-        for query_token in query_tokens
-    )
+    if not query_tokens:
+        return None
+    name_tokens = _tokens(name)
+    headline_tokens = _tokens(headline)
+
+    total = 0
+    in_title = 0
+    for query_token in query_tokens:
+        title_score = _token_score(query_token, name_tokens)
+        best = max(title_score, _token_score(query_token, headline_tokens))
+        if best < FUZZY_SEARCH_CUTOFF:
+            return None
+        total += best
+        if title_score >= FUZZY_SEARCH_CUTOFF:
+            in_title += 1
+    # A dish whose *name* carries the words beats one that only mentions them in
+    # its headline, so "chicken curry" leads with curries rather than with sides
+    # served alongside one.
+    return total / len(query_tokens) + (in_title / len(query_tokens)) * _TITLE_BONUS
 
 
 def _fuzzy_search_match(query: str, name: str | None, headline: str | None) -> bool:
-    text = _search_text(name, headline)
-    if _tokens_match(query, text):
-        return True
-    return max(
-        fuzz.WRatio(query, text, processor=utils.default_process),
-        fuzz.partial_token_ratio(query, text, processor=utils.default_process),
-    ) >= FUZZY_SEARCH_CUTOFF
+    return _relevance(query, name, headline) is not None
+
+
+def _ranked_recipe_ids(session: Session, filters: dict) -> list[int]:
+    """Ids matching the filters, most relevant first when a query is given."""
+    q = (filters.get("q") or "").strip()
+    stmt = _apply_filters(
+        select(
+            Recipe.id,
+            Recipe.name,
+            Recipe.headline,
+            func.coalesce(Recipe.effective_ratings_count, Recipe.ratings_count),
+        ),
+        **filters,
+    )
+    rows = session.execute(stmt).all()
+    if not q:
+        return [row[0] for row in rows]
+    scored = []
+    for recipe_id, name, headline, ratings in rows:
+        score = _relevance(q, name, headline)
+        if score is not None:
+            scored.append((score, ratings or 0, recipe_id))
+    # Popularity breaks ties between equally good text matches, so the better
+    # known of two identically named dishes comes first.
+    scored.sort(key=lambda row: (-row[0], -row[1], row[2]))
+    return [recipe_id for _, _, recipe_id in scored]
 
 
 def _filtered_recipe_ids(session: Session, filters: dict) -> list[int]:
-    q = (filters.get("q") or "").strip()
-    stmt = _apply_filters(select(Recipe.id, Recipe.name, Recipe.headline), **filters)
-    rows = session.execute(stmt).all()
-    if not q:
-        return [row.id for row in rows]
-    return [
-        row.id
-        for row in rows
-        if _fuzzy_search_match(q, row.name, row.headline)
-    ]
+    return _ranked_recipe_ids(session, filters)
+
+
+def _rows_in_id_order(session: Session, page_ids: list[int]) -> list[Recipe]:
+    """Load a page of recipes, preserving the order the ids were given in.
+
+    ``IN`` returns rows in whatever order it likes, which would throw away a
+    ranking computed in Python.
+    """
+    if not page_ids:
+        return []
+    rows = session.scalars(
+        select(Recipe)
+        .where(Recipe.id.in_(page_ids))
+        .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
+    ).all()
+    by_id = {recipe.id: recipe for recipe in rows}
+    return [by_id[recipe_id] for recipe_id in page_ids if recipe_id in by_id]
 
 
 def _shown_rating(r: Recipe) -> float | None:
@@ -469,7 +552,15 @@ def list_recipes(
         total = session.scalar(total_stmt) or 0
 
     effective_offset = offset if offset is not None else (page - 1) * page_size
-    if sort in {"price_low", "price_high"}:
+    # A search is ordered by how well it matches unless the reader asked for a
+    # specific order. Sorting the hits by popularity instead is what made the
+    # ranking invisible: the best match for "korean bbq noodles" could sit pages
+    # below a loosely related dish that happened to be better known.
+    if q and sort == facet_cfg.DEFAULT_SORT and candidate_ids is not None:
+        page_ids = candidate_ids[effective_offset:effective_offset + page_size]
+        rows = _rows_in_id_order(session, page_ids)
+        intrinsic = _intrinsic_prices(rows, factory, csv_path)
+    elif sort in {"price_low", "price_high"}:
         if candidate_ids is None:
             id_stmt = _apply_filters(select(Recipe.id), **filters)
             if excluded_recipe_ids:
@@ -486,15 +577,7 @@ def list_recipes(
             ),
         )
         page_ids = sorted_ids[effective_offset:effective_offset + page_size]
-        by_id: dict[int, Recipe] = {}
-        if page_ids:
-            rows_for_page = session.scalars(
-                select(Recipe)
-                .where(Recipe.id.in_(page_ids))
-                .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
-            ).all()
-            by_id = {recipe.id: recipe for recipe in rows_for_page}
-        rows = [by_id[recipe_id] for recipe_id in page_ids if recipe_id in by_id]
+        rows = _rows_in_id_order(session, page_ids)
     else:
         order = _SORT_COLUMNS.get(sort, _SORT_COLUMNS[facet_cfg.DEFAULT_SORT])
         if candidate_ids is not None:
