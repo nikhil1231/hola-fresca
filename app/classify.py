@@ -71,6 +71,52 @@ def effective_ratings(
     return own_rating, (own_count if own_count is not None else None)
 
 
+# --- course ----------------------------------------------------------------
+
+MAIN = "main"
+SIDE = "side"
+DESSERT = "dessert"
+PRODUCT = "product"
+
+# Tag types that genuinely name a course. Deliberately narrow: the source also
+# has ``lunch-salad``, ``lunch-pasta`` and ``addon-veggie``, which sound like
+# accompaniments and are not — a Green Goddess Rump Steak Salad and a Chicken
+# and Chorizo Paella carry them, and demoting those would empty the library of
+# real dinners.
+_SIDE_TAGS = ("sides", "grocery")
+_DESSERT_TAGS = ("dessert",)
+# Ready meals are sold as a course but cooked by nobody: one line, reheat.
+_PRODUCT_TAGS = ("lunch-readymeals",)
+
+# Above this a side tag is describing what a dish is served *with* rather than
+# what it is. Bacon and Sweet Potato Risotto is tagged ``sides-bread`` because
+# bread comes alongside it; it is still a ten-ingredient dinner.
+_SIDE_MAX_INGREDIENTS = 7
+
+
+def course(tag_types: list[str] | None, ingredient_count: int) -> str:
+    """Classify a recipe as a main, a side, a dessert, or a bought product.
+
+    Structure decides first and tags only refine it, because the structure
+    cannot be marketing: a recipe with one ingredient and nothing to do to it is
+    an item you buy — houmous, a garlic baguette, a tub of chips — whatever the
+    source files it under.
+    """
+    types = [(t or "").lower() for t in (tag_types or [])]
+
+    if ingredient_count <= 1:
+        return DESSERT if any(t.startswith(_DESSERT_TAGS) for t in types) else PRODUCT
+    if any(t.startswith(_PRODUCT_TAGS) for t in types):
+        return PRODUCT
+    if any(t.startswith(_DESSERT_TAGS) for t in types):
+        return DESSERT
+    if ingredient_count <= _SIDE_MAX_INGREDIENTS and any(
+        t.startswith(_SIDE_TAGS) for t in types
+    ):
+        return SIDE
+    return MAIN
+
+
 # --- diet suitability ------------------------------------------------------
 
 # Meat/fish substitutes: cancel a meat/fish keyword hit ("Plant-Based Mince",

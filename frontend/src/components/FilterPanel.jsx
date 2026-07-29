@@ -86,6 +86,18 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
         </div>
       )}
 
+      {facets.courses?.length > 0 && (
+        <Section label="Course">
+          <ChipFilter
+            options={facets.courses}
+            /* Nothing selected means mains, which is what the API does with an
+               empty course list -- so the chip has to look selected too. */
+            selected={filters.course ?? ['main']}
+            onToggle={(v) => toggleArrayValue('course', v)}
+          />
+        </Section>
+      )}
+
       {facets.diets.length > 0 && (
         <Section label="Diet">
           <ChipFilter

@@ -247,3 +247,52 @@ def test_cuts_complete_recipes_with_all_zero_quantities(factory):
     with factory() as s:
         active = {r.source_id for r in s.query(Recipe).filter(Recipe.curated == 1)}
     assert active == {"ok", "mixed"}
+
+
+def test_a_recipe_whose_real_ingredients_are_all_zero_is_cut(factory):
+    """The withdrawn draft: pork, potatoes and cauliflower all at zero, with
+    only "3 tbsp Olive Oil" carrying a number. One quantified line out of
+    eleven used to be enough to pass."""
+    _seed(
+        factory,
+        [
+            _recipe(source_id="cookable", name="Real Dinner"),
+            _recipe(
+                source_id="draft",
+                name="Rosemary Pork Medallions",
+                ingredients=[
+                    RecipeIngredient(name="Pork Medallion", amount=0, amount_g=0),
+                    RecipeIngredient(name="Baking Potato", amount=0, amount_g=0),
+                    RecipeIngredient(name="Cauliflower", amount=0, amount_g=0),
+                    RecipeIngredient(name="Olive Oil", amount=3, unit="tbsp", amount_g=45),
+                ],
+            ),
+        ],
+    )
+
+    rep = curate(factory, rules=CurationRules(dedup_versions=False))
+
+    assert rep.cut_zero_quantities == 1
+    with factory() as s:
+        active = {r.source_id for r in s.query(Recipe).filter(Recipe.curated == 1)}
+    assert active == {"cookable"}
+
+
+def test_a_partly_quantified_recipe_is_still_cookable(factory):
+    """Real recipes do sometimes leave a line unpriced; the corpus tail stops
+    at 0.6, so only a recipe that is almost entirely empty is cut."""
+    _seed(
+        factory,
+        [
+            _recipe(
+                source_id="mostly",
+                name="Mostly Quantified",
+                ingredients=[
+                    RecipeIngredient(name="Rice", amount=100, amount_g=100),
+                    RecipeIngredient(name="Chicken", amount=250, amount_g=250),
+                    RecipeIngredient(name="Garnish", amount=0, amount_g=0),
+                ],
+            ),
+        ],
+    )
+    assert curate(factory, rules=CurationRules(dedup_versions=False)).curated == 1

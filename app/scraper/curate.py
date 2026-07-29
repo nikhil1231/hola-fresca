@@ -93,12 +93,30 @@ def _avg_rating(recipe: Recipe) -> float:
     return recipe.avg_rating or 0.0
 
 
+# The share of a recipe's ingredient lines that must carry a quantity. Asking
+# for *any* quantified line was too weak: a withdrawn draft zeroes the pork, the
+# potatoes and the cauliflower but keeps "3 tbsp Olive Oil", and that one line
+# passed. Naming the staples instead does not work — in this corpus "Pepper" is
+# a vegetable, "Salted Barramundi" contains salt and "Sugar Snap Peas" sugar.
+#
+# The corpus makes the share safe to threshold: of 5,198 curated recipes 5,036
+# quantify every line, the tail stops at 0.6, and exactly one sits below half —
+# the broken draft, at 0.09. Nothing real lives near this line.
+_MIN_QUANTIFIED_SHARE = 0.5
+
+
 def _has_nonzero_ingredient_amount(recipe: Recipe) -> bool:
-    return any(
-        (line.amount_g is not None and line.amount_g > 0)
+    """True when enough of the recipe carries a quantity to be cookable."""
+    lines = recipe.ingredients
+    if not lines:
+        return False
+    quantified = sum(
+        1
+        for line in lines
+        if (line.amount_g is not None and line.amount_g > 0)
         or (line.amount is not None and line.amount > 0)
-        for line in recipe.ingredients
     )
+    return quantified / len(lines) >= _MIN_QUANTIFIED_SHARE
 
 
 def curate(

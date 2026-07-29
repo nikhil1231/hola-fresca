@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 // Keys stored as repeatable (multi-value) params.
-const ARRAY_KEYS = ['cuisine', 'diet', 'tag', 'protein', 'exclude']
+const ARRAY_KEYS = ['cuisine', 'diet', 'tag', 'protein', 'exclude', 'course']
 // Keys stored as single numeric params.
 const NUMBER_KEYS = ['max_time', 'min_protein', 'min_protein_ratio', 'max_kcal', 'difficulty']
 const BOOLEAN_KEYS = ['rated', 'wishlisted']

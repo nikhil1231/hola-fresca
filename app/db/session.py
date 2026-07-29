@@ -42,6 +42,7 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "cloned_from": "VARCHAR(64)",
         "source_active": "INTEGER DEFAULT 0",
         "source_published": "INTEGER DEFAULT 0",
+        "course": "VARCHAR(16) DEFAULT 'main'",
     },
 }
 

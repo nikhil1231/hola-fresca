@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.classify import (
+    course,
     diet_flags,
     effective_ratings,
     macros_suspect,
@@ -89,3 +90,53 @@ def test_low_carb_threshold():
     # carb energy fraction < 0.30 -> low carb.
     assert diet_flags(["Steak"], [], 20, 600)["is_low_carb"] is True  # 80/600=0.13
     assert diet_flags(["Pasta"], [], 80, 600)["is_low_carb"] is False  # 320/600=0.53
+
+
+# --- course ----------------------------------------------------------------
+
+def test_a_single_ingredient_recipe_is_a_bought_product():
+    """Nothing to cook: houmous, a garlic baguette, a tub of chips. The source
+    files some of these under veggie or nothing at all, so structure decides."""
+    assert course(["grocery", "addon-veggie"], 1) == "product"
+    assert course(["veggie"], 1) == "product"
+    assert course([], 1) == "product"
+    assert course(["lunch-readymeals"], 1) == "product"
+
+
+def test_a_single_ingredient_dessert_is_still_a_dessert():
+    assert course(["dessert-ready"], 1) == "dessert"
+
+
+def test_ready_meals_are_products_however_many_lines_they_list():
+    assert course(["lunch-readymeals"], 4) == "product"
+
+
+def test_desserts_are_recognised_even_when_they_are_real_cooking():
+    assert course(["dessert-baking"], 9) == "dessert"
+    assert course(["dessert-baking", "eggs-not-included"], 7) == "dessert"
+
+
+def test_small_side_tagged_dishes_are_sides():
+    assert course(["sides-salad"], 7) == "side"
+    assert course(["sides-bites"], 5) == "side"
+    assert course(["grocery-bakery"], 4) == "side"
+
+
+def test_a_side_tag_on_a_full_dinner_does_not_demote_it():
+    """Bacon and Sweet Potato Risotto carries sides-bread because bread comes
+    alongside it. Ten ingredients in, it is still dinner."""
+    assert course(["sides-bread", "grocery-bakery"], 10) == "main"
+
+
+def test_lunch_and_addon_tags_are_not_course_markers():
+    """These sound like accompaniments and are not: a Green Goddess Rump Steak
+    Salad and a Chicken and Chorizo Paella carry them."""
+    assert course(["lunch-salad"], 9) == "main"
+    assert course(["lunch-pasta"], 10) == "main"
+    assert course(["addon-veggie"], 11) == "main"
+    assert course(["addon-highprotein", "high-protein"], 18) == "main"
+
+
+def test_an_ordinary_dinner_is_a_main():
+    assert course(["rapid", "bestseller", "seo"], 11) == "main"
+    assert course(None, 8) == "main"

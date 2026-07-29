@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.canonicalize import to_grams
 from app.classify import (
+    course,
     diet_flags,
     effective_ratings,
     macros_implausible_for_veg,
@@ -470,6 +471,7 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
         or macros_implausible_for_veg(flags["is_vegetarian"], recipe.protein_g)
     )
     row.protein_energy_ratio = protein_energy_ratio(recipe.protein_g, recipe.energy_kcal)
+    row.course = course([t.type for t in recipe.tags], len(recipe.ingredients))
 
     session.add(row)
     return row

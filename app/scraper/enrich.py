@@ -19,6 +19,7 @@ from app.canonicalize import (
     to_grams,
 )
 from app.classify import (
+    course,
     diet_flags,
     macros_implausible_for_veg,
     macros_suspect,
@@ -39,6 +40,7 @@ _RECIPE_COLUMNS = {
     # Audit state; see app.audit. Separate from the computed macros_suspect above.
     "flagged_suspicious": "INTEGER DEFAULT 0",
     "audited_at": "DATETIME",
+    "course": "VARCHAR(16) DEFAULT 'main'",
 }
 _INGREDIENT_COLUMNS = {
     "amount_g": "REAL",
@@ -77,6 +79,7 @@ def enrich(session_factory: sessionmaker[Session]) -> EnrichReport:
             select(Recipe).options(
                 selectinload(Recipe.ingredients),
                 selectinload(Recipe.allergens),
+                selectinload(Recipe.tags),
             )
         )
         for r in recipes:
@@ -98,6 +101,7 @@ def _apply_recipe(r: Recipe) -> None:
     """Set the derived per-recipe fields on a Recipe row (shared with normalize)."""
     names = [i.name for i in r.ingredients]
     allergens = [a.name for a in r.allergens]
+    r.course = course([t.type for t in r.tags], len(r.ingredients))
     flags = diet_flags(names, allergens, r.carbs_g, r.energy_kcal)
     r.is_vegetarian = int(flags["is_vegetarian"])
     r.is_pescatarian = int(flags["is_pescatarian"])

@@ -127,3 +127,65 @@ def test_popularity_still_breaks_ties(factory):
 def test_no_query_returns_everything_unranked(factory):
     with factory() as s:
         assert len(_ranked_recipe_ids(s, dict(q=None, **_NO_FILTERS))) == 3
+
+
+# --- course filtering -------------------------------------------------------
+
+@pytest.fixture
+def courses(tmp_path):
+    engine = make_engine(tmp_path / "course.db")
+    init_db(engine)
+    f = make_session_factory(engine)
+    with f() as s:
+        s.add_all([
+            Recipe(source="hellofresh", source_id="m", url="x", curated=1, is_complete=1,
+                   name="Chicken Curry", course="main", effective_ratings_count=100),
+            Recipe(source="hellofresh", source_id="s", url="x", curated=1, is_complete=1,
+                   name="Garlic Bread Side", course="side", effective_ratings_count=100),
+            Recipe(source="hellofresh", source_id="d", url="x", curated=1, is_complete=1,
+                   name="Chocolate Brownie", course="dessert", effective_ratings_count=100),
+            Recipe(source="hellofresh", source_id="p", url="x", curated=1, is_complete=1,
+                   name="Houmous", course="product", effective_ratings_count=100),
+            # A row written before the column existed.
+            Recipe(source="hellofresh", source_id="legacy", url="x", curated=1,
+                   is_complete=1, name="Legacy Dinner", course=None,
+                   effective_ratings_count=100),
+        ])
+        s.commit()
+    return f
+
+
+def _names(factory, **overrides):
+    filters = dict(q=None, **_NO_FILTERS)
+    filters.update(overrides)
+    with factory() as s:
+        return {s.get(Recipe, i).name for i in _ranked_recipe_ids(s, filters)}
+
+
+def test_browse_shows_mains_only_by_default(courses):
+    assert _names(courses) == {"Chicken Curry", "Legacy Dinner"}
+
+
+def test_a_row_predating_the_column_reads_as_a_main(courses):
+    """Otherwise every recipe vanishes from browse between the deploy and the
+    next enrich pass."""
+    assert "Legacy Dinner" in _names(courses)
+    assert "Legacy Dinner" in _names(courses, course=["main"])
+
+
+def test_sides_are_opt_in(courses):
+    assert _names(courses, course=["side"]) == {"Garlic Bread Side"}
+    assert _names(courses, course=["main", "side"]) == {
+        "Chicken Curry", "Legacy Dinner", "Garlic Bread Side"
+    }
+
+
+def test_asking_for_every_course_returns_everything(courses):
+    assert len(_names(courses, course=["main", "side", "dessert", "product"])) == 5
+
+
+def test_search_is_scoped_to_mains_too(courses):
+    """A search for "chocolate" must not surface a dessert while browse hides
+    desserts; the two would disagree about what the library contains."""
+    assert _names(courses, q="chocolate") == set()
+    assert _names(courses, q="chocolate", course=["dessert"]) == {"Chocolate Brownie"}

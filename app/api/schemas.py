@@ -31,6 +31,7 @@ class RecipeCard(BaseModel):
     difficulty: int | None = None
     avg_rating: float | None = None
     ratings_count: int | None = None
+    course: str = "main"
     personal_rating: int | None = None
     wishlisted: bool = False
     cuisines: list[str] = Field(default_factory=list)
@@ -175,6 +176,7 @@ class NumericRange(BaseModel):
 
 
 class FacetsOut(BaseModel):
+    courses: list[FacetCount]
     cuisines: list[FacetCount]
     diets: list[FacetCount]
     attributes: list[FacetCount]

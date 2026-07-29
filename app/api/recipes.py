@@ -228,6 +228,25 @@ def _shown_ratings_count(r: Recipe) -> int | None:
     return r.ratings_count
 
 
+def _apply_course(stmt: Select, course: list[str] | None) -> Select:
+    """Restrict to the requested courses; mains only when nothing is asked for.
+
+    Sides and ready-made items are worth having in the library — they are real
+    things you can add to a week — but they are not what someone browsing for
+    dinner means, and being cheap they win every price-ordered list. So they are
+    opt-in, the same way unmapped recipes already are.
+    """
+    wanted = [c for c in (course or facet_cfg.DEFAULT_COURSES) if c in facet_cfg.COURSES]
+    if not wanted or set(wanted) == set(facet_cfg.COURSES):
+        return stmt
+    condition = Recipe.course.in_(wanted)
+    if facet_cfg.MAIN in wanted:
+        # A database that predates the column reads NULL, which is a main until
+        # the next enrich pass says otherwise.
+        condition = or_(condition, Recipe.course.is_(None))
+    return stmt.where(condition)
+
+
 def _apply_filters(
     stmt: Select,
     *,
@@ -244,8 +263,10 @@ def _apply_filters(
     exclude: list[str],
     rated: bool = False,
     wishlisted: bool = False,
+    course: list[str] | None = None,
 ) -> Select:
     stmt = stmt.where(Recipe.curated == 1)
+    stmt = _apply_course(stmt, course)
     if cuisine:
         stmt = stmt.where(Recipe.cuisines.any(RecipeCuisine.name.in_(cuisine)))
     # Diet filters map to derived boolean columns; ANDed (each must hold).
@@ -353,6 +374,7 @@ def _to_card(
         difficulty=r.difficulty,
         avg_rating=_shown_rating(r),
         ratings_count=_shown_ratings_count(r),
+        course=r.course or facet_cfg.MAIN,
         personal_rating=personal_rating if personal_rating is not None else _personal_rating_value(r),
         wishlisted=wishlisted if wishlisted is not None else _wishlisted_value(r),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in r.cuisines],
@@ -517,6 +539,7 @@ def list_recipes(
     rated: bool = False,
     wishlisted: bool = False,
     exclude_id: list[int] = Query(default_factory=list),
+    course: list[str] = Query(default_factory=list),
     sort: str = facet_cfg.DEFAULT_SORT,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=24, ge=1, le=MAX_PAGE_SIZE),
@@ -529,6 +552,7 @@ def list_recipes(
         q=q, cuisine=cuisine, diet=diet, tag=tag, protein=protein, max_time=max_time,
         min_protein=min_protein, min_protein_ratio=min_protein_ratio, max_kcal=max_kcal,
         difficulty=difficulty, exclude=exclude, rated=rated, wishlisted=wishlisted,
+        course=course,
     )
     exclude_unmapped = "unmapped" in exclude
     excluded_recipe_ids = set(exclude_id)
@@ -896,7 +920,23 @@ def get_facets(
             FacetCount(value="unmapped", label="Unmapped ingredients", count=unmapped_count),
         )
 
+    # Counted over the whole curated library rather than the current filters, so
+    # "Sides (23)" reads the same wherever you are and tells you the toggle has
+    # something behind it.
+    course_counts = dict(
+        session.execute(
+            select(func.coalesce(Recipe.course, facet_cfg.MAIN), func.count())
+            .where(Recipe.curated == 1)
+            .group_by(func.coalesce(Recipe.course, facet_cfg.MAIN))
+        ).all()
+    )
+    courses = [
+        FacetCount(value=value, label=label, count=course_counts.get(value, 0))
+        for value, label in facet_cfg.COURSES.items()
+    ]
+
     return FacetsOut(
+        courses=courses,
         cuisines=cuisines,
         diets=diet_facets(),
         attributes=tag_facets(facet_cfg.ATTRIBUTE_TAGS),

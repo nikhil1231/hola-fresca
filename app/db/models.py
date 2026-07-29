@@ -93,6 +93,12 @@ class Recipe(Base):
     # Deprecated stub recipes from the source are stored but flagged False.
     is_complete: Mapped[bool] = mapped_column(Integer, default=0, index=True)
 
+    # main | side | dessert | product. The library carries accompaniments and
+    # bought items alongside dinners; they are worth keeping and worth telling
+    # apart, since a £2 garlic bread otherwise outranks every meal on price.
+    # Derived — see app.classify.course.
+    course: Mapped[str] = mapped_column(String(16), default="main", index=True)
+
     # Source quality/recency signals, used for library curation and as inputs
     # to the planner (popularity, freshness). ``is_addon`` marks non-standalone
     # items (extra protein, side veg) rather than full meals.

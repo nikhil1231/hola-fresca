@@ -40,6 +40,19 @@ DIET_COLUMNS = {
     "low_carb": ("is_low_carb", "Low carb"),
 }
 
+# Course filter: what kind of thing this is, derived in app.classify.course.
+# Browse and the planner show mains unless asked otherwise, because a £2 garlic
+# bread beats every dinner in the library on price and would otherwise sit at
+# the top of every cheapest-first and best-fit list.
+MAIN = "main"
+COURSES = {
+    MAIN: "Mains",
+    "side": "Sides",
+    "dessert": "Desserts",
+    "product": "Ready-made",
+}
+DEFAULT_COURSES = [MAIN]
+
 # Attribute filters: lighter-weight "nice to have" tags.
 ATTRIBUTE_TAGS = {
     "high-protein": "High protein",

@@ -33,6 +33,12 @@ function formatMarginalScore(value) {
   return `${value < 0 ? '-' : '+'}£${absolute}`
 }
 
+const COURSE_LABELS = {
+  side: 'Side',
+  dessert: 'Dessert',
+  product: 'Ready-made',
+}
+
 function formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable) {
   if (!basketAvailable) return 'No basket data'
   const marginal = formatMarginalScore(marginalScore)
@@ -283,15 +289,22 @@ export default function RecipeCard({
                 {recipe.headline}
               </Text>
             )}
-            {recipe.tags?.length > 0 && (
+            {(recipe.course && recipe.course !== 'main') || recipe.tags?.length > 0 ? (
               <Group gap={6} mt={4}>
-                {recipe.tags.slice(0, 2).map((tag) => (
+                {/* Say what this is when it is not dinner: a side, a dessert or
+                    something you just buy. Mains are the norm and go unlabelled. */}
+                {recipe.course && recipe.course !== 'main' && (
+                  <Badge variant="light" color="gray" size="sm" radius="sm">
+                    {COURSE_LABELS[recipe.course] ?? recipe.course}
+                  </Badge>
+                )}
+                {(recipe.tags ?? []).slice(0, 2).map((tag) => (
                   <Badge key={tag} variant="light" color="fresh" size="sm" radius="sm">
                     {tag}
                   </Badge>
                 ))}
               </Group>
-            )}
+            ) : null}
           </div>
 
           {showStats && (
