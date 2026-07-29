@@ -469,6 +469,7 @@ export default function RecipeDetailPage() {
   )
   const plannerEntry = getRecipeEntry(recipeId, upcomingWeekStart)
   const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
+  const selectedServings = servingsOverride ?? DEFAULT_PORTIONS
   const currentSelections = useMemo(() => toPlannerSelections(upcomingRecipes), [upcomingRecipes])
   const withRecipeSelections = useMemo(() => {
     if (!recipe || plannerEntry) return currentSelections
@@ -478,9 +479,21 @@ export default function RecipeDetailPage() {
     () => currentSelections.filter((selection) => selection.recipe_id !== recipeId),
     [currentSelections, recipeId],
   )
+  const ingredientCostSelections = useMemo(() => {
+    if (!recipe) return currentSelections
+    if (plannerEntry) {
+      return currentSelections.map((selection) =>
+        selection.recipe_id === recipe.id
+          ? { ...selection, portions: selectedServings }
+          : selection,
+      )
+    }
+    return [...currentSelections, { recipe_id: recipe.id, portions: selectedServings }]
+  }, [currentSelections, plannerEntry, recipe, selectedServings])
   const { data: currentBasket } = usePlannerBasket(currentSelections)
   const { data: withRecipeBasket } = usePlannerBasket(withRecipeSelections)
   const { data: withoutRecipeBasket } = usePlannerBasket(withoutRecipeSelections)
+  const { data: ingredientCostBasket } = usePlannerBasket(ingredientCostSelections)
   // Keyed on the route param, so these sit above the loading/error returns below
   // and are never called conditionally.
   const audit = useAuditRecipe(id)
@@ -511,10 +524,9 @@ export default function RecipeDetailPage() {
   }
 
   const baseYield = recipe.base_yield || 2
-  const servings = servingsOverride ?? baseYield
+  const servings = selectedServings
   const factor = servings / baseYield
-  const basketForRecipe = plannerEntry ? currentBasket : withRecipeBasket
-  const ingredientCosts = ingredientCostByKey(basketForRecipe, recipe.id)
+  const ingredientCosts = ingredientCostByKey(ingredientCostBasket, recipe.id)
   const marginalTotal = plannerEntry
     ? currentBasket && withoutRecipeBasket
       ? currentBasket.cost - withoutRecipeBasket.cost
