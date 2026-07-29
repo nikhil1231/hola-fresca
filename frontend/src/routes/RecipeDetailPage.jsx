@@ -224,6 +224,9 @@ function splitQuantityLabel(label) {
   return { quantity: match[1], estimate: match[2] }
 }
 
+// What the recipe consumes, priced pro-rata: a recipe using 5 g from a 60 g bag
+// of sesame seeds is charged a twelfth of the bag. This is deliberately not what
+// the basket costs — see the totals row, which shows both.
 function ingredientCostByKey(basket, recipeId) {
   const costs = new Map()
   for (const line of basket?.lines ?? []) {
@@ -239,6 +242,12 @@ function ingredientCostByKey(basket, recipeId) {
     costs.set(line.key, (costs.get(line.key) ?? 0) + cost)
   }
   return costs
+}
+
+function sumCosts(costs) {
+  let total = 0
+  for (const cost of costs.values()) total += cost
+  return total
 }
 
 function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove }) {
@@ -511,17 +520,22 @@ export default function RecipeDetailPage() {
   )
   const plannerEntry = getRecipeEntry(recipeId, upcomingWeekStart)
   const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
-  const selectedServings = servingsOverride ?? DEFAULT_PORTIONS
+  // The servings control drives every number on the page. Seeded from the
+  // planner so a recipe already in the week at six portions opens showing six —
+  // it used to open at the default and price a six-portion basket beside a
+  // four-portion ingredient list, with nothing on screen to say why they
+  // disagreed.
+  const selectedServings = servingsOverride ?? plannerEntry?.portions ?? DEFAULT_PORTIONS
   const currentSelections = useMemo(() => toPlannerSelections(upcomingRecipes), [upcomingRecipes])
-  const withRecipeSelections = useMemo(() => {
-    if (!recipe || plannerEntry) return currentSelections
-    return [...currentSelections, { recipe_id: recipe.id, portions: DEFAULT_PORTIONS }]
-  }, [currentSelections, plannerEntry, recipe])
   const withoutRecipeSelections = useMemo(
     () => currentSelections.filter((selection) => selection.recipe_id !== recipeId),
     [currentSelections, recipeId],
   )
-  const ingredientCostSelections = useMemo(() => {
+  // The week including this recipe at the servings on screen — whether it is
+  // already planned (at whatever portions) or not planned at all. One basket
+  // behind both the per-ingredient costs and the marginal total, so the two can
+  // no longer be computed at different sizes.
+  const withRecipeSelections = useMemo(() => {
     if (!recipe) return currentSelections
     if (plannerEntry) {
       return currentSelections.map((selection) =>
@@ -532,10 +546,8 @@ export default function RecipeDetailPage() {
     }
     return [...currentSelections, { recipe_id: recipe.id, portions: selectedServings }]
   }, [currentSelections, plannerEntry, recipe, selectedServings])
-  const { data: currentBasket } = usePlannerBasket(currentSelections)
-  const { data: withRecipeBasket } = usePlannerBasket(withRecipeSelections)
   const { data: withoutRecipeBasket } = usePlannerBasket(withoutRecipeSelections)
-  const { data: ingredientCostBasket } = usePlannerBasket(ingredientCostSelections)
+  const { data: withRecipeBasket } = usePlannerBasket(withRecipeSelections)
   // Keyed on the route param, so these sit above the loading/error returns below
   // and are never called conditionally.
   const audit = useAuditRecipe(id)
@@ -569,16 +581,20 @@ export default function RecipeDetailPage() {
   const baseYield = recipe.base_yield || 2
   const servings = selectedServings
   const factor = servings / baseYield
-  const ingredientCosts = ingredientCostByKey(ingredientCostBasket, recipe.id)
-  const marginalTotal = plannerEntry
-    ? currentBasket && withoutRecipeBasket
-      ? currentBasket.cost - withoutRecipeBasket.cost
+  const ingredientCosts = ingredientCostByKey(withRecipeBasket, recipe.id)
+  // Two different questions, and the page shows both because neither alone is
+  // the answer. `usedTotal` is what the recipe consumes, priced pro-rata across
+  // the packs it draws on. `marginalTotal` is what the shop actually costs you:
+  // whole packs, minus whatever the rest of the week already covers. A recipe
+  // wanting 5 g of black sesame seeds pays 33p of a bag in the first and £2.00
+  // for the bag in the second, and the difference is sitting in your cupboard.
+  const usedTotal = sumCosts(ingredientCosts)
+  const marginalTotal =
+    withRecipeBasket && withoutRecipeBasket
+      ? withRecipeBasket.cost - withoutRecipeBasket.cost
       : null
-    : currentBasket && withRecipeBasket
-      ? withRecipeBasket.cost - currentBasket.cost
-      : null
-  const marginalPortions = plannerEntry?.portions ?? DEFAULT_PORTIONS
-  const marginalPerPortion = marginalTotal == null ? null : marginalTotal / marginalPortions
+  const marginalPerPortion = marginalTotal == null ? null : marginalTotal / servings
+  const leftoverTotal = marginalTotal == null ? null : marginalTotal - usedTotal
 
   // What each corrected macro used to say. Edits arrive oldest-first, so the
   // first entry for a field holds the original source value even if it has since
@@ -644,9 +660,20 @@ export default function RecipeDetailPage() {
                 }
               />
               {marginalPerPortion != null && (
-                <Badge color="fresh" variant="light" radius="sm" size="lg" className={classes.costBadge}>
-                  {formatSignedMoney(marginalPerPortion)} pp
-                </Badge>
+                <Tooltip
+                  label={
+                    `What this recipe adds to the week's shop, per portion: whole packs, ` +
+                    `less anything the rest of the week already buys. The ingredient list ` +
+                    `below prices only what the recipe uses, so it comes to less.`
+                  }
+                  withArrow
+                  multiline
+                  w={280}
+                >
+                  <Badge color="fresh" variant="light" radius="sm" size="lg" className={classes.costBadge}>
+                    {formatSignedMoney(marginalPerPortion)} pp to shop
+                  </Badge>
+                </Tooltip>
               )}
             </Group>
 
@@ -849,6 +876,52 @@ export default function RecipeDetailPage() {
                     )
                   })}
                 </Table.Tbody>
+                {marginalTotal != null && (
+                  <Table.Tfoot>
+                    <Table.Tr>
+                      <Table.Td colSpan={3}>
+                        <Text size="xs" c="dimmed" fw={600}>
+                          Used by this recipe
+                        </Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="xs" c="dimmed" fw={700}>{formatMoney(usedTotal)}</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                    {leftoverTotal > 0.005 && (
+                      <Table.Tr>
+                        <Table.Td colSpan={3}>
+                          <Group gap={6} wrap="nowrap">
+                            <Text size="xs" c="dimmed" fw={600}>
+                              Left over in the packs
+                            </Text>
+                            <Tooltip
+                              label="Packs come in fixed sizes, so a recipe needing 5 g of something still buys the whole bag. This is what stays in the cupboard for next time."
+                              withArrow
+                              multiline
+                              w={260}
+                            >
+                              <ThemeIcon variant="transparent" color="gray" size="xs">
+                                <IconAlertTriangle size={13} />
+                              </ThemeIcon>
+                            </Tooltip>
+                          </Group>
+                        </Table.Td>
+                        <Table.Td ta="right">
+                          <Text size="xs" c="dimmed" fw={700}>{formatMoney(leftoverTotal)}</Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    )}
+                    <Table.Tr>
+                      <Table.Td colSpan={3}>
+                        <Text size="sm" fw={700}>Added to the shop</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Text size="sm" fw={700}>{formatMoney(marginalTotal)}</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  </Table.Tfoot>
+                )}
               </Table>
             </Table.ScrollContainer>
 
