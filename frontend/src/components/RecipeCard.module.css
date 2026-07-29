@@ -78,10 +78,8 @@
 }
 
 .wishlistBadge {
-  forced-color-adjust: none;
-  color-scheme: light only;
   position: absolute;
-  top: 44px;
+  bottom: 8px;
   left: 8px;
   display: inline-flex;
   align-items: center;
@@ -89,9 +87,9 @@
   width: 28px;
   height: 28px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
-  color: var(--mantine-color-red-6);
-  border: 1px solid rgba(0, 0, 0, 0.14);
+  background: light-dark(rgba(255, 255, 255, 0.94), rgba(26, 27, 30, 0.88));
+  color: light-dark(var(--mantine-color-red-6), var(--mantine-color-red-4));
+  border: 1px solid light-dark(rgba(0, 0, 0, 0.14), rgba(255, 255, 255, 0.18));
   box-shadow: var(--mantine-shadow-xs);
 }
 

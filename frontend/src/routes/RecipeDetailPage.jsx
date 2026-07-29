@@ -360,6 +360,8 @@ function WishlistButton({ wishlisted, pending, onToggle }) {
         color={wishlisted ? 'red' : 'gray'}
         radius="xl"
         size="lg"
+        className={classes.wishlistButton}
+        data-active={wishlisted || undefined}
         disabled={pending}
         aria-label={label}
         aria-pressed={wishlisted}
@@ -368,6 +370,57 @@ function WishlistButton({ wishlisted, pending, onToggle }) {
         {wishlisted ? <IconHeartFilled size={19} /> : <IconHeart size={19} />}
       </ActionIcon>
     </Tooltip>
+  )
+}
+
+function RecipeRatings({ recipe, personalRating, wishlist }) {
+  return (
+    <Paper withBorder radius="md" p="sm" className={classes.ratingsPanel}>
+      <Group gap="lg" align="center" wrap="wrap">
+        <Stack gap={3} className={classes.ratingItem}>
+          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+            Source
+          </Text>
+          {recipe.avg_rating != null ? (
+            <Group gap={6} wrap="nowrap" className={classes.ratingValue}>
+              <IconStarFilled size={17} className={classes.star} />
+              <Text fw={700}>{recipe.avg_rating.toFixed(1)}</Text>
+              {recipe.ratings_count != null && (
+                <Text c="dimmed" size="sm">
+                  ({recipe.ratings_count.toLocaleString()})
+                </Text>
+              )}
+            </Group>
+          ) : (
+            <Text size="sm" c="dimmed">
+              Not rated
+            </Text>
+          )}
+        </Stack>
+
+        <Stack gap={3} className={classes.ratingItem}>
+          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+            Yours
+          </Text>
+          <PersonalRatingControl
+            value={recipe.personal_rating}
+            pending={personalRating.isPending}
+            onSet={(rating) => personalRating.mutate(rating)}
+          />
+        </Stack>
+
+        <Stack gap={3} className={classes.ratingItem}>
+          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+            Wishlist
+          </Text>
+          <WishlistButton
+            wishlisted={recipe.wishlisted}
+            pending={wishlist.isPending}
+            onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
+          />
+        </Stack>
+      </Group>
+    </Paper>
   )
 }
 
@@ -685,11 +738,6 @@ export default function RecipeDetailPage() {
                   setRecipePortions(upcomingWeekStart, recipe.id, portions)
                 }
               />
-              <WishlistButton
-                wishlisted={recipe.wishlisted}
-                pending={wishlist.isPending}
-                onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
-              />
               {marginalPerPortion != null && (
                 <Tooltip
                   label={
@@ -708,25 +756,9 @@ export default function RecipeDetailPage() {
               )}
             </Group>
 
+            <RecipeRatings recipe={recipe} personalRating={personalRating} wishlist={wishlist} />
+
             <Group gap="lg" mt="xs" align="flex-start">
-              <Stack gap={2} className={classes.ratingStack}>
-                {recipe.avg_rating != null && (
-                  <Group gap={6} wrap="nowrap">
-                    <IconStarFilled size={18} className={classes.star} />
-                    <Text fw={600}>{recipe.avg_rating.toFixed(1)}</Text>
-                    {recipe.ratings_count != null && (
-                      <Text c="dimmed" size="sm">
-                        ({recipe.ratings_count.toLocaleString()})
-                      </Text>
-                    )}
-                  </Group>
-                )}
-                <PersonalRatingControl
-                  value={recipe.personal_rating}
-                  pending={personalRating.isPending}
-                  onSet={(rating) => personalRating.mutate(rating)}
-                />
-              </Stack>
               {recipe.total_time_min != null && (
                 <Group gap={6} wrap="nowrap">
                   <IconClock size={18} />

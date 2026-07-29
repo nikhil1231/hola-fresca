@@ -17,17 +17,39 @@
   line-height: 1;
 }
 
+.ratingsPanel {
+  width: fit-content;
+  max-width: 100%;
+  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+}
+
+.ratingItem {
+  min-width: 92px;
+}
+
+.ratingValue {
+  min-height: 36px;
+}
+
 .personalStar,
 .personalStarActive {
-  forced-color-adjust: none;
-  color-scheme: light only;
-  color: rgb(173, 181, 189) !important;
+  color: light-dark(var(--mantine-color-gray-4), var(--mantine-color-dark-2)) !important;
 }
 
 .personalStar:hover,
 .personalStarActive,
 .personalStarActive:hover {
-  color: rgb(0, 0, 0) !important;
+  color: var(--mantine-color-yellow-6) !important;
+}
+
+.wishlistButton {
+  color: light-dark(var(--mantine-color-red-6), var(--mantine-color-red-4));
+}
+
+.wishlistButton[data-active] {
+  background: light-dark(var(--mantine-color-red-0), color-mix(in srgb, var(--mantine-color-red-9) 34%, transparent));
+  color: light-dark(var(--mantine-color-red-7), var(--mantine-color-red-3));
+  border: 1px solid light-dark(var(--mantine-color-red-2), var(--mantine-color-red-8));
 }
 
 .macro {
