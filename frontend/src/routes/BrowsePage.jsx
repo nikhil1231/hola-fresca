@@ -187,7 +187,22 @@ export default function BrowsePage() {
 
   return (
     <Group align="flex-start" gap="xl" wrap="nowrap">
-      <Box visibleFrom="md" w={260} style={{ flexShrink: 0, position: 'sticky', top: 88 }}>
+      {/* The sidebar is taller than the viewport, so it scrolls on its own
+          rather than running off the bottom of a sticky box. `contain` stops
+          the recipe list from taking over once the panel hits its end. */}
+      <Box
+        visibleFrom="md"
+        w={260}
+        style={{
+          flexShrink: 0,
+          position: 'sticky',
+          top: 88,
+          maxHeight: 'calc(100vh - 104px)',
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
+          paddingRight: 8,
+        }}
+      >
         {panel}
       </Box>
 

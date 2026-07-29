@@ -23,15 +23,16 @@ export default function RangeFilter({
   const isOff = local === offValue
   return (
     <div>
-      <Group justify="space-between" mb={4}>
-        <Text size="sm" fw={600}>
+      <Group justify="space-between" mb={2} wrap="nowrap">
+        <Text size="xs" fw={600}>
           {label}
         </Text>
-        <Text size="sm" c={isOff ? 'dimmed' : 'fresh.8'} fw={isOff ? 400 : 600}>
+        <Text size="xs" c={isOff ? 'dimmed' : 'fresh.8'} fw={isOff ? 400 : 600}>
           {isOff ? 'Any' : formatValue(local)}
         </Text>
       </Group>
       <Slider
+        size="xs"
         value={local}
         min={min}
         max={max}

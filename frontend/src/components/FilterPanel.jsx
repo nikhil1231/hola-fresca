@@ -1,7 +1,6 @@
 import {
   Button,
   Chip,
-  Divider,
   Group,
   MultiSelect,
   Pill,
@@ -16,8 +15,8 @@ import { countActiveFilters } from '../hooks/useFilters.js'
 
 function Section({ label, children }) {
   return (
-    <Stack gap="xs">
-      <Text size="sm" fw={700}>
+    <Stack gap={6}>
+      <Text size="xs" fw={700} tt="uppercase" c="dimmed" style={{ letterSpacing: '0.04em' }}>
         {label}
       </Text>
       {children}
@@ -28,12 +27,12 @@ function Section({ label, children }) {
 function ChipFilter({ options, selected, onToggle }) {
   return (
     <Chip.Group multiple value={selected}>
-      <Group gap={6}>
+      <Group gap={4}>
         {options.map((opt) => (
           <Chip
             key={opt.value}
             value={opt.value}
-            size="sm"
+            size="xs"
             radius="sm"
             color="fresh"
             variant="outline"
@@ -53,9 +52,9 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
   const activeCount = countActiveFilters(filters)
 
   return (
-    <Stack gap="lg">
-      <Group justify="space-between">
-        <Text fw={700} size="lg">
+    <Stack gap="sm">
+      <Group justify="space-between" wrap="nowrap">
+        <Text fw={700} size="sm">
           Filters
         </Text>
         {activeCount > 0 && (
@@ -67,11 +66,12 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
 
       {filters.q && (
         <div>
-          <Text size="xs" c="dimmed" mb={4}>
+          <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={4}
+                style={{ letterSpacing: '0.04em' }}>
             Search
           </Text>
           <Pill
-            size="md"
+            size="sm"
             withRemoveButton
             onRemove={() => setScalar('q', null)}
             styles={{
@@ -129,14 +129,16 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
       )}
 
       <Section label="Personal">
-        <Stack gap="xs">
+        <Stack gap={6}>
           <Switch
+            size="xs"
             color="dark"
             label="Rated"
             checked={Boolean(filters.rated)}
             onChange={(event) => setScalar('rated', event.currentTarget.checked ? 'true' : null)}
           />
           <Switch
+            size="xs"
             color="fresh"
             label="Wishlist"
             checked={Boolean(filters.wishlisted)}
@@ -146,8 +148,6 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
           />
         </Stack>
       </Section>
-
-      <Divider />
 
       <Section label="Difficulty">
         <SegmentedControl
@@ -229,14 +229,13 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
         ]}
       />
 
-      <Divider />
-
       <Section label="Cuisine">
         <MultiSelect
           data={facets.cuisines.map((c) => ({ value: c.value, label: c.label }))}
           value={filters.cuisine ?? []}
           onChange={(v) => setArray('cuisine', v)}
           placeholder="Any cuisine"
+          size="xs"
           searchable
           clearable
           radius="md"
@@ -249,6 +248,7 @@ export default function FilterPanel({ facets, filters, setScalar, setArray, togg
           value={filters.exclude ?? []}
           onChange={(v) => setArray('exclude', v)}
           placeholder="Nothing excluded"
+          size="xs"
           searchable
           clearable
           radius="md"
