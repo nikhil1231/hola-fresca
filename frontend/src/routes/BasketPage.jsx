@@ -3,6 +3,7 @@ import {
   Alert,
   Badge,
   Box,
+  Button,
   Checkbox,
   Group,
   Loader,
@@ -12,6 +13,7 @@ import {
   Table,
   Text,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import {
   IconAlertCircle,
@@ -21,9 +23,11 @@ import {
   IconCalendarWeek,
   IconChevronRight,
   IconHome,
+  IconRefresh,
 } from '@tabler/icons-react'
 
 import RecipeCard from '../components/RecipeCard.jsx'
+import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { usePlannerBasket } from '../hooks/useRecipeQueries.js'
 import {
@@ -55,6 +59,26 @@ function formatQuantity(value, unit = 'g') {
     return `${rounded.toLocaleString()} ${rounded === 1 ? 'unit' : 'units'}`
   }
   return formatGrams(value)
+}
+
+function formatDelta(value) {
+  const rounded = Math.round((value ?? 0) * 100) / 100
+  if (rounded === 0) return 'same price'
+  return `${rounded > 0 ? '+' : '-'}${formatMoney(Math.abs(rounded))}`
+}
+
+// "checked 4 min ago". Deliberately coarse: the useful question is whether the
+// stock behind these prices is minutes or days old, never which minute it was.
+function formatAge(value) {
+  if (!value) return null
+  const then = new Date(value).getTime()
+  if (Number.isNaN(then)) return null
+  const minutes = Math.round((Date.now() - then) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }
 
 function packsText(line) {
@@ -211,6 +235,23 @@ function LineTable({
                                 trace
                               </Badge>
                             )}
+                            {line.substitution && (
+                              <Tooltip
+                                multiline
+                                w={260}
+                                label={`Out of stock: ${line.substitution.displaced.join(', ')}. Covered instead by ${line.choices
+                                  .map((choice) => choice.product_name)
+                                  .join(', ')}.`}
+                              >
+                                <Badge
+                                  size="xs"
+                                  color={line.substitution.tier_changed ? 'orange' : 'blue'}
+                                  variant="light"
+                                >
+                                  swapped {formatDelta(line.substitution.cost_delta)}
+                                </Badge>
+                              </Tooltip>
+                            )}
                           </Group>
                           {line.contributions?.length > 0 && (
                             <Text size="xs" c="dimmed">
@@ -237,6 +278,16 @@ function LineTable({
                             expanded ? classes.expansionShellOpen : ''
                           }`}
                         >
+                          {line.substitution && (
+                            <Text size="xs" c="dimmed" px="xs" pb={6}>
+                              {line.substitution.tier_changed
+                                ? 'Nothing matching exactly is in stock. '
+                                : ''}
+                              Out of stock: {line.substitution.displaced.join(', ')} —{' '}
+                              {formatDelta(line.substitution.cost_delta)} against{' '}
+                              {formatMoney(line.substitution.baseline_cost)}.
+                            </Text>
+                          )}
                           <div className={classes.choiceList}>
                             {line.choices.map((choice) => (
                               <div key={`${rowKey}:${choice.sku}`} className={classes.choiceItem}>
@@ -311,6 +362,7 @@ export default function BasketPage() {
   const [hoverLineKey, setHoverLineKey] = useState(null)
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
   const { ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
+  const stockRefresh = useOcadoStockRefresh()
   const recipesScrollRef = useRef(null)
   const recipeRefs = useRef(new Map())
 
@@ -346,6 +398,7 @@ export default function BasketPage() {
     [buyLines],
   )
   const recipePrices = useMemo(() => recipePortionPrices(buyLines, entries), [buyLines, entries])
+  const stockAge = formatAge(data?.stock_checked_at)
   const basketPortionPrice = totalPortions > 0 ? orderCost / totalPortions : 0
   const selectedLineKey = hoverLineKey ?? activeLineKey
   const allLines = useMemo(
@@ -466,12 +519,53 @@ export default function BasketPage() {
         </Box>
 
         <Box className={classes.basketPanel}>
-          <Group gap="xs" mb="md">
-            <IconBasket size={22} className={classes.titleIcon} />
-            <Title order={3} className={classes.sectionTitle}>
-              Basket
-            </Title>
+          <Group justify="space-between" align="center" mb="md" wrap="nowrap">
+            <Group gap="xs">
+              <IconBasket size={22} className={classes.titleIcon} />
+              <Title order={3} className={classes.sectionTitle}>
+                Basket
+              </Title>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <Text size="xs" c="dimmed">
+                {stockRefresh.isPending
+                  ? 'Checking Ocado…'
+                  : stockAge
+                    ? `Stock checked ${stockAge}`
+                    : 'Stock not checked'}
+              </Text>
+              <Button
+                variant="subtle"
+                size="compact-sm"
+                leftSection={<IconRefresh size={16} />}
+                loading={stockRefresh.isPending}
+                disabled={!selections.length}
+                onClick={() => stockRefresh.mutate({ selections })}
+              >
+                Refresh stock
+              </Button>
+            </Group>
           </Group>
+
+          {stockRefresh.error && (
+            <Alert color="red" mb="md" icon={<IconAlertCircle size={18} />}>
+              {stockRefresh.error.message}
+            </Alert>
+          )}
+
+          {stockRefresh.isSuccess && !stockRefresh.isPending && (
+            <Alert
+              color={stockRefresh.data.sold_out.length ? 'yellow' : 'teal'}
+              variant="light"
+              mb="md"
+              icon={<IconRefresh size={18} />}
+            >
+              Checked {stockRefresh.data.checked} products: {stockRefresh.data.available}{' '}
+              available, {stockRefresh.data.sold_out.length} sold out,{' '}
+              {stockRefresh.data.restocked.length} back in stock,{' '}
+              {stockRefresh.data.repriced.length} repriced.
+            </Alert>
+          )}
 
           {isError ? (
             <Alert color="red" title="Couldn't price basket" icon={<IconAlertCircle size={18} />}>
@@ -555,6 +649,7 @@ export default function BasketPage() {
                     <Box className={classes.bucketGrid}>
                       <NameList title="Pantry staples" names={data.staples} muted />
                       <NameList title="Mapped, not priceable" names={data.unpriceable} />
+                      <NameList title="Out of stock at Ocado" names={data.sold_out} />
                     </Box>
                   </>
                 )}

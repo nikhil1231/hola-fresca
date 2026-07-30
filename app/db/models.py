@@ -388,7 +388,11 @@ class Product(Base):
     unit_price_basis: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stock is a cache of what the retailer said, so it is only as good as its
+    # timestamp: NULL means never checked live, and the planner treats an old
+    # reading as a reason to re-ask rather than as fact. See app.ocado.availability.
     in_stock: Mapped[bool | None] = mapped_column(Integer, nullable=True)
+    stock_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Ocado's guaranteed minimum life on delivery, kept both verbatim ("2 WEEK")
     # and as days for ordering/filtering. NULL means the retailer states no life

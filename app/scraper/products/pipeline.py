@@ -448,6 +448,10 @@ def upsert_product(session: Session, product) -> Product:
     existing.unit_price_basis = product.unit_price_basis
     existing.category = product.category
     existing.in_stock = product.in_stock
+    # A scrape *is* a stock reading, so it dates one - otherwise a basket built
+    # straight after a scrape claims its stock has never been checked at all.
+    if product.in_stock is not None:
+        existing.stock_checked_at = datetime.now(timezone.utc)
     existing.shelf_life_raw = product.shelf_life_raw
     existing.shelf_life_days = product.shelf_life_days
     existing.avg_rating = product.avg_rating

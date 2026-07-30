@@ -229,6 +229,16 @@ class BasketPackChoiceOut(BaseModel):
     external: bool = False
 
 
+class BasketSubstitutionOut(BaseModel):
+    """What a sold-out product cost this line, in money and in match quality."""
+
+    displaced: list[str] = Field(default_factory=list)
+    displaced_skus: list[str] = Field(default_factory=list)
+    baseline_cost: float
+    cost_delta: float
+    tier_changed: bool = False
+
+
 class BasketContributionOut(BaseModel):
     recipe_id: int
     recipe_name: str
@@ -254,6 +264,7 @@ class BasketLineOut(BaseModel):
     trace: bool = False
     external: bool = False
     note: str | None = None
+    substitution: BasketSubstitutionOut | None = None
     choices: list[BasketPackChoiceOut] = Field(default_factory=list)
     contributions: list[BasketContributionOut] = Field(default_factory=list)
 
@@ -263,10 +274,14 @@ class BasketOut(BaseModel):
     staples: list[str] = Field(default_factory=list)
     unmapped: list[str] = Field(default_factory=list)
     unpriceable: list[str] = Field(default_factory=list)
+    sold_out: list[str] = Field(default_factory=list)
     untracked_lines: int = 0
     cost: float
     waste_gbp: float
     score: float
+    #: How stale the stock behind this basket is: the oldest live check among the
+    #: products it buys, or null if any of them has never been checked.
+    stock_checked_at: datetime | None = None
 
 
 class SuggestionsIn(BasketIn):
@@ -510,6 +525,22 @@ class PushLineOut(BaseModel):
     sku: str
     quantity: int
     name: str | None = None
+    #: The ingredient this product was bought for - "Sesame seeds", not
+    #: "Mitake Irigoma Shiro". A drop is only actionable in these terms.
+    ingredient: str | None = None
+    ingredient_key: str | None = None
+    wanted: int | None = None
+    got: int | None = None
+    reason: str | None = None
+
+
+class OcadoSwapOut(BaseModel):
+    ingredient: str
+    ingredient_key: str
+    from_products: list[str] = Field(default_factory=list)
+    to_products: list[str] = Field(default_factory=list)
+    cost_delta: float = 0.0
+    tier_changed: bool = False
 
 
 class OcadoPushResultOut(BaseModel):
@@ -517,6 +548,19 @@ class OcadoPushResultOut(BaseModel):
     dropped: list[PushLineOut] = Field(default_factory=list)
     unmapped: list[str] = Field(default_factory=list)
     deltas: dict[str, int] = Field(default_factory=dict)
+    swaps: list[OcadoSwapOut] = Field(default_factory=list)
+    sold_out: list[str] = Field(default_factory=list)
+    stock_checked_at: datetime | None = None
+
+
+class OcadoStockRefreshOut(BaseModel):
+    checked_at: datetime
+    checked: int = 0
+    available: int = 0
+    sold_out: list[str] = Field(default_factory=list)
+    restocked: list[str] = Field(default_factory=list)
+    repriced: list[str] = Field(default_factory=list)
+    changed: int = 0
 
 
 class OcadoBasketOut(BaseModel):

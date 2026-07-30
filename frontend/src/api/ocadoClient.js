@@ -45,6 +45,12 @@ export function pushOcadoBasket({ selections, ownedItemKeys = [] }) {
   return postJSON('/api/ocado/basket/push', { selections, owned_item_keys: ownedItemKeys })
 }
 
+// Re-reads stock and price for every product this basket could be covered from.
+// Needs no Ocado login, so the basket page can offer it unconditionally.
+export function refreshOcadoStock({ selections }) {
+  return postJSON('/api/ocado/stock/refresh', { selections })
+}
+
 export function fetchOcadoBasket() {
   return getJSON('/api/ocado/basket')
 }

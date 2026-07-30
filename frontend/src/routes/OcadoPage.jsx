@@ -218,12 +218,35 @@ function useCountdown(expiry) {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+function formatDelta(value) {
+  const rounded = Math.round((value ?? 0) * 100) / 100
+  if (rounded === 0) return 'same price'
+  return `${rounded > 0 ? '+' : '-'}${money.format(Math.abs(rounded))}`
+}
+
+// A drop is only useful in the ingredient's terms: "Sesame seeds" says what the
+// week is now missing, where the brand name of the pack Ocado refused does not.
+function dropText(line) {
+  const product = line.name ?? line.sku
+  const short =
+    line.wanted != null && line.got != null && line.got > 0
+      ? ` (${line.got} of ${line.wanted})`
+      : ''
+  const why = line.reason ? ` - ${line.reason}` : ''
+  return line.ingredient ? `${line.ingredient}: ${product}${short}${why}` : `${product}${short}${why}`
+}
+
 function PushSummary({ result }) {
   if (!result) return null
+  const swaps = result.swaps ?? []
+  const soldOut = result.sold_out ?? []
   return (
     <Alert color={result.dropped.length ? 'yellow' : 'teal'} variant="light" icon={<IconCheck size={18} />}>
       <Group gap="xs">
         <Badge color="teal" variant="light">{result.applied.length} applied</Badge>
+        <Badge color={swaps.length ? 'blue' : 'gray'} variant="light">
+          {swaps.length} swapped
+        </Badge>
         <Badge color={result.dropped.length ? 'yellow' : 'gray'} variant="light">
           {result.dropped.length} dropped
         </Badge>
@@ -231,9 +254,25 @@ function PushSummary({ result }) {
           {result.unmapped.length} unmapped
         </Badge>
       </Group>
+      {swaps.length > 0 && (
+        <Stack gap={2} mt="xs">
+          {swaps.map((swap) => (
+            <Text size="sm" key={swap.ingredient_key}>
+              {swap.ingredient}: {swap.from_products.join(', ')} out of stock →{' '}
+              {swap.to_products.join(', ')} ({formatDelta(swap.cost_delta)})
+              {swap.tier_changed ? ', closest match unavailable' : ''}
+            </Text>
+          ))}
+        </Stack>
+      )}
       {result.dropped.length > 0 && (
         <Text size="sm" mt="xs">
-          Dropped: {result.dropped.map((line) => line.name ?? line.sku).join(', ')}
+          Ocado would not take: {result.dropped.map(dropText).join('; ')}
+        </Text>
+      )}
+      {soldOut.length > 0 && (
+        <Text size="sm" mt="xs">
+          Nothing in stock for: {soldOut.join(', ')}
         </Text>
       )}
       {result.unmapped.length > 0 && (

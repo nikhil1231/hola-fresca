@@ -1,6 +1,7 @@
 """Stateless planner API: basket pricing and best-fit recipe ranking."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,6 +22,7 @@ from app.api.schemas import (
     BasketLineOut,
     BasketOut,
     BasketPackChoiceOut,
+    BasketSubstitutionOut,
     PlannerSuggestionsOut,
     RecipeSuggestionCard,
     SuggestionsIn,
@@ -67,6 +69,45 @@ def _round_money(value: float) -> float:
     return round(value, 2)
 
 
+def _utc(value: datetime | None) -> datetime | None:
+    """Stamp UTC onto a timestamp SQLite handed back naive.
+
+    Everything written is ``datetime.now(timezone.utc)``, but the SQLite DATETIME
+    type drops the offset on the way in. Serialised naive, a browser reads the
+    result as local time and a freshly checked basket looks hours old.
+    """
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
+def _stock_checked_at(basket: Basket) -> datetime | None:
+    """How fresh the *stalest* pack in the basket is - what the basket can claim."""
+    stamps = [
+        choice.pack.stock_checked_at
+        for line in basket.lines
+        if line.cover is not None
+        for choice in line.cover.choices
+        if not choice.pack.external
+    ]
+    if not stamps or any(stamp is None for stamp in stamps):
+        return None
+    return _utc(min(stamps))
+
+
+def _substitution_out(line: BasketLine) -> BasketSubstitutionOut | None:
+    substitution = line.substitution
+    if substitution is None:
+        return None
+    return BasketSubstitutionOut(
+        displaced=list(substitution.displaced),
+        displaced_skus=list(substitution.displaced_skus),
+        baseline_cost=_round_money(substitution.baseline_cost),
+        cost_delta=_round_money(substitution.cost_delta),
+        tier_changed=substitution.tier_changed,
+    )
+
+
 def _line_out(line: BasketLine) -> BasketLineOut:
     cover = line.cover
     choices = []
@@ -105,6 +146,7 @@ def _line_out(line: BasketLine) -> BasketLineOut:
         trace=line.trace,
         external=line.external,
         note=line.note,
+        substitution=_substitution_out(line),
         choices=choices,
         contributions=[
             BasketContributionOut(
@@ -125,10 +167,12 @@ def _basket_out(basket: Basket) -> BasketOut:
         staples=basket.staples,
         unmapped=basket.unmapped,
         unpriceable=basket.unpriceable,
+        sold_out=basket.sold_out,
         untracked_lines=basket.untracked_lines,
         cost=_round_money(basket.cost),
         waste_gbp=_round_money(basket.waste_gbp),
         score=_round_money(basket.score),
+        stock_checked_at=_stock_checked_at(basket),
     )
 
 

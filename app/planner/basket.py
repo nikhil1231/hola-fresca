@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from statistics import median
 from typing import Iterable, Sequence
 
@@ -48,6 +48,26 @@ class PackChoice:
 
 
 @dataclass(frozen=True, slots=True)
+class Substitution:
+    """What a cover would have bought if the shop had everything in stock.
+
+    Recorded rather than inferred, because the swap is invisible after the fact:
+    once the sold-out pack is filtered out, the cover that replaces it looks like
+    a first choice. The price delta is the honest cost of the substitution — what
+    this ingredient costs now, minus what it would have cost.
+    """
+
+    displaced: tuple[str, ...]
+    displaced_skus: tuple[str, ...]
+    baseline_cost: float
+    cost_delta: float
+    #: The best-matching form ran out entirely, so the cover dropped a tier -
+    #: "roasted white sesame" giving way to plain sesame seeds. Worth saying out
+    #: loud: it is a change of ingredient, not just of brand.
+    tier_changed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Cover:
     """How one ingredient's demand is met, and what it costs to meet it."""
 
@@ -61,6 +81,7 @@ class Cover:
     need_qty: float | None = None
     capacity_qty: float | None = None
     leftover_qty: float | None = None
+    substitution: Substitution | None = None
 
     @property
     def score(self) -> float:
@@ -111,13 +132,29 @@ def _score_multiset(
     )
 
 
-def preferred_packs(ingredient: Ingredient) -> tuple[Pack, ...]:
-    """The best-matching form of an ingredient that can actually be bought."""
+def preferred_packs(
+    ingredient: Ingredient, *, include_unavailable: bool = False
+) -> tuple[Pack, ...]:
+    """The best-matching form of an ingredient that can actually be bought.
+
+    "Can actually be bought" now means in stock as well as approved, and the
+    walk down the tiers is what makes that survivable: when every exact match is
+    sold out the cover drops to ``form_differs`` rather than giving up on the
+    ingredient. ``include_unavailable`` asks the same question of a shop with
+    full shelves, which is how the substitution's price delta is measured.
+    """
+    return _preferred_tier(ingredient, include_unavailable=include_unavailable)[1]
+
+
+def _preferred_tier(
+    ingredient: Ingredient, *, include_unavailable: bool = False
+) -> tuple[str | None, tuple[Pack, ...]]:
+    packs = ingredient.packs if include_unavailable else ingredient.available_packs
     for tier in MATCH_TYPE_PREFERENCE:
-        tier_packs = tuple(p for p in ingredient.packs if p.match_type == tier)
+        tier_packs = tuple(p for p in packs if p.match_type == tier)
         if tier_packs:
-            return tier_packs
-    return ingredient.packs
+            return tier, tier_packs
+    return (None, packs)
 
 
 def _cover_with_packs(packs: Sequence[Pack], need_g: float) -> Cover | None:
@@ -225,11 +262,61 @@ def _cover_count_with_packs(packs: Sequence[Pack], need_units: float, need_g: fl
     return best_cover
 
 
+def _cover_from(
+    packs: Sequence[Pack],
+    unit_kind: str,
+    need_g: float,
+    need_units: float | None,
+) -> Cover | None:
+    if not packs:
+        return None
+    if unit_kind == "count":
+        return _cover_count_with_packs(packs, need_units or 0.0, need_g)
+    return _cover_with_packs(packs, need_g)
+
+
+def _with_substitution(
+    cover: Cover | None,
+    ingredient: Ingredient,
+    need_g: float,
+    need_units: float | None,
+) -> Cover | None:
+    """Label a cover with what being sold out cost it, if anything.
+
+    Only asked of ingredients that actually have a sold-out pack, and only then
+    is the second, hypothetical cover computed - so the common case pays nothing
+    for this.
+    """
+    if cover is None:
+        return None
+    tier, _ = _preferred_tier(ingredient)
+    full_tier, full_packs = _preferred_tier(ingredient, include_unavailable=True)
+    baseline = _cover_from(full_packs, ingredient.unit_kind, need_g, need_units)
+    if baseline is None:
+        return cover
+
+    displaced = tuple(choice.pack for choice in baseline.choices if not choice.pack.available)
+    if not displaced:
+        # Everything sold out was something this ingredient would not have
+        # bought anyway - the cheapest packs survived, so nothing was displaced.
+        return cover
+    return replace(
+        cover,
+        substitution=Substitution(
+            displaced=tuple(pack.product_name for pack in displaced),
+            displaced_skus=tuple(pack.sku for pack in displaced),
+            baseline_cost=baseline.cost,
+            cost_delta=cover.cost - baseline.cost,
+            tier_changed=tier != full_tier,
+        ),
+    )
+
+
 def cover_need(
     index: PlanIndex, ingredient: Ingredient, need_g: float, need_units: float | None = None
 ) -> Cover | None:
     """Cover one ingredient's demand, memoised on the index."""
-    if not ingredient.packs:
+    if not ingredient.available_packs:
         return None
     if ingredient.unit_kind == "count":
         if need_units is None or need_units <= 0:
@@ -239,16 +326,17 @@ def cover_need(
         if cache_key in index.cover_cache:
             return index.cover_cache[cache_key]  # type: ignore[return-value]
         cover = _cover_count_with_packs(preferred_packs(ingredient), need_units, need_g)
-        index.cover_cache[cache_key] = cover
-        return cover
-
-    if need_g <= 0:
+    elif need_g <= 0:
         return None
-    target_b = math.ceil(need_g / BUCKET_G)
-    cache_key = (ingredient.key, "g", target_b)
-    if cache_key in index.cover_cache:
-        return index.cover_cache[cache_key]  # type: ignore[return-value]
-    cover = _cover_with_packs(preferred_packs(ingredient), need_g)
+    else:
+        target_b = math.ceil(need_g / BUCKET_G)
+        cache_key = (ingredient.key, "g", target_b)
+        if cache_key in index.cover_cache:
+            return index.cover_cache[cache_key]  # type: ignore[return-value]
+        cover = _cover_with_packs(preferred_packs(ingredient), need_g)
+
+    if len(ingredient.available_packs) != len(ingredient.packs):
+        cover = _with_substitution(cover, ingredient, need_g, need_units)
     index.cover_cache[cache_key] = cover
     return cover
 
@@ -297,6 +385,11 @@ class BasketLine:
         return self.cover.waste_gbp if self.cover else 0.0
 
     @property
+    def substitution(self) -> Substitution | None:
+        """Set when something this line wanted was sold out - see :class:`Substitution`."""
+        return self.cover.substitution if self.cover else None
+
+    @property
     def trace(self) -> bool:
         """A whole pack bought to satisfy a trace demand - see ``TRACE_NEED_G``."""
         return self.unit_kind != "count" and self.need_g <= TRACE_NEED_G
@@ -323,6 +416,10 @@ class Basket:
     staples: list[str] = field(default_factory=list)
     unmapped: list[str] = field(default_factory=list)
     unpriceable: list[str] = field(default_factory=list)
+    #: Mapped and priced, but every approved product is out of stock today. Held
+    #: apart from ``unpriceable`` because it is a fact about this morning rather
+    #: than about the mapping, and it will fix itself.
+    sold_out: list[str] = field(default_factory=list)
     untracked_lines: int = 0
 
     @property
@@ -350,6 +447,11 @@ class Basket:
     def trace_lines(self) -> list[BasketLine]:
         """Lines bought for a trace demand: candidates for a pantry-staple flag."""
         return [line for line in self.lines if line.trace and line.cover is not None]
+
+    @property
+    def substituted_lines(self) -> list[BasketLine]:
+        """Lines covering around something the shop has run out of."""
+        return [line for line in self.lines if line.substitution is not None]
 
     @property
     def retailer_lines(self) -> list[BasketLine]:
@@ -496,7 +598,10 @@ def build_basket(
             basket.staples.append(label)
             continue
         if not ingredient.shoppable:
-            basket.unpriceable.append(label)
+            if ingredient.sold_out:
+                basket.sold_out.append(label)
+            else:
+                basket.unpriceable.append(label)
             continue
         cover = cover_need(index, ingredient, demand.grams, demand.units)
         line = BasketLine(
@@ -526,9 +631,15 @@ def build_basket(
     basket.staples.sort()
     basket.unmapped.sort()
     basket.unpriceable.sort()
+    basket.sold_out.sort()
     return basket
 
 
 def basket_gap_count(basket: Basket) -> int:
     """Unknown demand lines that should not rank as free."""
-    return len(basket.unmapped) + len(basket.unpriceable) + basket.untracked_lines
+    return (
+        len(basket.unmapped)
+        + len(basket.unpriceable)
+        + len(basket.sold_out)
+        + basket.untracked_lines
+    )

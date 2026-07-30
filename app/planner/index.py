@@ -5,6 +5,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from statistics import median
 
@@ -51,6 +52,11 @@ class Pack:
     retailer: str = RETAILER
     capacity_qty: float | None = None
     quantity_unit: str = "g"
+    #: Whether the retailer will currently sell it. Out-of-stock packs are kept
+    #: in the index rather than dropped, so a cover can say what it *would* have
+    #: bought and price the substitution it had to make instead.
+    available: bool = True
+    stock_checked_at: datetime | None = None
 
     @property
     def cost_per_g(self) -> float:
@@ -78,8 +84,17 @@ class Ingredient:
     unpriceable_products: int = 0
 
     @property
+    def available_packs(self) -> tuple[Pack, ...]:
+        return tuple(pack for pack in self.packs if pack.available)
+
+    @property
     def shoppable(self) -> bool:
-        return bool(self.packs)
+        return bool(self.available_packs)
+
+    @property
+    def sold_out(self) -> bool:
+        """Mapped and priced, but nothing on the list can be bought today."""
+        return bool(self.packs) and not self.available_packs
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,8 +322,6 @@ def _build_pack(
     product = mp.product
     if product is None or product.price is None:
         return None
-    if product.in_stock == 0:
-        return None
     capacity_g = _pack_capacity_g(product, each_to_grams)
     capacity_qty = _pack_capacity_qty(product, each_to_grams, unit_kind, capacity_g)
     if unit_kind == "count" and capacity_g is None and capacity_qty and each_to_grams:
@@ -328,6 +341,10 @@ def _build_pack(
         pack_size_raw=product.pack_size_raw,
         url=product.url,
         retailer=product.retailer,
+        # NULL means never checked, which is not the same as sold out - the
+        # catalogue simply has nothing to say yet, so the pack stays buyable.
+        available=product.in_stock != 0,
+        stock_checked_at=product.stock_checked_at,
     )
 
 

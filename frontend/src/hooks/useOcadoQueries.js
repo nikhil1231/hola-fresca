@@ -6,6 +6,7 @@ import {
   fetchOcadoStatus,
   pushOcadoBasket,
   refreshOcadoSession,
+  refreshOcadoStock,
   reserveOcadoSlot,
   startOcadoLogin,
   submitOcadoOtp,
@@ -49,7 +50,23 @@ export function useOcadoPush() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: pushOcadoBasket,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ocado-basket'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ocado-basket'] })
+      // A push re-checks stock and may swap packs, so the priced basket the
+      // page is showing is out of date the moment it returns.
+      qc.invalidateQueries({ queryKey: ['planner-basket'] })
+    },
+  })
+}
+
+// Refreshing stock rewrites prices and availability in the catalogue, which
+// re-covers every affected ingredient - so the basket has to be re-fetched, not
+// just re-rendered.
+export function useOcadoStockRefresh() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: refreshOcadoStock,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-basket'] }),
   })
 }
 

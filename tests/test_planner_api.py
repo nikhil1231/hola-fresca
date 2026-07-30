@@ -243,10 +243,12 @@ def test_basket_allows_empty_selection(planner_client):
         "staples": [],
         "unmapped": [],
         "unpriceable": [],
+        "sold_out": [],
         "untracked_lines": 0,
         "cost": 0.0,
         "waste_gbp": 0.0,
         "score": 0.0,
+        "stock_checked_at": None,
     }
 
 

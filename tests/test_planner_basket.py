@@ -51,11 +51,12 @@ def write_freq_csv(path, rows):
     return path
 
 
-def pack(capacity_g, price, *, salvage=0.85, match_type="exact", sku=None):
+def pack(capacity_g, price, *, salvage=0.85, match_type="exact", sku=None, available=True):
     label = sku or f"{capacity_g:g}g"
     return Pack(
         sku=label, product_name=f"pack {label}", capacity_g=capacity_g, price=price,
         salvage=salvage, rank=1, match_type=match_type, pack_size_raw=label,
+        available=available,
     )
 
 
@@ -153,6 +154,48 @@ def test_substitute_is_used_when_no_exact_form_is_buyable():
 def test_no_cover_without_packs_or_demand():
     assert B.cover_need(PlanIndex(), ingredient(), need_g=100) is None
     assert B.cover_need(PlanIndex(), ingredient(pack(500, 1.0)), need_g=0) is None
+
+
+# --------------------------------------------------------------------------
+# Covering around what the shop has run out of
+# --------------------------------------------------------------------------
+
+def test_a_sold_out_pack_is_covered_by_the_next_one_in_the_same_tier():
+    """The real case: the cheapest sesame seeds go, the runner-up is right there."""
+    cheap = pack(60, 1.30, sku="mitake", available=False)
+    dearer = pack(60, 2.20, sku="saitaku")
+    cover = B.cover_need(PlanIndex(), ingredient(cheap, dearer), need_g=30)
+
+    assert cover.choices[0].pack.sku == "saitaku"
+    assert cover.substitution.displaced == ("pack mitake",)
+    # The swap is what it costs, stated in money rather than left to be noticed.
+    assert cover.substitution.cost_delta == pytest.approx(0.90)
+    assert cover.substitution.tier_changed is False
+
+
+def test_running_out_of_every_exact_form_drops_a_tier_and_says_so():
+    limes = pack(130, 0.75, match_type="exact", sku="limes", available=False)
+    juice = pack(250, 0.80, match_type="form_differs", sku="juice")
+    cover = B.cover_need(PlanIndex(), ingredient(limes, juice), need_g=65)
+
+    assert cover.choices[0].pack.sku == "juice"
+    assert cover.substitution.tier_changed is True, "a change of ingredient, not of brand"
+
+
+def test_a_sold_out_pack_nobody_wanted_is_not_reported_as_a_substitution():
+    """Only a pack the cover *would* have bought counts as having displaced one."""
+    chosen = pack(500, 1.00, sku="chosen")
+    extravagant = pack(500, 9.00, sku="extravagant", available=False)
+    cover = B.cover_need(PlanIndex(), ingredient(chosen, extravagant), need_g=400)
+
+    assert cover.choices[0].pack.sku == "chosen"
+    assert cover.substitution is None
+
+
+def test_an_ingredient_with_nothing_in_stock_is_held_apart_from_the_unmappable():
+    ing = ingredient(pack(500, 1.00, sku="gone", available=False), key="name:gone")
+    assert ing.shoppable is False and ing.sold_out is True
+    assert B.cover_need(PlanIndex(), ing, need_g=100) is None
 
 
 # --------------------------------------------------------------------------
