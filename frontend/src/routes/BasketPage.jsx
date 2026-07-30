@@ -29,7 +29,7 @@ import {
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
-import { usePlannerBasket } from '../hooks/useRecipeQueries.js'
+import { usePackPreference, usePlannerBasket } from '../hooks/useRecipeQueries.js'
 import {
   formatWeekLabel,
   MAX_RECIPES_PER_WEEK,
@@ -65,6 +65,13 @@ function formatDelta(value) {
   const rounded = Math.round((value ?? 0) * 100) / 100
   if (rounded === 0) return 'same price'
   return `${rounded > 0 ? '+' : '-'}${formatMoney(Math.abs(rounded))}`
+}
+
+function formatSignedCapacity(value, unit) {
+  const rounded = unit === 'unit' ? Math.round((value ?? 0) * 100) / 100 : Math.round(value ?? 0)
+  if (rounded === 0) return 'same'
+  const magnitude = unit === 'unit' ? formatQuantity(Math.abs(rounded), unit) : formatGrams(Math.abs(rounded))
+  return `${rounded > 0 ? '+' : '-'}${magnitude}`
 }
 
 // "checked 4 min ago". Deliberately coarse: the useful question is whether the
@@ -128,10 +135,114 @@ function Stat({ label, value, tone = 'default' }) {
   )
 }
 
+function formatUnitCost(option) {
+  return option.quantity_unit === 'unit'
+    ? `${formatMoney(option.unit_cost)}/unit`
+    : `${formatMoney(option.unit_cost)}/kg`
+}
+
+function formatCapacity(value, unit) {
+  return unit === 'unit' ? formatQuantity(value, unit) : formatGrams(value)
+}
+
+function upsizeLabel(option) {
+  return `${formatUnitCost(option)} · ${formatDelta(option.cost_delta)}`
+}
+
+// The size menu. The planner only ever prices one week, so it has no way to
+// know that the kilo bag is the better buy across the month - this is where
+// that judgement gets made, and stays made.
+function PackOptions({ line, packPreference }) {
+  const options = line.options ?? []
+  if (options.length < 2) return null
+  const pending = packPreference.isPending && packPreference.variables?.ingredientKey === line.key
+
+  return (
+    <Box className={classes.optionBox}>
+      <Group gap="xs" mb={6}>
+        <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+          Pack size
+        </Text>
+        {line.options.some((option) => option.pinned) && (
+          <Text size="xs" c="dimmed">
+            pinned sizes stay put from week to week
+          </Text>
+        )}
+      </Group>
+      <Stack gap={4}>
+        {options.map((option) => (
+          <Group key={option.sku} gap="xs" wrap="nowrap" justify="space-between">
+            <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+              <Text size="sm" truncate>
+                {option.count}x {option.pack_size_raw || formatCapacity(option.capacity, option.quantity_unit)}
+              </Text>
+              <Text size="xs" c="dimmed" truncate>
+                {option.product_name}
+              </Text>
+              {option.chosen && (
+                <Badge size="xs" variant="light" color="gray">
+                  current
+                </Badge>
+              )}
+              {option.pinned && (
+                <Badge size="xs" variant="light" color="grape">
+                  pinned
+                </Badge>
+              )}
+              {option.better_value && !option.chosen && (
+                <Badge size="xs" variant="light" color="green">
+                  better value
+                </Badge>
+              )}
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <Text size="xs" c="dimmed">
+                {formatUnitCost(option)}
+              </Text>
+              <Text size="sm" fw={600}>
+                {formatMoney(option.cost)}
+              </Text>
+              <Text size="xs" c="dimmed" w={92} ta="right">
+                {option.chosen
+                  ? `${formatCapacity(option.leftover, option.quantity_unit)} left`
+                  : `${formatDelta(option.cost_delta)}, ${formatSignedCapacity(
+                      option.leftover_delta,
+                      option.quantity_unit,
+                    )} left`}
+              </Text>
+              <Button
+                size="compact-xs"
+                variant={option.pinned ? 'light' : 'subtle'}
+                color={option.pinned ? 'grape' : 'fresh'}
+                loading={pending}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  packPreference.mutate({
+                    ingredientKey: line.key,
+                    sku: option.pinned ? null : option.sku,
+                  })
+                }}
+              >
+                {option.pinned ? 'Unpin' : 'Always buy'}
+              </Button>
+            </Group>
+          </Group>
+        ))}
+      </Stack>
+      {packPreference.error && (
+        <Text size="xs" c="red" mt={6}>
+          {packPreference.error.message}
+        </Text>
+      )}
+    </Box>
+  )
+}
+
 function LineTable({
   title,
   icon,
   lines,
+  packPreference,
   openLineKey,
   setOpenLineKey,
   tableId,
@@ -183,6 +294,8 @@ function LineTable({
               const highlighted =
                 selectedLineKey === rowKey || (hoverRecipeId && lineRecipeIds.has(hoverRecipeId))
               const owned = ownedItemKeySet.has(line.key)
+              const upsize = (line.options ?? []).find((option) => option.better_value)
+              const pinnedOption = (line.options ?? []).find((option) => option.pinned)
 
               return (
                 <Fragment key={rowKey}>
@@ -252,6 +365,27 @@ function LineTable({
                                 </Badge>
                               </Tooltip>
                             )}
+                            {pinnedOption && (
+                              <Badge size="xs" color="grape" variant="light">
+                                {pinnedOption.pack_size_raw || 'pinned'}
+                              </Badge>
+                            )}
+                            {upsize && !pinnedOption && (
+                              <Tooltip
+                                multiline
+                                w={280}
+                                label={`${upsize.product_name}: ${formatUnitCost(upsize)} against ${formatUnitCost(
+                                  line.options.find((option) => option.chosen) ?? upsize,
+                                )} — ${formatDelta(upsize.cost_delta)} now and ${formatSignedCapacity(
+                                  upsize.leftover_delta,
+                                  upsize.quantity_unit,
+                                )} left over, which keeps.`}
+                              >
+                                <Badge size="xs" color="green" variant="light">
+                                  bigger is cheaper
+                                </Badge>
+                              </Tooltip>
+                            )}
                           </Group>
                           {line.contributions?.length > 0 && (
                             <Text size="xs" c="dimmed">
@@ -318,6 +452,7 @@ function LineTable({
                               </div>
                             ))}
                           </div>
+                          <PackOptions line={line} packPreference={packPreference} />
                         </div>
                       </Table.Td>
                     </Table.Tr>
@@ -363,6 +498,7 @@ export default function BasketPage() {
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
   const { ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
   const stockRefresh = useOcadoStockRefresh()
+  const packPreference = usePackPreference()
   const recipesScrollRef = useRef(null)
   const recipeRefs = useRef(new Map())
 
@@ -631,6 +767,7 @@ export default function BasketPage() {
                       setHoverLineKey={setHoverLineKey}
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
+                      packPreference={packPreference}
                     />
                     <LineTable
                       title="Source elsewhere"
@@ -645,6 +782,7 @@ export default function BasketPage() {
                       setHoverLineKey={setHoverLineKey}
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
+                      packPreference={packPreference}
                     />
                     <Box className={classes.bucketGrid}>
                       <NameList title="Pantry staples" names={data.staples} muted />

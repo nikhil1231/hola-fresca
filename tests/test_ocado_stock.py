@@ -229,6 +229,22 @@ def test_an_ingredient_with_nothing_in_stock_is_reported_apart(stock_client, mon
     assert data["lines"] == []
 
 
+def test_a_pinned_pack_survives_the_round_trip_through_the_catalogue(stock_client):
+    """Not about stock, but the same loop: a decision written to the mapping has
+    to come back out through the index and change what the basket buys."""
+    client, recipe_id, _ = stock_client
+
+    client.put("/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": DEARER})
+    line = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
+
+    assert line["choices"][0]["sku"] == DEARER, "bought as asked, not as costed"
+    assert [o["pinned"] for o in line["options"] if o["sku"] == DEARER] == [True]
+
+    client.put("/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": None})
+    line = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
+    assert line["choices"][0]["sku"] == CHEAP
+
+
 def test_a_push_checks_the_shelves_before_filling_the_trolley(stock_client, monkeypatch):
     client, recipe_id, cart = stock_client
     _shelves(monkeypatch, sold_out=[CHEAP])

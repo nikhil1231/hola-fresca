@@ -20,7 +20,7 @@ from app.db.models import (
     Recipe,
     RecipeIngredient,
 )
-from app.mapping.candidates import load_source_id_index
+from app.mapping.candidates import load_recipe_pct_index, load_source_id_index
 from app.planner import waste as waste_mod
 
 log = logging.getLogger(__name__)
@@ -82,6 +82,11 @@ class Ingredient:
     each_to_grams: float | None = None
     unit_kind: str = "mass"
     unpriceable_products: int = 0
+    #: A standing choice of pack, honoured while it is in stock.
+    preferred_sku: str | None = None
+    #: Share of the curated library this ingredient appears in. The planner never
+    #: prices future weeks, so this is how it knows a big bag will get eaten.
+    recipe_pct: float = 0.0
 
     @property
     def available_packs(self) -> tuple[Pack, ...]:
@@ -349,7 +354,10 @@ def _build_pack(
 
 
 def _load_ingredients(
-    session: Session, statuses: tuple[str, ...], retailer: str
+    session: Session,
+    statuses: tuple[str, ...],
+    retailer: str,
+    recipe_pct: dict[str, float] | None = None,
 ) -> tuple[dict[str, Ingredient], dict[str, str], dict[str, float], dict[str, str]]:
     """Build the canonical ingredient table, alias roots, unit metadata.
 
@@ -375,6 +383,12 @@ def _load_ingredients(
     by_key = {r.ingredient_key: r for r in rows}
     each_by_key = {r.ingredient_key: r.each_to_grams for r in rows if r.each_to_grams}
     unit_kind_by_key = {r.ingredient_key: (r.unit_kind or "mass") for r in rows}
+
+    # An alias's recipes are the root's recipes, so its share counts towards how
+    # often the root is cooked - which is what decides whether bulk pays.
+    pct_by_root: dict[str, float] = defaultdict(float)
+    for key, pct in (recipe_pct or {}).items():
+        pct_by_root[roots.get(key, key)] += pct
 
     ingredients: dict[str, Ingredient] = {}
     for row in rows:
@@ -403,6 +417,8 @@ def _load_ingredients(
             each_to_grams=row.each_to_grams,
             unit_kind=unit_kind,
             unpriceable_products=unpriceable,
+            preferred_sku=row.preferred_sku,
+            recipe_pct=min(100.0, pct_by_root.get(row.ingredient_key, 0.0)),
         )
 
     _ = by_key
@@ -509,9 +525,10 @@ def load_index(
 ) -> PlanIndex:
     """Read the mapping and recipe library into a self-contained planner index."""
     sid_index = load_source_id_index(csv_path)
+    recipe_pct = load_recipe_pct_index(csv_path)
     with session_factory() as session:
         ingredients, roots, each_by_key, unit_kind_by_key = _load_ingredients(
-            session, statuses, retailer
+            session, statuses, retailer, recipe_pct
         )
         recipes = _load_recipes(
             session,

@@ -60,8 +60,15 @@ def pack(capacity_g, price, *, salvage=0.85, match_type="exact", sku=None, avail
     )
 
 
-def ingredient(*packs, key="name:test", staple=False):
-    return Ingredient(key=key, name="Test", pantry_staple=staple, packs=tuple(packs))
+def ingredient(*packs, key="name:test", staple=False, recipe_pct=0.0, preferred_sku=None):
+    return Ingredient(
+        key=key,
+        name="Test",
+        pantry_staple=staple,
+        packs=tuple(packs),
+        recipe_pct=recipe_pct,
+        preferred_sku=preferred_sku,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -190,6 +197,99 @@ def test_a_sold_out_pack_nobody_wanted_is_not_reported_as_a_substitution():
 
     assert cover.choices[0].pack.sku == "chosen"
     assert cover.substitution is None
+
+
+# --------------------------------------------------------------------------
+# Pack size: the bulk trade-off the planner cannot see
+# --------------------------------------------------------------------------
+
+def _rice(**kwargs):
+    """A staple: keeps for ever and the library cooks it constantly."""
+    return ingredient(
+        pack(500, 1.50, salvage=0.85, sku="500g"),
+        pack(1000, 2.50, salvage=0.85, sku="1kg"),
+        key="name:rice",
+        **kwargs,
+    )
+
+
+def _options(ing, need_g=300):
+    cover = B.cover_need(PlanIndex(), ing, need_g=need_g)
+    return cover, {o.pack.sku: o for o in B.pack_options(ing, cover, need_g)}
+
+
+def test_the_planner_still_buys_the_small_pack_but_says_the_big_one_is_better_value():
+    """Both are true: £1 less this week, and 17% cheaper per kilo."""
+    cover, options = _options(_rice(recipe_pct=9.4))
+
+    assert cover.choices[0].pack.sku == "500g", "one week's spend is what it minimises"
+    assert options["1kg"].better_value is True
+    assert options["1kg"].unit_cost == pytest.approx(0.0025)
+    assert options["1kg"].cost_delta == pytest.approx(1.00)
+    assert options["1kg"].leftover_delta == pytest.approx(500)
+    assert options["500g"].chosen is True
+
+
+def test_bulk_is_not_offered_for_something_the_library_barely_cooks():
+    """Cheaper per kilo is not a saving when the rest of it goes stale unopened."""
+    _, options = _options(_rice(recipe_pct=0.3))
+    assert options["1kg"].better_value is False
+
+
+def test_bulk_is_not_offered_for_something_that_will_not_keep():
+    perishable = ingredient(
+        pack(500, 1.50, salvage=0.15, sku="500g"),
+        pack(1000, 2.50, salvage=0.15, sku="1kg"),
+        key="name:spinach",
+        recipe_pct=9.0,
+    )
+    _, options = _options(perishable)
+    assert options["1kg"].better_value is False
+
+
+def test_bulk_is_not_offered_when_it_costs_too_much_to_fund():
+    catering = ingredient(
+        pack(500, 1.50, salvage=0.85, sku="500g"),
+        pack(10_000, 12.00, salvage=0.85, sku="10kg"),
+        key="name:rice",
+        recipe_pct=9.4,
+    )
+    _, options = _options(catering)
+    assert options["10kg"].unit_cost < options["500g"].unit_cost, "genuinely cheaper per kilo"
+    assert options["10kg"].better_value is False, "and still not what to do with £12"
+
+
+def test_a_pinned_size_is_bought_whatever_the_week_needs():
+    cover = B.cover_need(PlanIndex(), _rice(recipe_pct=9.4, preferred_sku="1kg"), need_g=300)
+
+    assert [c.pack.sku for c in cover.choices] == ["1kg"]
+    assert cover.cost == pytest.approx(2.50)
+
+
+def test_a_pin_on_something_sold_out_is_ignored_rather_than_obeyed():
+    ing = ingredient(
+        pack(500, 1.50, sku="500g"),
+        pack(1000, 2.50, sku="1kg", available=False),
+        key="name:rice",
+        preferred_sku="1kg",
+    )
+    cover = B.cover_need(PlanIndex(), ing, need_g=300)
+
+    assert [c.pack.sku for c in cover.choices] == ["500g"]
+
+
+def test_sizes_of_a_different_form_are_not_offered_as_sizes():
+    """A smaller jar is a size; lime juice instead of limes is a different thing."""
+    ing = ingredient(
+        pack(130, 0.75, match_type="exact", sku="limes"),
+        pack(260, 1.30, match_type="exact", sku="limes-big"),
+        pack(250, 0.80, match_type="form_differs", sku="juice"),
+        key="name:lime",
+        recipe_pct=9.0,
+    )
+    _, options = _options(ing, need_g=130)
+
+    assert set(options) == {"limes", "limes-big"}
 
 
 def test_an_ingredient_with_nothing_in_stock_is_held_apart_from_the_unmappable():

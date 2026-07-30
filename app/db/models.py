@@ -494,6 +494,13 @@ class IngredientMapping(Base):
     alias_of: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     # line_count x representative price; orders the review queue by spend impact.
     spend_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    # A standing "always buy this size" decision, e.g. the 1 kg bag of rice
+    # rather than the 500 g one. The planner minimises this week's spend, which
+    # is right for a lettuce and wrong for a cupboard staple that keeps and comes
+    # back every week — the cheaper £/kg only pays off across weeks the planner
+    # cannot see. So the trade-off is offered rather than guessed, and recorded
+    # here once made. Ignored while the product is out of stock.
+    preferred_sku: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     llm_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

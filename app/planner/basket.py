@@ -142,8 +142,26 @@ def preferred_packs(
     sold out the cover drops to ``form_differs`` rather than giving up on the
     ingredient. ``include_unavailable`` asks the same question of a shop with
     full shelves, which is how the substitution's price delta is measured.
+
+    A standing pack choice beats all of it - having decided you buy the kilo bag
+    of rice, the planner should stop re-deciding it every week - but only while
+    that product is in stock, and never for the hypothetical baseline, which has
+    to describe the shop rather than your preferences.
     """
+    if not include_unavailable:
+        pinned = pinned_pack(ingredient)
+        if pinned is not None:
+            return (pinned,)
     return _preferred_tier(ingredient, include_unavailable=include_unavailable)[1]
+
+
+def pinned_pack(ingredient: Ingredient) -> Pack | None:
+    """The pack this ingredient is always bought as, if it can be bought today."""
+    if not ingredient.preferred_sku:
+        return None
+    return next(
+        (p for p in ingredient.available_packs if p.sku == ingredient.preferred_sku), None
+    )
 
 
 def _preferred_tier(
@@ -341,6 +359,136 @@ def cover_need(
     return cover
 
 
+# What it takes for a bigger pack to be worth recommending rather than merely
+# listing. The planner prices one week, so on its own arithmetic the small pack
+# always wins - the cheaper £/kg only pays off in weeks it cannot see. These are
+# the conditions under which those weeks are a safe enough bet.
+BULK_MIN_UNIT_SAVING = 0.15  # a real difference in £/kg, not rounding
+BULK_MIN_SALVAGE = 0.65      # the remainder has to survive to be used
+BULK_MIN_RECIPE_PCT = 1.0    # and the ingredient has to come back: the top ~12%
+BULK_MAX_EXTRA_GBP = 3.00    # thrift you have to fund is not thrift
+
+
+@dataclass(frozen=True, slots=True)
+class PackOption:
+    """What buying this ingredient in one particular size would cost this week.
+
+    One entry per approved pack of the best-matching form, each covered on its
+    own, so the choice can be shown as the trade-off it is: £/kg against cash
+    now and a cupboard full of the remainder.
+    """
+
+    pack: Pack
+    count: int
+    cost: float
+    capacity: float
+    leftover: float
+    unit_cost: float
+    cost_delta: float
+    leftover_delta: float
+    quantity_unit: str = "g"
+    chosen: bool = False
+    pinned: bool = False
+    better_value: bool = False
+
+    @property
+    def keeps(self) -> bool:
+        return self.pack.salvage >= BULK_MIN_SALVAGE
+
+
+def _pack_option(pack: Pack, need: float, unit: str) -> PackOption | None:
+    capacity_each = pack.capacity_qty if unit == "unit" else pack.capacity_g
+    if not capacity_each or capacity_each <= 0 or need <= 0:
+        return None
+    count = max(1, math.ceil(need / capacity_each - COUNT_CEIL_EPSILON))
+    capacity = capacity_each * count
+    return PackOption(
+        pack=pack,
+        count=count,
+        cost=pack.price * count,
+        capacity=capacity,
+        leftover=max(0.0, capacity - need),
+        # Per single pack, not per multiple: it is the shelf price comparison,
+        # and it does not move with how many you happen to need this week.
+        unit_cost=pack.price / capacity_each,
+        cost_delta=0.0,
+        leftover_delta=0.0,
+        quantity_unit=unit,
+    )
+
+
+def pack_options(ingredient: Ingredient, cover: Cover, need: float) -> tuple[PackOption, ...]:
+    """Every size this ingredient could be bought in, priced against the cover.
+
+    Restricted to the form the cover is already using: a smaller jar is a size,
+    a different form is a different ingredient, and offering them in one list
+    would quietly invite the second while looking like the first.
+    """
+    unit = cover.quantity_unit
+    if need <= 0:
+        return ()
+    packs = list(_preferred_tier(ingredient)[1])
+    pinned = pinned_pack(ingredient)
+    if pinned is not None and pinned not in packs:
+        packs.append(pinned)
+    if len(packs) < 2:
+        return ()
+
+    chosen_capacity = cover.capacity_qty if unit == "unit" else cover.capacity_g
+    chosen_unit_cost = cover.cost / chosen_capacity if chosen_capacity else 0.0
+    chosen_skus = {choice.pack.sku for choice in cover.choices}
+
+    options: list[PackOption] = []
+    for pack in packs:
+        option = _pack_option(pack, need, unit)
+        if option is None:
+            continue
+        options.append(
+            replace(
+                option,
+                cost_delta=option.cost - cover.cost,
+                leftover_delta=option.leftover - (cover.leftover_qty
+                                                  if unit == "unit" else cover.leftover_g),
+                chosen=len(chosen_skus) == 1 and pack.sku in chosen_skus,
+                pinned=pinned is not None and pack.sku == pinned.sku,
+            )
+        )
+
+    best = _best_value(options, ingredient, chosen_unit_cost, chosen_capacity or 0.0)
+    options = [
+        replace(option, better_value=best is not None and option.pack.sku == best.pack.sku)
+        for option in options
+    ]
+    options.sort(key=lambda o: o.unit_cost)
+    return tuple(options)
+
+
+def _best_value(
+    options: Sequence[PackOption],
+    ingredient: Ingredient,
+    chosen_unit_cost: float,
+    chosen_capacity: float,
+) -> PackOption | None:
+    """The size worth recommending over the one the planner picked, if any.
+
+    Every condition is a way of asking the same question: will the rest of it
+    get eaten? A cheaper £/kg on something that spoils, or that this library
+    barely cooks, is not a saving - it is a slower way of throwing money out.
+    """
+    if not chosen_unit_cost or ingredient.recipe_pct < BULK_MIN_RECIPE_PCT:
+        return None
+    candidates = [
+        option
+        for option in options
+        if not option.chosen
+        and option.keeps
+        and option.capacity > chosen_capacity
+        and option.unit_cost <= chosen_unit_cost * (1 - BULK_MIN_UNIT_SAVING)
+        and option.cost_delta <= BULK_MAX_EXTRA_GBP
+    ]
+    return min(candidates, key=lambda o: o.unit_cost) if candidates else None
+
+
 @dataclass(frozen=True, slots=True)
 class Selection:
     """A recipe in the week's plan, cooked for ``servings`` people."""
@@ -375,6 +523,7 @@ class BasketLine:
     unit_kind: str = "mass"
     need_qty: float | None = None
     quantity_unit: str = "g"
+    options: tuple[PackOption, ...] = ()
 
     @property
     def cost(self) -> float:
@@ -388,6 +537,15 @@ class BasketLine:
     def substitution(self) -> Substitution | None:
         """Set when something this line wanted was sold out - see :class:`Substitution`."""
         return self.cover.substitution if self.cover else None
+
+    @property
+    def upsize(self) -> PackOption | None:
+        """A bigger pack worth offering: cheaper per kg, and it will keep."""
+        return next((option for option in self.options if option.better_value), None)
+
+    @property
+    def pinned_option(self) -> PackOption | None:
+        return next((option for option in self.options if option.pinned), None)
 
     @property
     def trace(self) -> bool:
@@ -625,6 +783,14 @@ def build_basket(
         )
         if cover is None:
             line.note = "no pack covers this demand"
+        else:
+            # Only ever built here, never in ``score_basket``: a ranking compares
+            # totals and would pay for a pack-size menu it never reads.
+            line.options = pack_options(
+                ingredient,
+                cover,
+                line.need_qty if line.quantity_unit == "unit" else line.need_g,
+            )
         basket.lines.append(line)
 
     basket.lines.sort(key=lambda line: line.cost, reverse=True)

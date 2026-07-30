@@ -223,6 +223,36 @@ def test_basket_serializes_totals_and_all_buckets(planner_client):
     assert rice["contributions"][0]["grams"] == 300
 
 
+def test_a_pack_preference_is_recorded_against_the_mapping(planner_client):
+    client, _ = planner_client
+    response = client.put(
+        "/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": "rice"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ingredient_key": KEY_RICE, "sku": "rice"}
+    # And clearing it hands the size decision back to the planner.
+    cleared = client.put(
+        "/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": None}
+    )
+    assert cleared.json()["sku"] is None
+
+
+def test_a_pack_preference_has_to_name_an_approved_product(planner_client):
+    """Otherwise the basket pins itself to something the mapping never allowed."""
+    client, _ = planner_client
+
+    rejected = client.put(
+        "/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": "beans"}
+    )
+    missing = client.put(
+        "/api/planner/preferences/pack", json={"ingredient_key": "name:nope", "sku": None}
+    )
+
+    assert rejected.status_code == 400
+    assert missing.status_code == 404
+
+
 def test_basket_portions_scale_from_base_yield(planner_client):
     client, ids = planner_client
     data = client.post(

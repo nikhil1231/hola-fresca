@@ -106,6 +106,23 @@ def load_source_id_index(csv_path: Path | None = None) -> dict[str, str]:
     return index
 
 
+def load_recipe_pct_index(csv_path: Path | None = None) -> dict[str, float]:
+    """Map each ``ingredient_key`` → the share of recipes it appears in.
+
+    How often an ingredient comes back is what decides whether a bulk pack is
+    thrift or waste, and the frequency analysis already knows it.
+    """
+    path = csv_path or (config.DATA_DIR / "ingredient_frequency.csv")
+    index: dict[str, float] = {}
+    with path.open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            try:
+                index[row["ingredient_key"]] = float(row.get("recipe_pct") or 0.0)
+            except ValueError:
+                continue
+    return index
+
+
 def gather_candidates(
     session: Session,
     ingredient_key: str,

@@ -10,6 +10,7 @@ import {
   fetchRecipes,
   flagRecipe,
   revertRecipeEdits,
+  setPackPreference,
   setPersonalRecipeRating,
   setRecipeWishlist,
 } from '../api/client.js'
@@ -73,6 +74,19 @@ export function usePlannerBasket(selections) {
   return useQuery({
     queryKey: ['planner-basket', selections],
     queryFn: () => fetchPlannerBasket(selections),
+  })
+}
+
+// Pinning a pack size changes what the whole week costs - other recipes may
+// share the ingredient - so the basket and the suggestions both go stale.
+export function usePackPreference() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: setPackPreference,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['planner-basket'] })
+      qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
+    },
   })
 }
 

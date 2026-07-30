@@ -229,6 +229,39 @@ class BasketPackChoiceOut(BaseModel):
     external: bool = False
 
 
+class BasketPackOptionOut(BaseModel):
+    """One size this ingredient could be bought in, priced against the current pick."""
+
+    sku: str
+    product_name: str
+    pack_size_raw: str | None = None
+    url: str | None = None
+    count: int
+    cost: float
+    capacity: float
+    leftover: float
+    #: Per kilo (or per unit), which is the only figure that compares sizes.
+    unit_cost: float
+    cost_delta: float
+    leftover_delta: float
+    quantity_unit: str = "g"
+    keeps: bool = False
+    chosen: bool = False
+    pinned: bool = False
+    better_value: bool = False
+
+
+class PackPreferenceIn(BaseModel):
+    ingredient_key: str = Field(min_length=1)
+    #: Null clears the standing choice and hands the size back to the planner.
+    sku: str | None = None
+
+
+class PackPreferenceOut(BaseModel):
+    ingredient_key: str
+    sku: str | None = None
+
+
 class BasketSubstitutionOut(BaseModel):
     """What a sold-out product cost this line, in money and in match quality."""
 
@@ -265,6 +298,7 @@ class BasketLineOut(BaseModel):
     external: bool = False
     note: str | None = None
     substitution: BasketSubstitutionOut | None = None
+    options: list[BasketPackOptionOut] = Field(default_factory=list)
     choices: list[BasketPackChoiceOut] = Field(default_factory=list)
     contributions: list[BasketContributionOut] = Field(default_factory=list)
 

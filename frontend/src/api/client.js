@@ -103,6 +103,12 @@ export function setRecipeWishlist(id, wishlisted) {
   return putJSON(`/api/recipes/${id}/wishlist`, { wishlisted })
 }
 
+// A standing "always buy this size" choice for one ingredient; null hands the
+// size back to the planner.
+export function setPackPreference({ ingredientKey, sku }) {
+  return putJSON('/api/planner/preferences/pack', { ingredient_key: ingredientKey, sku })
+}
+
 // Flags the macros as suspicious and starts a background audit; poll the
 // returned job_id with fetchAuditJob until it is no longer 'running'.
 export async function flagRecipe(id) {

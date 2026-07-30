@@ -22,12 +22,15 @@ from app.api.schemas import (
     BasketLineOut,
     BasketOut,
     BasketPackChoiceOut,
+    BasketPackOptionOut,
     BasketSubstitutionOut,
+    PackPreferenceIn,
+    PackPreferenceOut,
     PlannerSuggestionsOut,
     RecipeSuggestionCard,
     SuggestionsIn,
 )
-from app.db.models import Recipe
+from app.db.models import IngredientMapping, Recipe
 from app.planner.basket import (
     Basket,
     BasketLine,
@@ -35,7 +38,7 @@ from app.planner.basket import (
     build_basket,
 )
 from app.planner.cache import get_index, get_ranking
-from app.planner.index import PlanIndex
+from app.planner.index import RETAILER, PlanIndex
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
 assert SuggestionsIn.model_fields["candidate_portions"].default == 4
@@ -95,6 +98,29 @@ def _stock_checked_at(basket: Basket) -> datetime | None:
     return _utc(min(stamps))
 
 
+def _option_out(option) -> BasketPackOptionOut:
+    # Per kilo rather than per gram: £0.0025/g is a number nobody can shop with.
+    scale = 1.0 if option.quantity_unit == "unit" else 1000.0
+    return BasketPackOptionOut(
+        sku=option.pack.sku,
+        product_name=option.pack.product_name,
+        pack_size_raw=option.pack.pack_size_raw,
+        url=option.pack.url,
+        count=option.count,
+        cost=_round_money(option.cost),
+        capacity=round(option.capacity, 3 if option.quantity_unit == "unit" else 1),
+        leftover=round(option.leftover, 3 if option.quantity_unit == "unit" else 1),
+        unit_cost=_round_money(option.unit_cost * scale),
+        cost_delta=_round_money(option.cost_delta),
+        leftover_delta=round(option.leftover_delta, 3 if option.quantity_unit == "unit" else 1),
+        quantity_unit=option.quantity_unit,
+        keeps=option.keeps,
+        chosen=option.chosen,
+        pinned=option.pinned,
+        better_value=option.better_value,
+    )
+
+
 def _substitution_out(line: BasketLine) -> BasketSubstitutionOut | None:
     substitution = line.substitution
     if substitution is None:
@@ -147,6 +173,7 @@ def _line_out(line: BasketLine) -> BasketLineOut:
         external=line.external,
         note=line.note,
         substitution=_substitution_out(line),
+        options=[_option_out(option) for option in line.options],
         choices=choices,
         contributions=[
             BasketContributionOut(
@@ -204,6 +231,37 @@ def basket(
     index = _load_planner_index(factory, recipe_ids, csv_path)
     selections = [_planner_selection(selection) for selection in body.selections]
     return _basket_out(build_basket(index, selections))
+
+
+@router.put("/preferences/pack", response_model=PackPreferenceOut)
+def set_pack_preference(
+    body: PackPreferenceIn,
+    session: Session = Depends(get_session),
+) -> PackPreferenceOut:
+    """Fix (or release) the pack size an ingredient is always bought in.
+
+    Kept on the mapping rather than on a week, because it is a standing
+    decision - having settled that you buy rice by the kilo, the planner should
+    not put it back to the 500 g bag every Monday.
+    """
+    mapping = session.scalar(
+        select(IngredientMapping).where(
+            IngredientMapping.retailer == RETAILER,
+            IngredientMapping.ingredient_key == body.ingredient_key,
+        )
+    )
+    if mapping is None:
+        raise HTTPException(status_code=404, detail=f"Unknown ingredient: {body.ingredient_key}")
+    if body.sku is not None and not any(
+        product.sku == body.sku and product.accepted for product in mapping.products
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{body.sku} is not an approved product for {body.ingredient_key}",
+        )
+    mapping.preferred_sku = body.sku
+    session.commit()
+    return PackPreferenceOut(ingredient_key=body.ingredient_key, sku=body.sku)
 
 
 def _candidate_ids(

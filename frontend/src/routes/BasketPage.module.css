@@ -216,9 +216,18 @@
 }
 
 .expansionShellOpen {
-  max-height: 320px;
+  /* Roomier than the pack list alone needs: the size menu sits below it, and a
+     clipped "always buy" button is a control nobody knows exists. */
+  max-height: 560px;
+  overflow-y: auto;
   opacity: 1;
   transform: translateY(0);
+}
+
+.optionBox {
+  border-top: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-default) 14%, transparent);
+  padding: 10px 14px 12px;
 }
 
 .choiceList {
