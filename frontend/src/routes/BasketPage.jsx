@@ -3,6 +3,7 @@ import {
   Alert,
   Badge,
   Box,
+  Checkbox,
   Group,
   Loader,
   Select,
@@ -23,6 +24,7 @@ import {
 } from '@tabler/icons-react'
 
 import RecipeCard from '../components/RecipeCard.jsx'
+import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { usePlannerBasket } from '../hooks/useRecipeQueries.js'
 import {
   formatWeekLabel,
@@ -113,6 +115,8 @@ function LineTable({
   selectedLineKey,
   setActiveLineKey,
   setHoverLineKey,
+  ownedItemKeySet,
+  setItemOwned,
 }) {
   if (!lines.length) return null
 
@@ -127,6 +131,7 @@ function LineTable({
       <Table.ScrollContainer minWidth={720}>
         <Table highlightOnHover verticalSpacing="sm" className={classes.lineTable}>
           <colgroup>
+            <col className={classes.colOwned} />
             <col className={classes.colIngredient} />
             <col className={classes.colNeed} />
             <col className={classes.colPacks} />
@@ -136,6 +141,7 @@ function LineTable({
           </colgroup>
           <Table.Thead>
             <Table.Tr>
+              <Table.Th>Owned</Table.Th>
               <Table.Th>Ingredient</Table.Th>
               <Table.Th>Need</Table.Th>
               <Table.Th>Packs</Table.Th>
@@ -152,6 +158,7 @@ function LineTable({
               const lineRecipeIds = contributionIds(line)
               const highlighted =
                 selectedLineKey === rowKey || (hoverRecipeId && lineRecipeIds.has(hoverRecipeId))
+              const owned = ownedItemKeySet.has(line.key)
 
               return (
                 <Fragment key={rowKey}>
@@ -159,6 +166,7 @@ function LineTable({
                     className={[
                       canExpand ? classes.expandableRow : '',
                       highlighted ? classes.highlightedRow : '',
+                      owned ? classes.ownedRow : '',
                     ]
                       .filter(Boolean)
                       .join(' ')}
@@ -178,6 +186,15 @@ function LineTable({
                       setOpenLineKey(expanded ? null : rowKey)
                     }}
                   >
+                    <Table.Td className={classes.ownedCell}>
+                      <Checkbox
+                        checked={owned}
+                        onChange={(event) => setItemOwned(line.key, event.currentTarget.checked)}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        aria-label={`Mark ${line.name} as already owned`}
+                      />
+                    </Table.Td>
                     <Table.Td>
                       <Group gap={6} wrap="nowrap">
                         {canExpand && (
@@ -214,7 +231,7 @@ function LineTable({
 
                   {canExpand && (
                     <Table.Tr className={classes.expansionRow} aria-hidden={!expanded}>
-                      <Table.Td colSpan={6} className={classes.expansionCell}>
+                      <Table.Td colSpan={7} className={classes.expansionCell}>
                         <div
                           className={`${classes.expansionShell} ${
                             expanded ? classes.expansionShellOpen : ''
@@ -223,6 +240,7 @@ function LineTable({
                           <div className={classes.choiceList}>
                             {line.choices.map((choice) => (
                               <div key={`${rowKey}:${choice.sku}`} className={classes.choiceItem}>
+                                <div />
                                 <div className={classes.choiceProduct}>
                                   {choice.url ? (
                                     <a
@@ -292,6 +310,7 @@ export default function BasketPage() {
   const [activeLineKey, setActiveLineKey] = useState(null)
   const [hoverLineKey, setHoverLineKey] = useState(null)
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
+  const { ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
   const recipesScrollRef = useRef(null)
   const recipeRefs = useRef(new Map())
 
@@ -310,15 +329,24 @@ export default function BasketPage() {
     () => data?.lines?.filter((line) => line.external) ?? [],
     [data?.lines],
   )
-  const recipePrices = useMemo(
-    () => recipePortionPrices(data?.lines ?? [], entries),
-    [data?.lines, entries],
-  )
   const totalPortions = useMemo(
     () => entries.reduce((total, entry) => total + entry.portions, 0),
     [entries],
   )
-  const basketPortionPrice = totalPortions > 0 ? (data?.cost ?? 0) / totalPortions : 0
+  const buyLines = useMemo(
+    () => (data?.lines ?? []).filter((line) => !ownedItemKeySet.has(line.key)),
+    [data?.lines, ownedItemKeySet],
+  )
+  const orderCost = useMemo(
+    () => buyLines.reduce((total, line) => total + (line.cost ?? 0), 0),
+    [buyLines],
+  )
+  const orderWaste = useMemo(
+    () => buyLines.reduce((total, line) => total + (line.waste_gbp ?? 0), 0),
+    [buyLines],
+  )
+  const recipePrices = useMemo(() => recipePortionPrices(buyLines, entries), [buyLines, entries])
+  const basketPortionPrice = totalPortions > 0 ? orderCost / totalPortions : 0
   const selectedLineKey = hoverLineKey ?? activeLineKey
   const allLines = useMemo(
     () => [
@@ -456,9 +484,9 @@ export default function BasketPage() {
           ) : (
             <>
               <Box className={classes.statsGrid}>
-                <Stat label="Spend" value={formatMoney(data.cost)} tone="spend" />
-                <Stat label="Waste" value={formatMoney(data.waste_gbp)} />
-                <Stat label="Score" value={formatMoney(data.score)} />
+                <Stat label="Spend" value={formatMoney(orderCost)} tone="spend" />
+                <Stat label="Waste" value={formatMoney(orderWaste)} />
+                <Stat label="Score" value={formatMoney(orderCost + orderWaste)} />
                 <Stat label="Portion price" value={formatMoney(basketPortionPrice)} />
               </Box>
 
@@ -507,6 +535,8 @@ export default function BasketPage() {
                       selectedLineKey={selectedLineKey}
                       setActiveLineKey={setActiveLineKey}
                       setHoverLineKey={setHoverLineKey}
+                      ownedItemKeySet={ownedItemKeySet}
+                      setItemOwned={setItemOwned}
                     />
                     <LineTable
                       title="Source elsewhere"
@@ -519,6 +549,8 @@ export default function BasketPage() {
                       selectedLineKey={selectedLineKey}
                       setActiveLineKey={setActiveLineKey}
                       setHoverLineKey={setHoverLineKey}
+                      ownedItemKeySet={ownedItemKeySet}
+                      setItemOwned={setItemOwned}
                     />
                     <Box className={classes.bucketGrid}>
                       <NameList title="Pantry staples" names={data.staples} muted />

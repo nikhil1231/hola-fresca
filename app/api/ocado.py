@@ -75,7 +75,7 @@ def push(
     index: PlanIndex = _load_planner_index(factory, recipe_ids, csv_path)
     basket = build_basket(index, [_planner_selection(selection) for selection in body.selections])
     try:
-        result = push_basket(client, basket)
+        result = push_basket(client, basket, owned_item_keys=set(body.owned_item_keys))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado basket push failed: {exc}") from exc
     return OcadoPushResultOut(
@@ -117,4 +117,3 @@ def reserve(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado slot reserve failed: {exc}") from exc
     return OcadoReserveOut(raw=payload)
-

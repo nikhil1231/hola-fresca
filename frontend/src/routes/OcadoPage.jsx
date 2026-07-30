@@ -24,6 +24,7 @@ import {
 } from '@tabler/icons-react'
 
 import { usePlannerBasket } from '../hooks/useRecipeQueries.js'
+import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { formatWeekLabel, toPlannerSelections, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 import {
   useOcadoBasket,
@@ -114,6 +115,7 @@ function PushSummary({ result }) {
 
 export default function OcadoPage() {
   const { upcomingWeekStart, getWeekRecipes } = useWeeklyPlan()
+  const { ownedItemKeys, ownedItemKeySet } = useOwnedBasketItems(upcomingWeekStart)
   const entries = getWeekRecipes(upcomingWeekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
   const planner = usePlannerBasket(selections)
@@ -129,7 +131,15 @@ export default function OcadoPage() {
   const reserve = useOcadoReserve()
   const countdown = useCountdown(extractExpiry(reservation?.raw))
   const groupedSlots = useMemo(() => groupSlots(slots.data?.items ?? []), [slots.data?.items])
-  const onlineLines = planner.data?.lines?.filter((line) => !line.external) ?? []
+  const onlineLines =
+    planner.data?.lines?.filter((line) => !line.external && !ownedItemKeySet.has(line.key)) ?? []
+  const orderCost = useMemo(
+    () =>
+      (planner.data?.lines ?? [])
+        .filter((line) => !ownedItemKeySet.has(line.key))
+        .reduce((total, line) => total + (line.cost ?? 0), 0),
+    [planner.data?.lines, ownedItemKeySet],
+  )
 
   return (
     <Stack gap="lg" className={classes.pageStack}>
@@ -202,7 +212,7 @@ export default function OcadoPage() {
                     </div>
                     <div className={classes.stat}>
                       <Text size="xs" c="dimmed" fw={700} tt="uppercase">Spend</Text>
-                      <Text fw={800}>{formatMoney(planner.data?.cost)}</Text>
+                      <Text fw={800}>{formatMoney(orderCost)}</Text>
                     </div>
                     <div className={classes.stat}>
                       <Text size="xs" c="dimmed" fw={700} tt="uppercase">Unmapped</Text>
@@ -213,7 +223,7 @@ export default function OcadoPage() {
                     leftSection={<IconBasketUp size={16} />}
                     disabled={!selections.length || status.data?.status !== 'ready'}
                     loading={push.isPending}
-                    onClick={() => push.mutate(selections)}
+                    onClick={() => push.mutate({ selections, ownedItemKeys })}
                   >
                     Push basket to Ocado
                   </Button>
@@ -346,4 +356,3 @@ export default function OcadoPage() {
     </Stack>
   )
 }
-

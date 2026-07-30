@@ -138,8 +138,12 @@
   background: var(--mantine-color-body);
 }
 
+.colOwned {
+  width: 7%;
+}
+
 .colIngredient {
-  width: 42%;
+  width: 35%;
 }
 
 .colNeed {
@@ -172,6 +176,17 @@
 .highlightedRow {
   background: color-mix(in srgb, var(--mantine-color-fresh-1) 55%, transparent);
   box-shadow: inset 3px 0 0 var(--mantine-color-fresh-6);
+}
+
+.ownedCell {
+  text-decoration: none;
+}
+
+.ownedRow td:not(.ownedCell) {
+  color: var(--mantine-color-dimmed);
+  opacity: 0.72;
+  text-decoration-line: line-through;
+  text-decoration-thickness: 1.5px;
 }
 
 .chevron {
@@ -215,7 +230,8 @@
 .choiceItem {
   display: grid;
   grid-template-columns:
-    minmax(0, 42%)
+    minmax(0, 7%)
+    minmax(0, 35%)
     minmax(0, 10%)
     minmax(0, 20%)
     minmax(0, 10%)

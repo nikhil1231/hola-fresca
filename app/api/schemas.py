@@ -211,6 +211,7 @@ class PlannerFiltersIn(BaseModel):
 
 class BasketIn(BaseModel):
     selections: list[PlannerSelectionIn] = Field(default_factory=list)
+    owned_item_keys: list[str] = Field(default_factory=list)
 
 
 class BasketPackChoiceOut(BaseModel):

@@ -37,8 +37,8 @@ export function submitOcadoOtp(code) {
   return postJSON('/api/ocado/otp', { code })
 }
 
-export function pushOcadoBasket(selections) {
-  return postJSON('/api/ocado/basket/push', { selections })
+export function pushOcadoBasket({ selections, ownedItemKeys = [] }) {
+  return postJSON('/api/ocado/basket/push', { selections, owned_item_keys: ownedItemKeys })
 }
 
 export function fetchOcadoBasket() {
@@ -60,4 +60,3 @@ export function reserveOcadoSlot({ slotId, ddid, region }) {
     region: region || null,
   })
 }
-

@@ -23,9 +23,14 @@ class PushResult:
     deltas: dict[str, int] = field(default_factory=dict)
 
 
-def push_basket(client: OcadoClient, basket: Basket) -> PushResult:
+def push_basket(
+    client: OcadoClient,
+    basket: Basket,
+    *,
+    owned_item_keys: set[str] | None = None,
+) -> PushResult:
     current = cart_quantities(client.cart_view())
-    targets, names, unmapped = basket_targets(basket)
+    targets, names, unmapped = basket_targets(basket, owned_item_keys=owned_item_keys)
     deltas = {
         sku: targets.get(sku, 0) - current.get(sku, 0)
         for sku in sorted(set(current) | set(targets))
@@ -47,11 +52,18 @@ def push_basket(client: OcadoClient, basket: Basket) -> PushResult:
     return PushResult(applied=applied, dropped=dropped, unmapped=unmapped, deltas=deltas)
 
 
-def basket_targets(basket: Basket) -> tuple[dict[str, int], dict[str, str], list[str]]:
+def basket_targets(
+    basket: Basket,
+    *,
+    owned_item_keys: set[str] | None = None,
+) -> tuple[dict[str, int], dict[str, str], list[str]]:
     targets: dict[str, int] = {}
     names: dict[str, str] = {}
     unmapped = list(basket.unmapped) + list(basket.unpriceable)
+    owned_item_keys = owned_item_keys or set()
     for line in basket.lines:
+        if line.key in owned_item_keys:
+            continue
         if line.external:
             continue
         if line.cover is None:
@@ -110,4 +122,3 @@ def _quantity(item: dict[str, Any]) -> int | None:
         except (TypeError, ValueError):
             pass
     return None
-

@@ -78,3 +78,31 @@ def test_push_basket_uses_deltas_and_detects_dropped_products():
     assert [(line.sku, line.quantity) for line in result.dropped] == [("sku-b", 1)]
     assert result.unmapped == ["mystery"]
 
+
+def test_push_basket_skips_owned_items():
+    basket = Basket(
+        lines=[
+            BasketLine(
+                key="potato",
+                name="Potatoes",
+                need_g=100,
+                cover=_cover(PackChoice(_pack("sku-a", "Potatoes"), 2)),
+            ),
+            BasketLine(
+                key="onion",
+                name="Onion",
+                need_g=100,
+                cover=_cover(PackChoice(_pack("sku-b", "Onion"), 1)),
+            ),
+        ],
+    )
+    client = FakeClient(
+        {"items": [{"sku": "sku-b", "quantity": 1}]},
+        {"items": [{"sku": "sku-a", "quantity": 2}]},
+    )
+
+    result = push_basket(client, basket, owned_item_keys={"onion"})
+
+    assert client.deltas == {"sku-a": 2, "sku-b": -1}
+    assert [(line.sku, line.quantity) for line in result.applied] == [("sku-a", 2)]
+    assert result.dropped == []
