@@ -8,9 +8,8 @@ import {
   Loader,
   PasswordInput,
   Stack,
-  Table,
+  Tabs,
   Text,
-  TextInput,
   Title,
 } from '@mantine/core'
 import {
@@ -108,13 +107,87 @@ function statusLabel(status) {
   return 'logged out'
 }
 
-function groupSlots(slots) {
-  return slots.reduce((groups, slot) => {
+function parseSlotDate(value) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function slotSortValue(slot) {
+  return parseSlotDate(slot.start)?.getTime() ?? Number.MAX_SAFE_INTEGER
+}
+
+function groupSlotsByDay(slots) {
+  const sortedSlots = [...slots].sort((a, b) => slotSortValue(a) - slotSortValue(b))
+  const groups = sortedSlots.reduce((acc, slot) => {
     const day = slot.day ?? 'Later'
-    groups[day] = groups[day] ?? []
-    groups[day].push(slot)
-    return groups
-  }, {})
+    acc.set(day, [...(acc.get(day) ?? []), slot])
+    return acc
+  }, new Map())
+  return [...groups.entries()].map(([day, daySlots]) => ({
+    day,
+    label: formatDay(day),
+    slots: daySlots,
+  }))
+}
+
+function SlotTabs({ days, reserve, onReserved }) {
+  const [activeDay, setActiveDay] = useState(null)
+
+  useEffect(() => {
+    if (!days.length) {
+      setActiveDay(null)
+      return
+    }
+    setActiveDay((current) => (current && days.some((day) => day.day === current) ? current : days[0].day))
+  }, [days])
+
+  if (!days.length) {
+    return null
+  }
+
+  return (
+    <Tabs value={activeDay} onChange={setActiveDay} classNames={{ list: classes.slotTabsList }}>
+      <Tabs.List>
+        {days.map((day) => (
+          <Tabs.Tab key={day.day} value={day.day}>
+            <Stack gap={0} align="center">
+              <Text span fw={700} size="sm">{day.label}</Text>
+              <Text span size="xs" c="dimmed">{day.slots.length} slots</Text>
+            </Stack>
+          </Tabs.Tab>
+        ))}
+      </Tabs.List>
+
+      {days.map((day) => (
+        <Tabs.Panel key={day.day} value={day.day} pt="sm">
+          <div className={classes.slotGrid}>
+            {day.slots.map((slot) => (
+              <Button
+                key={slot.slot_id}
+                className={classes.slotButton}
+                variant={slot.available ? 'light' : 'default'}
+                color={slot.eco ? 'green' : 'blue'}
+                disabled={!slot.available}
+                loading={reserve.isPending && reserve.variables?.slotId === slot.slot_id}
+                onClick={() =>
+                  reserve.mutate(
+                    { slotId: slot.slot_id },
+                    { onSuccess: onReserved },
+                  )
+                }
+              >
+                <Stack gap={0} align="center" className={classes.slotContent}>
+                  <Text fw={800} size="sm" lh={1.1}>{formatSlotWindow(slot)}</Text>
+                  <Text size="xs" lh={1.1}>{formatMoney(slot.price)}{slot.eco ? ' eco' : ''}</Text>
+                </Stack>
+              </Button>
+            ))}
+          </div>
+        </Tabs.Panel>
+      ))}
+    </Tabs>
+  )
 }
 
 function extractExpiry(raw) {
@@ -185,14 +258,13 @@ export default function OcadoPage() {
   const otp = useOcadoOtp()
   const push = useOcadoPush()
   const basket = useOcadoBasket({ enabled: status.data?.status === 'ready' })
-  const [slotParams, setSlotParams] = useState({ ddid: '', region: '' })
   const [otpCode, setOtpCode] = useState('')
   const [reservation, setReservation] = useState(null)
-  const slots = useOcadoSlots(slotParams, { enabled: status.data?.status === 'ready' })
+  const slots = useOcadoSlots(undefined, { enabled: status.data?.status === 'ready' })
   const reserve = useOcadoReserve()
   const countdown = useCountdown(extractExpiry(reservation?.raw))
-  const groupedSlots = useMemo(() => groupSlots(slots.data?.items ?? []), [slots.data?.items])
   const cartSummary = useMemo(() => summariseCart(basket.data?.raw), [basket.data?.raw])
+  const slotDays = useMemo(() => groupSlotsByDay(slots.data?.items ?? []), [slots.data?.items])
   const onlineLines =
     planner.data?.lines?.filter((line) => !line.external && !ownedItemKeySet.has(line.key)) ?? []
   const orderCost = useMemo(
@@ -429,22 +501,6 @@ export default function OcadoPage() {
                   Refresh
                 </Button>
               </Group>
-              <Group grow>
-                <TextInput
-                  label="Delivery address id"
-                  value={slotParams.ddid}
-                  onChange={(event) =>
-                    setSlotParams((current) => ({ ...current, ddid: event.currentTarget.value }))
-                  }
-                />
-                <TextInput
-                  label="Region"
-                  value={slotParams.region}
-                  onChange={(event) =>
-                    setSlotParams((current) => ({ ...current, region: event.currentTarget.value }))
-                  }
-                />
-              </Group>
               {slots.error && (
                 <Alert color="red" icon={<IconAlertCircle size={18} />}>
                   {slots.error.message}
@@ -460,34 +516,7 @@ export default function OcadoPage() {
                   Slot reserved. Confirm the order on Ocado before the hold expires.
                 </Alert>
               )}
-              {Object.entries(groupedSlots).map(([day, daySlots]) => (
-                <Stack key={day} gap="sm">
-                  <Title order={4} className={classes.dayHeading}>{formatDay(day)}</Title>
-                  <div className={classes.slotGrid}>
-                    {daySlots.map((slot) => (
-                      <Button
-                        key={slot.slot_id}
-                        className={classes.slotButton}
-                        variant={slot.available ? 'light' : 'default'}
-                        color={slot.eco ? 'green' : 'blue'}
-                        disabled={!slot.available}
-                        loading={reserve.isPending && reserve.variables?.slotId === slot.slot_id}
-                        onClick={() =>
-                          reserve.mutate(
-                            { slotId: slot.slot_id, ...slotParams },
-                            { onSuccess: setReservation },
-                          )
-                        }
-                      >
-                        <Stack gap={2} align="center">
-                          <Text fw={700}>{formatSlotWindow(slot)}</Text>
-                          <Text size="xs">{formatMoney(slot.price)}{slot.eco ? ' / eco' : ''}</Text>
-                        </Stack>
-                      </Button>
-                    ))}
-                  </div>
-                </Stack>
-              ))}
+              <SlotTabs days={slotDays} reserve={reserve} onReserved={setReservation} />
               {!slots.isLoading && !slots.error && (slots.data?.items ?? []).length === 0 && (
                 <Text c="dimmed">No slots loaded yet.</Text>
               )}
