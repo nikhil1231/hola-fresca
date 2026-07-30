@@ -43,6 +43,64 @@ function formatMoney(value) {
   return value == null ? '-' : money.format(value)
 }
 
+// Slot times arrive as ISO strings carrying the delivery region's own UTC offset
+// ("2026-07-31T16:00:00+01:00"), so the wall-clock time is already correct in
+// the string. Reading it out directly beats parsing to a Date, which would
+// re-render it in whatever timezone the browser happens to be in.
+function formatTime(value) {
+  if (!value) return null
+  const match = /T(\d{2}:\d{2})/.exec(value)
+  return match ? match[1] : value
+}
+
+function formatSlotWindow(slot) {
+  const start = formatTime(slot.start)
+  if (!start) return 'Slot'
+  const end = formatTime(slot.end)
+  return end ? `${start} – ${end}` : start
+}
+
+// cart-view nests its lines two levels down, under the checkout group that owns
+// them - the same path app/ocado/sync.py reads.
+function summariseCart(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const items = (raw.checkoutGroups?.assignedCheckoutGroups ?? []).flatMap((group) =>
+    (group.itemGroups ?? []).flatMap((itemGroup) => itemGroup.items ?? []),
+  )
+  const checkout = raw.activeCheckoutGroup ?? {}
+  const spend = raw.totals?.itemPriceAfterPromos
+  return {
+    lines: items.length,
+    units: items.reduce((total, item) => total + (item.quantity ?? 0), 0),
+    spend: spend ? Number(spend.amount) : null,
+    threshold: checkout.minimumCheckoutThreshold
+      ? Number(checkout.minimumCheckoutThreshold.amount)
+      : null,
+    canCheckout: checkout.canCheckout ?? false,
+    restrictions: checkout.checkoutRestrictions ?? [],
+  }
+}
+
+const RESTRICTION_LABELS = {
+  NOT_REACHED_THRESHOLD: 'below minimum',
+  MISSING_SLOT: 'no slot booked',
+}
+
+function restrictionLabel(code) {
+  return RESTRICTION_LABELS[code] ?? code.toLowerCase().replace(/_/g, ' ')
+}
+
+function formatDay(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? '')) return day
+  const parsed = new Date(`${day}T12:00:00`)
+  if (Number.isNaN(parsed.getTime())) return day
+  return parsed.toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })
+}
+
 function statusLabel(status) {
   if (status === 'ready') return 'ready'
   if (status === 'awaiting_otp') return 'awaiting OTP'
@@ -131,6 +189,7 @@ export default function OcadoPage() {
   const reserve = useOcadoReserve()
   const countdown = useCountdown(extractExpiry(reservation?.raw))
   const groupedSlots = useMemo(() => groupSlots(slots.data?.items ?? []), [slots.data?.items])
+  const cartSummary = useMemo(() => summariseCart(basket.data?.raw), [basket.data?.raw])
   const onlineLines =
     planner.data?.lines?.filter((line) => !line.external && !ownedItemKeySet.has(line.key)) ?? []
   const orderCost = useMemo(
@@ -258,8 +317,46 @@ export default function OcadoPage() {
                 {basket.error.message}
               </Alert>
             )}
-            <Text size="sm" c="dimmed" mt="sm">
-              Current Ocado cart data is available after login. The final order still happens on Ocado.
+            {cartSummary ? (
+              <Stack gap="sm" mt="sm">
+                <Group gap="lg">
+                  <div>
+                    <Text size="xs" c="dimmed" tt="uppercase">Lines</Text>
+                    <Text fw={700}>{cartSummary.lines}</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed" tt="uppercase">Items</Text>
+                    <Text fw={700}>{cartSummary.units}</Text>
+                  </div>
+                  <div>
+                    <Text size="xs" c="dimmed" tt="uppercase">Spend</Text>
+                    <Text fw={700}>{formatMoney(cartSummary.spend)}</Text>
+                  </div>
+                  {cartSummary.threshold != null && (
+                    <div>
+                      <Text size="xs" c="dimmed" tt="uppercase">Minimum</Text>
+                      <Text fw={700}>{formatMoney(cartSummary.threshold)}</Text>
+                    </div>
+                  )}
+                </Group>
+                <Group gap="xs">
+                  <Badge color={cartSummary.canCheckout ? 'teal' : 'gray'} variant="light">
+                    {cartSummary.canCheckout ? 'ready to check out' : 'not ready'}
+                  </Badge>
+                  {cartSummary.restrictions.map((code) => (
+                    <Badge key={code} color="yellow" variant="light">
+                      {restrictionLabel(code)}
+                    </Badge>
+                  ))}
+                </Group>
+              </Stack>
+            ) : (
+              <Text size="sm" c="dimmed" mt="sm">
+                Current Ocado cart data is available after login.
+              </Text>
+            )}
+            <Text size="xs" c="dimmed" mt="sm">
+              The final order still happens on Ocado.
             </Text>
           </Box>
 
@@ -320,7 +417,7 @@ export default function OcadoPage() {
               )}
               {Object.entries(groupedSlots).map(([day, daySlots]) => (
                 <Stack key={day} gap="sm">
-                  <Title order={4} className={classes.dayHeading}>{day}</Title>
+                  <Title order={4} className={classes.dayHeading}>{formatDay(day)}</Title>
                   <div className={classes.slotGrid}>
                     {daySlots.map((slot) => (
                       <Button
@@ -338,7 +435,7 @@ export default function OcadoPage() {
                         }
                       >
                         <Stack gap={2} align="center">
-                          <Text fw={700}>{slot.start ?? 'Slot'} - {slot.end ?? ''}</Text>
+                          <Text fw={700}>{formatSlotWindow(slot)}</Text>
                           <Text size="xs">{formatMoney(slot.price)}{slot.eco ? ' / eco' : ''}</Text>
                         </Stack>
                       </Button>
