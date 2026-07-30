@@ -1,6 +1,7 @@
 """Ocado basket and slot API."""
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,7 +23,7 @@ from app.api.schemas import (
 )
 from app.ocado.auth import AUTH
 from app.ocado.client import OcadoClient
-from app.ocado.session import OcadoSession
+from app.ocado.session import get_shared_session
 from app.ocado.sync import push_basket
 from app.planner.basket import build_basket
 from app.planner.index import PlanIndex
@@ -31,7 +32,7 @@ router = APIRouter(prefix="/api/ocado", tags=["ocado"])
 
 
 def get_ocado_client() -> OcadoClient:
-    return OcadoClient()
+    return OcadoClient(get_shared_session())
 
 
 @router.get("/status", response_model=OcadoLoginOut)
@@ -41,13 +42,13 @@ def status() -> OcadoLoginOut:
 
 @router.post("/login", response_model=OcadoLoginOut)
 def login() -> OcadoLoginOut:
-    session = OcadoSession()
+    # Deliberately not closed: when this returns AWAITING_OTP the ladder keeps a
+    # reference to this session for the /otp call that follows.
+    session = get_shared_session()
     try:
         state = AUTH.ensure_authenticated(session)
     except Exception as exc:  # noqa: BLE001 - browser/login failures surface as bad gateway
         raise HTTPException(status_code=502, detail=f"Ocado login failed: {exc}") from exc
-    finally:
-        session.close()
     return OcadoLoginOut(status=state)
 
 
@@ -78,9 +79,10 @@ def push(
         result = push_basket(client, basket, owned_item_keys=set(body.owned_item_keys))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado basket push failed: {exc}") from exc
+    # asdict, not vars: these dataclasses use slots and so have no __dict__.
     return OcadoPushResultOut(
-        applied=[PushLineOut(**vars(line)) for line in result.applied],
-        dropped=[PushLineOut(**vars(line)) for line in result.dropped],
+        applied=[PushLineOut(**asdict(line)) for line in result.applied],
+        dropped=[PushLineOut(**asdict(line)) for line in result.dropped],
         unmapped=result.unmapped,
         deltas=result.deltas,
     )
@@ -104,7 +106,7 @@ def slots(
         items = client.slots(ddid=ddid, region=region)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado slot fetch failed: {exc}") from exc
-    return OcadoSlotsOut(items=[OcadoSlotOut(**vars(slot)) for slot in items])
+    return OcadoSlotsOut(items=[OcadoSlotOut(**asdict(slot)) for slot in items])
 
 
 @router.post("/slots/reserve", response_model=OcadoReserveOut)

@@ -1,0 +1,105 @@
+{
+ "basketUpdateResult": {
+  "checkout": {
+   "basketAboveThreshold": false
+  },
+  "itemGroups": [
+   {
+    "items": [
+     {
+      "basketLines": [
+       {
+        "appliedPromoIds": [
+         "4de152fc-ac86-4d71-a63c-2783a1731d53"
+        ]
+       },
+       {
+        "appliedPromoIds": [
+         "4de152fc-ac86-4d71-a63c-2783a1731d53"
+        ]
+       },
+       {
+        "appliedPromoIds": [
+         "4de152fc-ac86-4d71-a63c-2783a1731d53"
+        ]
+       }
+      ],
+      "finalPrice": {
+       "currency": "GBP",
+       "amount": "0.99"
+      },
+      "lastModified": "2026-07-29T11:08:51.121708158Z",
+      "maxQuantityReached": false,
+      "price": {
+       "currency": "GBP",
+       "amount": "0.99"
+      },
+      "productId": "9f24fc1d-281f-4c16-b7a0-94004918a720",
+      "promoVersionId": "1785322610915",
+      "quantity": 3,
+      "itemType": "BasketItem",
+      "productPrices": {
+       "regularPrice": {
+        "currency": "GBP",
+        "amount": "0.99"
+       },
+       "finalPrice": {
+        "currency": "GBP",
+        "amount": "0.99"
+       }
+      },
+      "totalPrices": {
+       "regularPrice": {
+        "currency": "GBP",
+        "amount": "2.97"
+       },
+       "finalPrice": {
+        "currency": "GBP",
+        "amount": "2.97"
+       },
+       "finalUnitPrice": {
+        "currency": "GBX",
+        "amount": "99.0"
+       }
+      }
+     }
+    ]
+   }
+  ],
+  "lastModified": "2026-07-29T11:04:35.751Z",
+  "totals": {
+   "display": {
+    "itemPriceAfterPromos": {
+     "currency": "GBP",
+     "amount": "2.97"
+    },
+    "taxation": "TAX_INCLUDED"
+   },
+   "itemPriceAfterPromos": {
+    "currency": "GBP",
+    "amount": "2.97"
+   },
+   "itemPriceAfterPromosDifference": {
+    "currency": "GBP",
+    "amount": "0.99"
+   },
+   "itemsRetailPrice": {
+    "currency": "GBP",
+    "amount": "2.97"
+   },
+   "minThreshold": {
+    "currency": "GBP",
+    "amount": "40.00"
+   },
+   "savingsPrice": {
+    "currency": "GBP",
+    "amount": "0.00"
+   },
+   "taxation": "TAX_INCLUDED"
+  }
+ },
+ "limitedItems": [],
+ "limitedPromotionIds": [],
+ "pricingNotifications": [],
+ "unavailableData": []
+}

@@ -1,0 +1,38 @@
+{
+ "slot": {
+  "slotId": "d7a708f4-6bf9-4f03-865d-7d32c40a8765",
+  "slotWindow": {
+   "startTime": "2026-08-04T08:30:00Z",
+   "endTime": "2026-08-04T09:30:00Z"
+  },
+  "type": "STANDARD",
+  "expiryTime": "2026-07-29T12:15:08Z",
+  "latestEditableTime": "2026-08-04T08:30:00Z",
+  "guaranteedEditableDateTime": "2026-08-03T16:25:00Z",
+  "address": {
+   "addressId": "98292b10-b5d8-45b6-b019-e3bd6e9e4889",
+   "nickname": "Home",
+   "notes": "",
+   "address": "1 Example Street, London, SW1A 1AA, United Kingdom",
+   "primary": true,
+   "latitude": "51.429226",
+   "longitude": "-0.0853365",
+   "regionId": "9138094d-f307-46aa-a62d-86c8bdaeb4b9"
+  },
+  "deliveryMethod": "HOME_DELIVERY",
+  "timeZoneId": "Europe/London",
+  "carrierId": "e2a40b24-d716-4ec5-9c4a-9ba199fcb8ed"
+ },
+ "minimumCheckoutThresholdData": {
+  "minimumCheckoutThreshold": {
+   "amount": "40.00",
+   "currency": "GBP"
+  },
+  "originalMinimumCheckoutThreshold": {
+   "amount": "40.00",
+   "currency": "GBP"
+  },
+  "minimumCheckoutThresholdChanged": false,
+  "taxation": "TAX_INCLUDED"
+ }
+}

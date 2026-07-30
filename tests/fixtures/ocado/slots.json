@@ -1,0 +1,936 @@
+{
+ "timeZoneId": "Europe/London",
+ "displaySlotPriceConfiguration": "ENVIRONMENT_DEPENDANT",
+ "deliveryPriceModificationLevels": {},
+ "minimumOrderValue": {
+  "currency": "GBP",
+  "amount": "40.00"
+ },
+ "checkoutGroupsChanged": false,
+ "carriers": [
+  {
+   "carrierDetails": [],
+   "gridSlots": [
+    {
+     "day": "2026-07-29",
+     "slots": [
+      {
+       "slotId": "6d6aafb9-1154-481d-9146-490810b085a4",
+       "slotWindow": {
+        "startTime": "2026-07-29T22:30:00+01:00",
+        "endTime": "2026-07-29T23:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "d831850a-c346-4724-9088-5cdc188f56a1",
+       "slotWindow": {
+        "startTime": "2026-07-29T20:00:00+01:00",
+        "endTime": "2026-07-29T23:59:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "2b5697b6-1918-4b68-970c-57bddd114c7d",
+       "slotWindow": {
+        "startTime": "2026-07-29T22:00:00+01:00",
+        "endTime": "2026-07-29T23:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "664feb73-6c45-44b7-aee9-53e8ec5b2a7c",
+       "slotWindow": {
+        "startTime": "2026-07-29T14:00:00+01:00",
+        "endTime": "2026-07-29T18:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "1bcc63f9-5afe-41f7-9b68-3937bda277b0",
+       "slotWindow": {
+        "startTime": "2026-07-29T20:00:00+01:00",
+        "endTime": "2026-07-29T21:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "8920dc2d-79fd-4add-91dd-19e2fb83905a",
+       "slotWindow": {
+        "startTime": "2026-07-29T13:00:00+01:00",
+        "endTime": "2026-07-29T14:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "bb9f369b-f16a-4605-b240-96f825c941f5",
+       "slotWindow": {
+        "startTime": "2026-07-29T16:30:00+01:00",
+        "endTime": "2026-07-29T17:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "5d93ca12-18b4-420d-986b-9b7b798262f2",
+       "slotWindow": {
+        "startTime": "2026-07-29T21:00:00+01:00",
+        "endTime": "2026-07-29T22:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "83e95fc8-1a9e-4578-80d7-9b89d560b8f6",
+       "slotWindow": {
+        "startTime": "2026-07-29T18:00:00+01:00",
+        "endTime": "2026-07-29T19:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "c3dc046d-5467-4565-8759-9ee0672ba1bd",
+       "slotWindow": {
+        "startTime": "2026-07-29T19:00:00+01:00",
+        "endTime": "2026-07-29T20:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "59791d6b-2d94-49e6-aed3-bf259ea18441",
+       "slotWindow": {
+        "startTime": "2026-07-29T16:00:00+01:00",
+        "endTime": "2026-07-29T17:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "daf90d63-2fd7-4f3f-9e86-a6ff89e83e03",
+       "slotWindow": {
+        "startTime": "2026-07-29T20:30:00+01:00",
+        "endTime": "2026-07-29T21:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "ce29e763-5aec-4ff4-8dc0-740084797259",
+       "slotWindow": {
+        "startTime": "2026-07-29T18:00:00+01:00",
+        "endTime": "2026-07-29T22:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "801d654f-d258-4ce9-bec0-213aa3c53f30",
+       "slotWindow": {
+        "startTime": "2026-07-29T23:00:00+01:00",
+        "endTime": "2026-07-29T23:59:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "e5cb3ccc-8bf0-4ff6-b89a-fb8aff1feb03",
+       "slotWindow": {
+        "startTime": "2026-07-29T17:00:00+01:00",
+        "endTime": "2026-07-29T18:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "6d33ca01-33a4-4257-ad6a-d2b5b311b937",
+       "slotWindow": {
+        "startTime": "2026-07-29T21:30:00+01:00",
+        "endTime": "2026-07-29T22:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "04cccb7c-2329-47e6-ab81-956239e2d25b",
+       "slotWindow": {
+        "startTime": "2026-07-29T12:30:00+01:00",
+        "endTime": "2026-07-29T13:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "b2b69073-6d22-4d7b-a355-9d12a5c8a2f3",
+       "slotWindow": {
+        "startTime": "2026-07-29T18:30:00+01:00",
+        "endTime": "2026-07-29T19:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "64a1aba7-10dc-4bf7-844b-aa10a74cb84b",
+       "slotWindow": {
+        "startTime": "2026-07-29T14:00:00+01:00",
+        "endTime": "2026-07-29T15:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "67ce6185-bf40-49aa-8e3c-54ad9ca581de",
+       "slotWindow": {
+        "startTime": "2026-07-29T17:30:00+01:00",
+        "endTime": "2026-07-29T18:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "947e29f7-08fd-431a-9e9f-c41ad70968b1",
+       "slotWindow": {
+        "startTime": "2026-07-29T16:00:00+01:00",
+        "endTime": "2026-07-29T20:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "04b3f301-30c3-438b-8202-c0da7716c4dd",
+       "slotWindow": {
+        "startTime": "2026-07-29T15:00:00+01:00",
+        "endTime": "2026-07-29T16:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "125dc31e-e5c1-4cbe-881e-1b5fcce2128d",
+       "slotWindow": {
+        "startTime": "2026-07-29T19:30:00+01:00",
+        "endTime": "2026-07-29T20:30:00+01:00"
+       },
+       "attributes": []
+      }
+     ]
+    },
+    {
+     "day": "2026-07-30",
+     "slots": [
+      {
+       "slotId": "aa567716-0fd0-4e1a-bee8-f4c6828aeed0",
+       "slotWindow": {
+        "startTime": "2026-07-30T22:00:00+01:00",
+        "endTime": "2026-07-30T23:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "164008a0-9dfe-4edc-ac3b-62c938465eca",
+       "slotWindow": {
+        "startTime": "2026-07-30T16:00:00+01:00",
+        "endTime": "2026-07-30T20:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "9ce72b55-7ed0-43a8-ac12-067d53f0bf99",
+       "slotWindow": {
+        "startTime": "2026-07-30T16:30:00+01:00",
+        "endTime": "2026-07-30T17:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "b24ae5cd-15f9-44e8-a55c-9f0adfb4698e",
+       "slotWindow": {
+        "startTime": "2026-07-30T12:00:00+01:00",
+        "endTime": "2026-07-30T16:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "e53f2429-8034-45da-999e-8df22e56f48d",
+       "slotWindow": {
+        "startTime": "2026-07-30T18:00:00+01:00",
+        "endTime": "2026-07-30T19:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "d80cb96c-b438-4387-bdf8-b667c8ba4b92",
+       "slotWindow": {
+        "startTime": "2026-07-30T05:30:00+01:00",
+        "endTime": "2026-07-30T06:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "a0545068-271e-41cf-b2e1-49d6a42d5e93",
+       "slotWindow": {
+        "startTime": "2026-07-30T07:00:00+01:00",
+        "endTime": "2026-07-30T08:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "f647eebc-1b9d-47bb-beb2-f40cdaba11bf",
+       "slotWindow": {
+        "startTime": "2026-07-30T19:30:00+01:00",
+        "endTime": "2026-07-30T20:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "60eaf232-8077-45e5-9e2c-83ab31a6ca01",
+       "slotWindow": {
+        "startTime": "2026-07-30T12:30:00+01:00",
+        "endTime": "2026-07-30T13:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "4893fcab-0d91-47ba-b009-98827ce6dd03",
+       "slotWindow": {
+        "startTime": "2026-07-30T17:30:00+01:00",
+        "endTime": "2026-07-30T18:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "a949ec02-9eeb-4fd3-9374-9b4c0abc40ff",
+       "slotWindow": {
+        "startTime": "2026-07-30T06:00:00+01:00",
+        "endTime": "2026-07-30T10:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "90e41099-b4eb-4336-9cf2-017d8ace863b",
+       "slotWindow": {
+        "startTime": "2026-07-30T06:30:00+01:00",
+        "endTime": "2026-07-30T07:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "b2d69730-b71c-426b-b3e6-34a5d04cbba2",
+       "slotWindow": {
+        "startTime": "2026-07-30T12:00:00+01:00",
+        "endTime": "2026-07-30T13:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "8249199a-23ee-4ec6-9d6b-4b888aafbb99",
+       "slotWindow": {
+        "startTime": "2026-07-30T19:00:00+01:00",
+        "endTime": "2026-07-30T20:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "d81c91e4-823a-48d5-b44b-99b3c04079d3",
+       "slotWindow": {
+        "startTime": "2026-07-30T10:00:00+01:00",
+        "endTime": "2026-07-30T14:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "3f97fa49-f0ba-40f6-b0c3-95079427c0fe",
+       "slotWindow": {
+        "startTime": "2026-07-30T15:00:00+01:00",
+        "endTime": "2026-07-30T16:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "f16a8467-6986-484c-820b-c662f87495d3",
+       "slotWindow": {
+        "startTime": "2026-07-30T23:00:00+01:00",
+        "endTime": "2026-07-30T23:59:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "1969204d-ead0-41ce-a841-585a2e37b92d",
+       "slotWindow": {
+        "startTime": "2026-07-30T20:30:00+01:00",
+        "endTime": "2026-07-30T21:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "c84dd8dd-ae25-47d2-8fa5-0da06415cf96",
+       "slotWindow": {
+        "startTime": "2026-07-30T13:00:00+01:00",
+        "endTime": "2026-07-30T14:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "043c3f2c-e966-451d-a7f6-b8966d4881f3",
+       "slotWindow": {
+        "startTime": "2026-07-30T06:00:00+01:00",
+        "endTime": "2026-07-30T07:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "afb9f80a-5338-4387-b1c2-ea7514a56a6c",
+       "slotWindow": {
+        "startTime": "2026-07-30T14:00:00+01:00",
+        "endTime": "2026-07-30T18:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "052cb250-6de5-499b-8705-1b309e72b085",
+       "slotWindow": {
+        "startTime": "2026-07-30T18:30:00+01:00",
+        "endTime": "2026-07-30T19:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "d3d5dcd5-da92-4afc-bcb1-bd014033d1cb",
+       "slotWindow": {
+        "startTime": "2026-07-30T20:00:00+01:00",
+        "endTime": "2026-07-30T21:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "ba4b7161-16eb-4b82-a6ce-9ae11691234b",
+       "slotWindow": {
+        "startTime": "2026-07-30T21:30:00+01:00",
+        "endTime": "2026-07-30T22:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "19292a05-0b7e-4780-b5d9-d3c69c5e719e",
+       "slotWindow": {
+        "startTime": "2026-07-30T18:00:00+01:00",
+        "endTime": "2026-07-30T22:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "c2e5e593-5f87-44e1-bb1b-063b95aedce5",
+       "slotWindow": {
+        "startTime": "2026-07-30T16:00:00+01:00",
+        "endTime": "2026-07-30T17:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "64098078-157d-4dc1-92c7-2268f7db0f29",
+       "slotWindow": {
+        "startTime": "2026-07-30T20:00:00+01:00",
+        "endTime": "2026-07-30T23:59:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "ebc3602a-0df0-4570-a15a-ef68d783dd3b",
+       "slotWindow": {
+        "startTime": "2026-07-30T14:00:00+01:00",
+        "endTime": "2026-07-30T15:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "e625ee19-a419-451b-94b5-fedfd143ebcc",
+       "slotWindow": {
+        "startTime": "2026-07-30T21:00:00+01:00",
+        "endTime": "2026-07-30T22:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "GREEN",
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "3b0d5e75-cd9e-4825-b4f0-2d5cdea84a63",
+       "slotWindow": {
+        "startTime": "2026-07-30T17:00:00+01:00",
+        "endTime": "2026-07-30T18:00:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "2bf22539-3827-4b78-b00c-8142ef3db79f",
+       "slotWindow": {
+        "startTime": "2026-07-30T22:30:00+01:00",
+        "endTime": "2026-07-30T23:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "a0468e46-ebb1-4662-9c08-9901b588603d",
+       "slotWindow": {
+        "startTime": "2026-07-30T11:30:00+01:00",
+        "endTime": "2026-07-30T12:30:00+01:00"
+       },
+       "deliveryPrice": {
+        "currency": "GBP",
+        "amount": "0.00"
+       },
+       "attributes": [
+        "AVAILABLE"
+       ]
+      },
+      {
+       "slotId": "427019c1-0fb2-4828-8724-74e9207bf692",
+       "slotWindow": {
+        "startTime": "2026-07-30T08:30:00+01:00",
+        "endTime": "2026-07-30T09:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "b6b3d77d-7064-4878-98a1-81690e83278e",
+       "slotWindow": {
+        "startTime": "2026-07-30T10:30:00+01:00",
+        "endTime": "2026-07-30T11:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "4ef894be-2a8d-4a84-8306-c17bc78230fc",
+       "slotWindow": {
+        "startTime": "2026-07-30T09:30:00+01:00",
+        "endTime": "2026-07-30T10:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "4716dcf4-e3c8-4431-b7af-8b798779da97",
+       "slotWindow": {
+        "startTime": "2026-07-30T11:00:00+01:00",
+        "endTime": "2026-07-30T12:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "32213fc9-17da-46f6-b717-01b5bc89fd43",
+       "slotWindow": {
+        "startTime": "2026-07-30T07:30:00+01:00",
+        "endTime": "2026-07-30T08:30:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "67d11b4f-fead-4d9f-a67f-43ee17bbc767",
+       "slotWindow": {
+        "startTime": "2026-07-30T09:00:00+01:00",
+        "endTime": "2026-07-30T10:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "e61b8d7c-9358-466b-b2c0-85edf61952cc",
+       "slotWindow": {
+        "startTime": "2026-07-30T10:00:00+01:00",
+        "endTime": "2026-07-30T11:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "759fcb0e-962c-4484-8f93-1bc7010c563a",
+       "slotWindow": {
+        "startTime": "2026-07-30T08:00:00+01:00",
+        "endTime": "2026-07-30T09:00:00+01:00"
+       },
+       "attributes": []
+      },
+      {
+       "slotId": "5f7d9a48-f4d1-47f8-890f-403193d0e1d1",
+       "slotWindow": {
+        "startTime": "2026-07-30T08:00:00+01:00",
+        "endTime": "2026-07-30T12:00:00+01:00"
+       },
+       "attributes": []
+      }
+     ]
+    }
+   ],
+   "featuredSlots": [],
+   "slotPeriods": [
+    {
+     "id": "Default days",
+     "type": "DEFAULT",
+     "fromDate": "2026-07-29",
+     "toDate": "2026-08-26"
+    }
+   ],
+   "timeWindows": [
+    {
+     "from": "16:00",
+     "to": "17:00"
+    },
+    {
+     "from": "06:00",
+     "to": "10:00"
+    },
+    {
+     "from": "20:00",
+     "to": "23:59"
+    },
+    {
+     "from": "17:30",
+     "to": "18:30"
+    },
+    {
+     "from": "06:30",
+     "to": "07:30"
+    },
+    {
+     "from": "12:00",
+     "to": "13:00"
+    },
+    {
+     "from": "08:00",
+     "to": "09:00"
+    },
+    {
+     "from": "10:00",
+     "to": "14:00"
+    },
+    {
+     "from": "06:00",
+     "to": "07:00"
+    },
+    {
+     "from": "11:30",
+     "to": "12:30"
+    },
+    {
+     "from": "13:00",
+     "to": "14:00"
+    },
+    {
+     "from": "14:00",
+     "to": "18:00"
+    },
+    {
+     "from": "07:30",
+     "to": "08:30"
+    },
+    {
+     "from": "21:30",
+     "to": "22:30"
+    },
+    {
+     "from": "09:00",
+     "to": "10:00"
+    },
+    {
+     "from": "18:00",
+     "to": "22:00"
+    },
+    {
+     "from": "08:00",
+     "to": "12:00"
+    },
+    {
+     "from": "07:00",
+     "to": "08:00"
+    },
+    {
+     "from": "08:30",
+     "to": "09:30"
+    },
+    {
+     "from": "14:00",
+     "to": "15:00"
+    },
+    {
+     "from": "12:00",
+     "to": "16:00"
+    },
+    {
+     "from": "17:00",
+     "to": "18:00"
+    },
+    {
+     "from": "22:30",
+     "to": "23:30"
+    },
+    {
+     "from": "15:00",
+     "to": "16:00"
+    },
+    {
+     "from": "16:00",
+     "to": "20:00"
+    },
+    {
+     "from": "22:00",
+     "to": "23:00"
+    },
+    {
+     "from": "12:30",
+     "to": "13:30"
+    },
+    {
+     "from": "05:30",
+     "to": "06:30"
+    },
+    {
+     "from": "19:30",
+     "to": "20:30"
+    },
+    {
+     "from": "10:30",
+     "to": "11:30"
+    },
+    {
+     "from": "20:30",
+     "to": "21:30"
+    },
+    {
+     "from": "16:30",
+     "to": "17:30"
+    },
+    {
+     "from": "21:00",
+     "to": "22:00"
+    },
+    {
+     "from": "09:30",
+     "to": "10:30"
+    },
+    {
+     "from": "18:30",
+     "to": "19:30"
+    },
+    {
+     "from": "11:00",
+     "to": "12:00"
+    },
+    {
+     "from": "19:00",
+     "to": "20:00"
+    },
+    {
+     "from": "20:00",
+     "to": "21:00"
+    },
+    {
+     "from": "23:00",
+     "to": "23:59"
+    },
+    {
+     "from": "10:00",
+     "to": "11:00"
+    },
+    {
+     "from": "18:00",
+     "to": "19:00"
+    }
+   ]
+  }
+ ]
+}

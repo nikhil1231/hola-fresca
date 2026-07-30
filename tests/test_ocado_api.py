@@ -1,0 +1,103 @@
+"""Ocado routes. The client is faked; nothing here reaches the network."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+import main
+from app.api.ocado import get_ocado_client
+from app.ocado.client import Slot, normalize_slots
+
+FIXTURES = Path(__file__).parent / "fixtures" / "ocado"
+
+
+def fixture(name: str):
+    return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+class FakeClient:
+    def __init__(self):
+        self.reserved = None
+
+    def cart_view(self):
+        return fixture("cart_view")
+
+    def slots(self, ddid=None, region=None):
+        return normalize_slots(fixture("slots"))
+
+    def reserve(self, slot_id, ddid=None, region=None):
+        self.reserved = (slot_id, ddid, region)
+        return fixture("reservation")
+
+
+@pytest.fixture
+def client():
+    fake = FakeClient()
+    main.app.dependency_overrides[get_ocado_client] = lambda: fake
+    with TestClient(main.app) as test_client:
+        test_client.fake = fake
+        yield test_client
+    main.app.dependency_overrides.clear()
+
+
+def test_status_reports_the_ladder_state(client):
+    response = client.get("/api/ocado/status")
+
+    assert response.status_code == 200
+    assert response.json()["status"] in {"logged_out", "awaiting_otp", "ready"}
+
+
+def test_slots_serialise_the_dataclass(client):
+    """Slot and PushLine use slots=True, so vars() raises - asdict is required."""
+    response = client.get("/api/ocado/slots")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 64
+    assert sum(i["available"] for i in items) == 35
+    assert sum(i["eco"] for i in items) == 12
+    assert {"slot_id", "start", "end", "day", "available", "eco", "price"} <= set(items[0])
+
+
+def test_basket_returns_the_raw_cart(client):
+    response = client.get("/api/ocado/basket")
+
+    assert response.status_code == 200
+    assert "checkoutGroups" in response.json()["raw"]
+
+
+def test_reserve_passes_the_slot_through(client):
+    response = client.post("/api/ocado/slots/reserve", json={"slot_id": "slot-9"})
+
+    assert response.status_code == 200
+    assert client.fake.reserved == ("slot-9", None, None)
+    assert response.json()["raw"]["slot"]["slotId"]
+
+
+def test_a_client_failure_surfaces_as_bad_gateway(client):
+    def boom(*args, **kwargs):
+        raise RuntimeError("ocado is down")
+
+    client.fake.slots = boom
+    response = client.get("/api/ocado/slots")
+
+    assert response.status_code == 502
+    assert "ocado is down" in response.json()["detail"]
+
+
+def test_otp_rejects_an_empty_code(client):
+    response = client.post("/api/ocado/otp", json={"code": ""})
+
+    assert response.status_code == 422
+
+
+def test_serialising_a_slot_dataclass_does_not_use_vars():
+    from dataclasses import asdict
+
+    slot = Slot(slot_id="s", available=True)
+    assert asdict(slot)["slot_id"] == "s"
+    with pytest.raises(TypeError):
+        vars(slot)

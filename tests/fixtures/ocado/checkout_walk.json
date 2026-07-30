@@ -1,0 +1,150 @@
+{
+ "activeCheckoutGroup": {
+  "basketAboveThreshold": false,
+  "canCheckout": false,
+  "checkoutRestrictions": [
+   "NOT_REACHED_THRESHOLD",
+   "MISSING_SLOT"
+  ],
+  "minimumCheckoutThreshold": {
+   "currency": "GBP",
+   "amount": "40.00"
+  },
+  "orderId": "1978047754515",
+  "shippingGroupType": "default home delivery",
+  "shippingGroupTypeDisplayName": "Home delivery"
+ },
+ "cartId": "868ddb18-3a99-4d34-89ac-40ec7ea8ee19",
+ "cartStatus": "NEVER_CHECKED_OUT",
+ "checkoutCorrelationId": "1978047754515",
+ "defaultCheckoutGroup": {
+  "basketAboveThreshold": false,
+  "canCheckout": false,
+  "checkoutRestrictions": [
+   "NOT_REACHED_THRESHOLD",
+   "MISSING_SLOT"
+  ],
+  "minimumCheckoutThreshold": {
+   "currency": "GBP",
+   "amount": "40.00"
+  },
+  "orderId": "1978047754515",
+  "shippingGroupType": "default home delivery",
+  "shippingGroupTypeDisplayName": "Home delivery"
+ },
+ "deliveryDestinationId": "2e74f2bf-73f5-403c-a3a7-50bdf3eca4b1",
+ "deliveryPriceModificationLevels": {},
+ "itemGroups": [
+  {
+   "items": [
+    "9f24fc1d-281f-4c16-b7a0-94004918a720"
+   ]
+  }
+ ],
+ "items": [
+  {
+   "basketLines": [],
+   "finalPrice": {
+    "currency": "GBP",
+    "amount": "0.99"
+   },
+   "lastModified": "2026-07-29T11:04:35.751047111Z",
+   "price": {
+    "currency": "GBP",
+    "amount": "0.99"
+   },
+   "productId": "9f24fc1d-281f-4c16-b7a0-94004918a720",
+   "promoVersionId": "1785322610915",
+   "quantity": 2
+  }
+ ],
+ "lastModified": "2026-07-29T11:04:35.897556189Z",
+ "charges": {},
+ "loyalty": {
+  "unitsSpent": 0
+ },
+ "orderLevelPromotions": [],
+ "totals": {
+  "chargesPrice": {
+   "currency": "GBP",
+   "amount": "0.00"
+  },
+  "chargesPriceAfterPromos": {
+   "currency": "GBP",
+   "amount": "0.00"
+  },
+  "depositsPrice": {
+   "currency": "GBP",
+   "amount": "0.00"
+  },
+  "display": {
+   "finalPrice": {
+    "currency": "GBP",
+    "amount": "1.98"
+   },
+   "itemPriceAfterPromos": {
+    "currency": "GBP",
+    "amount": "1.98"
+   },
+   "taxation": "TAX_INCLUDED"
+  },
+  "environmentalHandlingPrice": {
+   "currency": "GBP",
+   "amount": "0.00"
+  },
+  "finalPrice": {
+   "currency": "GBP",
+   "amount": "1.98"
+  },
+  "itemPriceAfterPromos": {
+   "currency": "GBP",
+   "amount": "1.98"
+  },
+  "itemsRetailPrice": {
+   "currency": "GBP",
+   "amount": "1.98"
+  },
+  "paymentMethodSavingsPrice": {
+   "currency": "GBP",
+   "amount": "0.00"
+  },
+  "paymentSplit": {
+   "paidByLoyalty": {
+    "currency": "GBP",
+    "amount": "0.00"
+   },
+   "remainingPayment": {
+    "currency": "GBP",
+    "amount": "1.98"
+   }
+  },
+  "remainingAmountToMinimumCheckoutThreshold": {
+   "currency": "GBP",
+   "amount": "38.02"
+  },
+  "savingsPrice": {
+   "currency": "GBP",
+   "amount": "0.00"
+  },
+  "spendForPromotionsAndCharges": {
+   "currency": "GBP",
+   "amount": "1.98"
+  },
+  "taxation": "TAX_INCLUDED",
+  "totalPrice": {
+   "currency": "GBP",
+   "amount": "1.98"
+  },
+  "vouchersSavingsPrice": {
+   "currency": "GBP",
+   "amount": "0.00"
+  }
+ },
+ "vouchers": [],
+ "pricingNotifications": [],
+ "regionId": "9138094d-f307-46aa-a62d-86c8bdaeb4b9",
+ "smallOrderChargeThresholds": [],
+ "totalsGroups": [],
+ "unavailableData": [],
+ "variablePrice": false
+}

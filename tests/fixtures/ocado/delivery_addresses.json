@@ -1,0 +1,28 @@
+[
+ {
+  "deliveryDestinationId": "2e74f2bf-73f5-403c-a3a7-50bdf3eca4b1",
+  "addressId": "98292b10-b5d8-45b6-b019-e3bd6e9e4889",
+  "formattedAddress": "1 Example Street, London, SW1A 1AA, United Kingdom",
+  "name": "Home",
+  "coordinates": {
+   "latitude": 51.429226,
+   "longitude": -0.0853365
+  },
+  "timeZoneId": "Europe/London",
+  "deliverability": "DELIVERABLE",
+  "deliveryType": "BRANDED_VAN",
+  "deliveryMethod": "HOME_DELIVERY",
+  "resolvedRegionId": "9138094d-f307-46aa-a62d-86c8bdaeb4b9",
+  "countryCode": "GB",
+  "postalCode": "SW1A1AA",
+  "isPrimary": true,
+  "deliveryInstructions": "",
+  "propositions": [
+   {
+    "deliveryPropositionId": "ed7e065f-96db-40d4-b8d0-3e606bc1b1e5",
+    "propositionType": "SCHEDULED",
+    "regionId": "9138094d-f307-46aa-a62d-86c8bdaeb4b9"
+   }
+  ]
+ }
+]

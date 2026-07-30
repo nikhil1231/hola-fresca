@@ -39,6 +39,15 @@ AUDIT_MODEL = os.environ.get("HOLAFRESCA_AUDIT_MODEL", "gpt-5.4-mini")
 # slot calls use the persisted session cookie jar.
 OCADO_EMAIL = os.environ.get("OCADO_EMAIL")
 OCADO_PASSWORD = os.environ.get("OCADO_PASSWORD")
+# Login drives a real browser (Ocado's SSO runs reCAPTCHA, which no HTTP client
+# can clear). Headless by default so it works on a box with no display; if
+# reCAPTCHA starts challenging, run the server under `xvfb-run` and set this to 0
+# for a headed browser, which is challenged less often.
+OCADO_LOGIN_HEADLESS = os.environ.get("OCADO_LOGIN_HEADLESS", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
 
 
 def db_url(path: Path | None = None) -> str:

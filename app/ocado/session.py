@@ -3,19 +3,27 @@ from __future__ import annotations
 
 import json
 import re
-from http.cookiejar import Cookie, CookieJar
+from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from app import config
-from app.ocado.auth import AUTH, AuthLadder
+from app.ocado.auth import AUTH, AuthLadder, AuthState
 
 BASE_URL = "https://www.ocado.com"
 SESSION_PATH = config.DATA_DIR / "ocado" / "session.json"
 CSRF_RE = re.compile(r'"csrf"\s*:\s*\{\s*"token"\s*:\s*"([^"]+)"')
-AUTH_COOKIE_NAMES = {"global_sid", "ocado_session", "aws-waf-token"}
+
+#: The Ocado login session. ``aws-waf-token`` deliberately is *not* here - it is a
+#: WAF challenge token that an entirely logged-out browser also carries, so
+#: counting it would make a dead jar look authenticated.
+AUTH_COOKIE_NAMES = {"global_sid", "ocado_session"}
+
+#: Mirrors ``client.CHECKOUT_WALK_PATH``; duplicated to keep this module free of
+#: an import cycle with the client.
+AUTH_PROBE_PATH = "/api/cart/v1/carts/active/checkout-walk"
 
 
 class OcadoSession:
@@ -51,7 +59,25 @@ class OcadoSession:
         self.client.close()
 
     def has_auth_cookies(self) -> bool:
+        """Whether a login cookie is *present*. Says nothing about it working."""
         return any(cookie.name in AUTH_COOKIE_NAMES for cookie in self.client.cookies.jar)
+
+    def probe_authenticated(self) -> bool:
+        """Ask Ocado whether the jar still works.
+
+        Presence of ``global_sid`` is not enough - it is a session cookie the
+        server expires on its own schedule, so a stale one sits in the jar
+        looking healthy. This costs one cheap request and gives a real answer.
+        Deliberately bypasses ``request`` so a 401 here cannot recurse back into
+        the auth ladder.
+        """
+        if not self.has_auth_cookies():
+            return False
+        try:
+            response = self.client.get(AUTH_PROBE_PATH, headers={"accept": "application/json"})
+        except httpx.HTTPError:
+            return False
+        return response.status_code != 401
 
     def load(self) -> None:
         if not self.jar_path.exists():
@@ -93,25 +119,38 @@ class OcadoSession:
 
     def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         method = method.upper()
-        if method not in {"GET", "HEAD", "OPTIONS"}:
-            headers = dict(kwargs.pop("headers", {}) or {})
-            headers.setdefault("x-csrf-token", self.csrf())
-            headers.setdefault("ecom-request-source", "web")
-            kwargs["headers"] = headers
+        writes = method not in {"GET", "HEAD", "OPTIONS"}
+        if writes:
+            kwargs = self._with_csrf(kwargs, self.csrf())
 
         response = self.client.request(method, url, **kwargs)
+
         if self._is_csrf_failure(response):
-            headers = dict(kwargs.pop("headers", {}) or {})
-            headers["x-csrf-token"] = self.csrf(force=True)
-            headers.setdefault("ecom-request-source", "web")
-            kwargs["headers"] = headers
+            kwargs = self._with_csrf(kwargs, self.csrf(force=True))
             response = self.client.request(method, url, **kwargs)
+
         if response.status_code == 401:
-            state = self.auth.ensure_authenticated(self)
-            if state == "ready":
+            # The jar is provably dead, so tell the ladder not to re-check it.
+            state = self.auth.ensure_authenticated(self, trust_existing=False)
+            if state == AuthState.READY:
+                # A fresh login means a fresh session, and the CSRF token is
+                # scoped to the session - the cached one died with the old one.
+                self._csrf_token = None
+                if writes:
+                    kwargs = self._with_csrf(kwargs, self.csrf())
                 response = self.client.request(method, url, **kwargs)
+
         self.save()
         return response
+
+    @staticmethod
+    def _with_csrf(kwargs: dict[str, Any], token: str) -> dict[str, Any]:
+        kwargs = dict(kwargs)
+        headers = dict(kwargs.get("headers") or {})
+        headers["x-csrf-token"] = token
+        headers.setdefault("ecom-request-source", "web")
+        kwargs["headers"] = headers
+        return kwargs
 
     @staticmethod
     def _is_csrf_failure(response: httpx.Response) -> bool:
@@ -165,6 +204,19 @@ def _cookie_from_json(item: dict[str, Any]) -> Cookie:
     )
 
 
-def clear_cookie_jar(jar: CookieJar) -> None:
-    jar.clear()
+_SHARED: OcadoSession | None = None
+
+
+def get_shared_session() -> OcadoSession:
+    """The process-wide session.
+
+    One session per process, not per request: the cookie jar and CSRF token are
+    shared state, and the login flow parks a browser against a specific session
+    across two separate HTTP requests - so a per-request session would be closed
+    out from under the OTP step.
+    """
+    global _SHARED
+    if _SHARED is None:
+        _SHARED = OcadoSession()
+    return _SHARED
 

@@ -76,49 +76,65 @@ def basket_targets(
 
 
 def cart_quantities(payload: Any) -> dict[str, int]:
+    """Read ``{productId: quantity}`` out of any of Ocado's basket payloads.
+
+    The three that matter nest their lines differently, so the paths are spelled
+    out rather than searched for - a generic walker silently returns ``{}`` on
+    cart-view, which reads as "basket empty" and makes every push a double-add:
+
+    * ``cart-view``      → ``checkoutGroups.assignedCheckoutGroups[].itemGroups[].items[]``
+    * ``checkout-walk``  → ``items[]``
+    * ``apply-quantity`` → ``basketUpdateResult.itemGroups[].items[]``
+    """
     quantities: dict[str, int] = {}
     for item in _cart_items(payload):
-        sku = _sku(item)
-        if not sku:
-            continue
+        sku = item.get("productId")
         quantity = _quantity(item)
-        if quantity is not None:
+        if isinstance(sku, str) and sku and quantity is not None:
             quantities[sku] = quantity
     return quantities
 
 
 def _cart_items(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
     if not isinstance(payload, dict):
         return []
-    for key in ("items", "lines", "basketItems", "cartItems", "products"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
-    for value in payload.values():
-        found = _cart_items(value)
-        if found:
-            return found
-    return []
+    items: list[dict[str, Any]] = []
+
+    groups = payload.get("checkoutGroups")
+    if isinstance(groups, dict):
+        for group in _dicts(groups.get("assignedCheckoutGroups")):
+            items.extend(_item_group_items(group))
+
+    update = payload.get("basketUpdateResult")
+    if isinstance(update, dict):
+        items.extend(_item_group_items(update))
+
+    items.extend(_item_group_items(payload))
+
+    # checkout-walk carries its lines at the top level; its itemGroups hold bare
+    # product-id strings, which _item_group_items already skips.
+    items.extend(_dicts(payload.get("items")))
+
+    deduped: dict[int, dict[str, Any]] = {id(item): item for item in items}
+    return list(deduped.values())
 
 
-def _sku(item: dict[str, Any]) -> str | None:
-    for key in ("sku", "productId", "product_id", "id"):
-        value = item.get(key)
-        if isinstance(value, str) and value:
-            return value
-    product = item.get("product")
-    if isinstance(product, dict):
-        return _sku(product)
-    return None
+def _item_group_items(node: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for group in _dicts(node.get("itemGroups")):
+        items.extend(_dicts(group.get("items")))
+    return items
+
+
+def _dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _quantity(item: dict[str, Any]) -> int | None:
-    for key in ("quantity", "qty", "itemQuantity"):
-        value = item.get(key)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            pass
-    return None
+    value = item.get("quantity")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
