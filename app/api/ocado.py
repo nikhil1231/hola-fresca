@@ -52,6 +52,21 @@ def login() -> OcadoLoginOut:
     return OcadoLoginOut(status=state)
 
 
+@router.post("/session/refresh", response_model=OcadoLoginOut)
+def refresh_session() -> OcadoLoginOut:
+    """Become ready if that is possible without asking the user anything.
+
+    Safe to call automatically on page load: it stops before the password step,
+    which would email an OTP to someone who only opened the page.
+    """
+    session = get_shared_session()
+    try:
+        state = AUTH.ensure_authenticated(session, allow_login=False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Ocado session refresh failed: {exc}") from exc
+    return OcadoLoginOut(status=state)
+
+
 @router.post("/otp", response_model=OcadoLoginOut)
 def otp(body: OcadoOtpIn) -> OcadoLoginOut:
     try:

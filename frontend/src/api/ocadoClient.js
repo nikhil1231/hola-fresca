@@ -33,6 +33,10 @@ export function startOcadoLogin() {
   return postJSON('/api/ocado/login')
 }
 
+export function refreshOcadoSession() {
+  return postJSON('/api/ocado/session/refresh')
+}
+
 export function submitOcadoOtp(code) {
   return postJSON('/api/ocado/otp', { code })
 }

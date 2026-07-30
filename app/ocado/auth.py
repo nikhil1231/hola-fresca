@@ -213,13 +213,21 @@ class AuthLadder:
         return self._worker
 
     def ensure_authenticated(
-        self, session: "OcadoSession", *, trust_existing: bool = True
+        self,
+        session: "OcadoSession",
+        *,
+        trust_existing: bool = True,
+        allow_login: bool = True,
     ) -> AuthState:
         """Try the cheapest thing that could work, then escalate.
 
         ``trust_existing=False`` is what the 401 handler passes: the caller
         already has proof the jar is dead, so re-checking it would only burn a
         request confirming that and then wrongly report READY.
+
+        ``allow_login=False`` stops before the password step. The first two rungs
+        need nothing from the user, but the third emails an OTP - so anything
+        automatic (a page load, say) must not be able to reach it.
         """
         if trust_existing and session.probe_authenticated():
             log.info("ocado auth: existing jar still works")
@@ -228,6 +236,10 @@ class AuthLadder:
         if self.try_silent(session):
             log.info("ocado auth: silent refresh succeeded")
             self.state = AuthState.READY
+            return self.state
+        if not allow_login:
+            log.info("ocado auth: quiet refresh exhausted, a full login is needed")
+            self.state = AuthState.LOGGED_OUT
             return self.state
         log.info("ocado auth: silent refresh failed, falling back to full login")
         return self.start_login(session)

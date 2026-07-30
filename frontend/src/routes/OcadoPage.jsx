@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -32,6 +32,7 @@ import {
   useOcadoOtp,
   useOcadoPush,
   useOcadoReserve,
+  useOcadoSessionRefresh,
   useOcadoSlots,
   useOcadoStatus,
 } from '../hooks/useOcadoQueries.js'
@@ -179,6 +180,8 @@ export default function OcadoPage() {
   const planner = usePlannerBasket(selections)
   const status = useOcadoStatus()
   const login = useOcadoLogin()
+  const sessionRefresh = useOcadoSessionRefresh()
+  const reconnectAttempted = useRef(false)
   const otp = useOcadoOtp()
   const push = useOcadoPush()
   const basket = useOcadoBasket({ enabled: status.data?.status === 'ready' })
@@ -200,6 +203,21 @@ export default function OcadoPage() {
     [planner.data?.lines, ownedItemKeySet],
   )
 
+  const connected = status.data?.status === 'ready'
+  const awaitingOtp = status.data?.status === 'awaiting_otp'
+  const reconnecting = sessionRefresh.isPending
+
+  // A saved session usually just needs waking up, so try that on arrival rather
+  // than making you press a button for it. Once per mount, and only the rungs
+  // that need nothing from you - /session/refresh stops before the password
+  // step, so this can never trigger an OTP email on its own.
+  useEffect(() => {
+    if (status.data?.status !== 'logged_out') return
+    if (reconnectAttempted.current) return
+    reconnectAttempted.current = true
+    sessionRefresh.mutate()
+  }, [status.data?.status, sessionRefresh])
+
   return (
     <Stack gap="lg" className={classes.pageStack}>
       <Group justify="space-between" align="flex-end">
@@ -219,39 +237,66 @@ export default function OcadoPage() {
 
       <Box className={classes.layout}>
         <Stack gap="lg">
-          <Box className={classes.panel}>
-            <Stack gap="sm">
-              <Group justify="space-between">
-                <Title order={3}>Login</Title>
-                {status.isLoading && <Loader size="sm" />}
-              </Group>
-              <Button
-                leftSection={<IconLogin size={16} />}
-                loading={login.isPending}
-                onClick={() => login.mutate()}
-              >
-                Start or refresh login
-              </Button>
-              {status.data?.status === 'awaiting_otp' && (
-                <Group align="flex-end">
-                  <PasswordInput
-                    label="OTP"
-                    value={otpCode}
-                    onChange={(event) => setOtpCode(event.currentTarget.value)}
-                    flex={1}
-                  />
-                  <Button loading={otp.isPending} onClick={() => otp.mutate(otpCode)}>
-                    Submit
-                  </Button>
+          {/* Nothing to say while the session is healthy - the header badge
+              already carries the state, and a login button there just invites
+              you to fix something that is not broken. */}
+          {!connected && (
+            <Box className={classes.panel}>
+              <Stack gap="sm">
+                <Group justify="space-between">
+                  <Title order={3}>{awaitingOtp ? 'Check your email' : 'Connect to Ocado'}</Title>
+                  {(status.isLoading || reconnecting) && <Loader size="sm" />}
                 </Group>
-              )}
-              {(login.error || otp.error || status.error) && (
-                <Alert color="red" icon={<IconAlertCircle size={18} />}>
-                  {login.error?.message ?? otp.error?.message ?? status.error?.message}
-                </Alert>
-              )}
-            </Stack>
-          </Box>
+
+                {awaitingOtp ? (
+                  <>
+                    <Text size="sm" c="dimmed">
+                      Ocado sent a verification code. Enter it to finish signing in.
+                    </Text>
+                    <Group align="flex-end">
+                      <PasswordInput
+                        label="Verification code"
+                        value={otpCode}
+                        onChange={(event) => setOtpCode(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && otpCode.trim()) otp.mutate(otpCode)
+                        }}
+                        flex={1}
+                      />
+                      <Button
+                        loading={otp.isPending}
+                        disabled={!otpCode.trim()}
+                        onClick={() => otp.mutate(otpCode)}
+                      >
+                        Submit
+                      </Button>
+                    </Group>
+                  </>
+                ) : (
+                  <>
+                    <Text size="sm" c="dimmed">
+                      {reconnecting
+                        ? 'Reusing your saved session…'
+                        : 'Signing in will email you a verification code.'}
+                    </Text>
+                    <Button
+                      leftSection={<IconLogin size={16} />}
+                      loading={login.isPending || reconnecting}
+                      onClick={() => login.mutate()}
+                    >
+                      Sign in to Ocado
+                    </Button>
+                  </>
+                )}
+
+                {(login.error || otp.error || status.error) && (
+                  <Alert color="red" icon={<IconAlertCircle size={18} />}>
+                    {login.error?.message ?? otp.error?.message ?? status.error?.message}
+                  </Alert>
+                )}
+              </Stack>
+            </Box>
+          )}
 
           <Box className={classes.panel}>
             <Stack gap="sm">

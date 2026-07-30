@@ -5,6 +5,7 @@ import {
   fetchOcadoSlots,
   fetchOcadoStatus,
   pushOcadoBasket,
+  refreshOcadoSession,
   reserveOcadoSlot,
   startOcadoLogin,
   submitOcadoOtp,
@@ -22,6 +23,16 @@ export function useOcadoLogin() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: startOcadoLogin,
+    onSuccess: (data) => qc.setQueryData(['ocado-status'], data),
+  })
+}
+
+// Reconnects without any user input where it can. Distinct from useOcadoLogin,
+// which may escalate to a password login and email an OTP.
+export function useOcadoSessionRefresh() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: refreshOcadoSession,
     onSuccess: (data) => qc.setQueryData(['ocado-status'], data),
   })
 }

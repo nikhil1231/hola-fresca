@@ -70,6 +70,29 @@ def test_a_failed_silent_refresh_escalates_to_full_login():
     assert auth.calls == ["silent", "login"]
 
 
+def test_a_quiet_refresh_never_reaches_the_password_step():
+    """What makes auto-reconnect-on-page-load safe.
+
+    The first two rungs need nothing from the user; the third emails an OTP. So
+    anything automatic must stop before it, or merely opening the page would
+    send a code.
+    """
+    auth = ladder(silent_works=False, login_outcome=AuthState.AWAITING_OTP)
+    session = FakeSession(authenticated=False)
+
+    state = auth.ensure_authenticated(session, allow_login=False)
+
+    assert state == AuthState.LOGGED_OUT
+    assert auth.calls == ["silent"], "must not start a login that emails a code"
+
+
+def test_a_quiet_refresh_still_reports_a_working_session():
+    auth = ladder(silent_works=True)
+    session = FakeSession(authenticated=False)
+
+    assert auth.ensure_authenticated(session, allow_login=False) == AuthState.READY
+
+
 def test_a_401_caller_is_not_allowed_to_short_circuit():
     """The regression that made re-auth impossible.
 
