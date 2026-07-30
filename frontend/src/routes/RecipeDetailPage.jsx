@@ -60,6 +60,7 @@ import {
   toPlannerSelections,
   useWeeklyPlan,
 } from '../hooks/useWeeklyPlan.js'
+import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import classes from './RecipeDetailPage.module.css'
 
 const MACRO_LABELS = {
@@ -699,7 +700,8 @@ export default function RecipeDetailPage() {
       <Grid gutter="xl">
         <Grid.Col span={{ base: 12, sm: 6 }}>
           <Image
-            src={recipe.image_url}
+            src={recipe.image_url || RECIPE_PLACEHOLDER_IMAGE}
+            fallbackSrc={RECIPE_PLACEHOLDER_IMAGE}
             alt={recipe.name}
             radius="md"
             className={classes.hero}

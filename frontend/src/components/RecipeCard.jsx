@@ -12,16 +12,11 @@ import {
 } from '@tabler/icons-react'
 
 import { MAX_PORTIONS, MIN_PORTIONS } from '../hooks/useWeeklyPlan.js'
+import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import classes from './RecipeCard.module.css'
 
 const PROTEIN_DENSITY_BREAKPOINTS = [4, 6, 8]
 const PROTEIN_DENSITY_SEGMENTS = PROTEIN_DENSITY_BREAKPOINTS.length + 1
-
-const PLACEHOLDER =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="#e9f9f0"/></svg>',
-  )
 
 function round(value) {
   return value == null ? null : Math.round(value)
@@ -223,8 +218,8 @@ export default function RecipeCard({
       <Link to={`/recipes/${recipe.id}`} className={classes.mainLink}>
         <Card.Section className={classes.imageWrap}>
           <Image
-            src={recipe.image_url || PLACEHOLDER}
-            fallbackSrc={PLACEHOLDER}
+            src={recipe.image_url || RECIPE_PLACEHOLDER_IMAGE}
+            fallbackSrc={RECIPE_PLACEHOLDER_IMAGE}
             alt={recipe.name}
             className={classes.image}
             loading="lazy"
