@@ -199,6 +199,7 @@ class PlannerFiltersIn(BaseModel):
     diet: list[str] = Field(default_factory=list)
     tag: list[str] = Field(default_factory=list)
     protein: list[str] = Field(default_factory=list)
+    course: list[str] = Field(default_factory=list)
     max_time: int | None = None
     min_protein: float | None = None
     min_protein_ratio: float | None = None
