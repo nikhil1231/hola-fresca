@@ -57,6 +57,10 @@ class Pack:
     #: bought and price the substitution it had to make instead.
     available: bool = True
     stock_checked_at: datetime | None = None
+    #: Customer rating and how many people gave it. Cheapest is not best when the
+    #: cheap one is a two-star product, so this is a term in the pack choice.
+    rating: float | None = None
+    ratings_count: int | None = None
 
     @property
     def cost_per_g(self) -> float:
@@ -350,6 +354,8 @@ def _build_pack(
         # catalogue simply has nothing to say yet, so the pack stays buyable.
         available=product.in_stock != 0,
         stock_checked_at=product.stock_checked_at,
+        rating=product.avg_rating,
+        ratings_count=product.ratings_count,
     )
 
 

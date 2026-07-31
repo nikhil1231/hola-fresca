@@ -118,6 +118,11 @@ def _option_out(option) -> BasketPackOptionOut:
         chosen=option.chosen,
         pinned=option.pinned,
         better_value=option.better_value,
+        rating=option.pack.rating,
+        ratings_count=option.pack.ratings_count,
+        weeks_of_supply=(
+            round(option.weeks_of_supply, 1) if option.weeks_of_supply is not None else None
+        ),
     )
 
 

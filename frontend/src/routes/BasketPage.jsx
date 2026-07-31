@@ -145,8 +145,21 @@ function formatCapacity(value, unit) {
   return unit === 'unit' ? formatQuantity(value, unit) : formatGrams(value)
 }
 
-function upsizeLabel(option) {
-  return `${formatUnitCost(option)} · ${formatDelta(option.cost_delta)}`
+// Deliberately coarse, and deliberately capped at "2+ years". The estimate comes
+// from how often the whole library cooks the ingredient, not from what you
+// actually make, and at one gram a recipe it will happily compute seventy years
+// of chilli flakes — which is true, useless, and makes a sane 30p upsize look
+// deranged. The figure is only good to an order of magnitude, so it says so.
+function formatSupply(weeks) {
+  if (weeks == null) return null
+  if (weeks < 2) return 'about a week'
+  if (weeks < 9) return `about ${Math.round(weeks)} weeks`
+  if (weeks < 78) return `about ${Math.round(weeks / 4.3)} months`
+  return '2+ years'
+}
+
+function formatRating(option) {
+  return option.rating == null ? null : `${option.rating.toFixed(1)}★ (${option.ratings_count ?? 0})`
 }
 
 // The size menu. The planner only ever prices one week, so it has no way to
@@ -196,6 +209,22 @@ function PackOptions({ line, packPreference }) {
               )}
             </Group>
             <Group gap="xs" wrap="nowrap">
+              {formatRating(option) && (
+                <Text size="xs" c="dimmed">
+                  {formatRating(option)}
+                </Text>
+              )}
+              <Tooltip
+                label={
+                  option.weeks_of_supply != null
+                    ? `${formatSupply(option.weeks_of_supply)}' supply at how often this library cooks it`
+                    : 'no usage estimate for this ingredient'
+                }
+              >
+                <Text size="xs" c="dimmed" w={78} ta="right">
+                  {formatSupply(option.weeks_of_supply) ?? '—'}
+                </Text>
+              </Tooltip>
               <Text size="xs" c="dimmed">
                 {formatUnitCost(option)}
               </Text>
@@ -373,13 +402,21 @@ function LineTable({
                             {upsize && !pinnedOption && (
                               <Tooltip
                                 multiline
-                                w={280}
-                                label={`${upsize.product_name}: ${formatUnitCost(upsize)} against ${formatUnitCost(
-                                  line.options.find((option) => option.chosen) ?? upsize,
-                                )} — ${formatDelta(upsize.cost_delta)} now and ${formatSignedCapacity(
-                                  upsize.leftover_delta,
-                                  upsize.quantity_unit,
-                                )} left over, which keeps.`}
+                                w={300}
+                                label={[
+                                  `${upsize.product_name}: ${formatUnitCost(upsize)} against ${formatUnitCost(
+                                    line.options.find((option) => option.chosen) ?? upsize,
+                                  )}`,
+                                  `${formatDelta(upsize.cost_delta)} now, ${formatSignedCapacity(
+                                    upsize.leftover_delta,
+                                    upsize.quantity_unit,
+                                  )} left over`,
+                                  upsize.weeks_of_supply != null
+                                    ? `${formatSupply(upsize.weeks_of_supply)}' supply at how often this library cooks it`
+                                    : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' — ')}
                               >
                                 <Badge size="xs" color="green" variant="light">
                                   bigger is cheaper

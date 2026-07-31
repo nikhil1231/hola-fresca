@@ -30,7 +30,18 @@ SALVAGE_BY_SHELF_LIFE: tuple[tuple[int, float], ...] = (
 )
 SALVAGE_LONG_LIFE = 0.85  # stated life beyond a month
 
-# Fallbacks when the retailer states no life at all, keyed on the category root.
+# Fallbacks when the retailer states no life at all, matched against the aisle
+# words anywhere in the category path.
+#
+# Matched on *words in any segment* rather than on the first one, because Ocado
+# shelves a good deal of its range under a brand or a cuisine instead of an
+# aisle: "M&S > M&S Food Cupboard, Bakery & Drinks > M&S Food Cupboard" and
+# "Ocado Own Range > Bakery & Food Cupboard > Food Cupboard" are both ambient
+# groceries, and reading only the root filed them under "no idea" — so two
+# identical bags of sugar came out with different keeping qualities, and the
+# planner preferred the dearer one. Spices arrive the same way, shelved by
+# cuisine ("Indian Spices", "Cajun Spices"), and those are the very products
+# where buying the bigger jar is most obviously right.
 SALVAGE_BY_CATEGORY: dict[str, float] = {
     "Frozen Food": 0.90,
     "Food Cupboard": 0.85,
@@ -44,6 +55,20 @@ SALVAGE_BY_CATEGORY: dict[str, float] = {
     # identical products that do state a week's life, which is backwards.
     "Fresh & Chilled Food": 0.15,
 }
+
+#: Substring -> salvage, tried against each segment. Deliberately short, and
+#: deliberately only words that mean one thing in this taxonomy: "bakery" is not
+#: here because Ocado files baking sugar under "M&S Bakery", and "fresh" is not
+#: here because "M&S Best of Fresh" is a brand range rather than a chiller. An
+#: ingredient whose shelving is that ambiguous is better left at SALVAGE_UNKNOWN
+#: than confidently mis-scored.
+SALVAGE_BY_KEYWORD: tuple[tuple[str, float], ...] = (
+    ("frozen", 0.90),
+    ("spice", 0.85),
+    ("food cupboard", 0.85),
+    ("world foods", 0.80),
+)
+
 SALVAGE_UNKNOWN = 0.50  # no stated life and no useful category
 
 # A pack is never a total loss: whatever the model says, buying a jar you half
@@ -59,21 +84,48 @@ def category_root(category: str | None) -> str | None:
     return category.split(">")[0].strip() or None
 
 
+def _segments(category: str | None) -> list[str]:
+    """Path segments, deepest first - the deepest is the most specific shelf."""
+    if not category:
+        return []
+    return [part.strip() for part in reversed(category.split(">")) if part.strip()]
+
+
+def category_salvage(category: str | None) -> float | None:
+    """What the shelving says about keeping, or None if it says nothing useful.
+
+    Walks from the most specific segment outwards, so "M&S Food Cupboard,
+    Bakery & Drinks > M&S Bakery" comes out as bakery rather than cupboard.
+    """
+    for segment in _segments(category):
+        if segment in SALVAGE_BY_CATEGORY:
+            return SALVAGE_BY_CATEGORY[segment]
+        lowered = segment.lower()
+        for keyword, fraction in SALVAGE_BY_KEYWORD:
+            if keyword in lowered:
+                return fraction
+    return None
+
+
+def is_frozen(category: str | None) -> bool:
+    """Only the word itself: a caramel sauce shelved in the ice cream aisle is
+    not frozen, and this answer overrides a stated shelf life."""
+    return any("frozen" in segment.lower() for segment in _segments(category))
+
+
 def salvage_fraction(shelf_life_days: int | None, category: str | None) -> float:
     """Fraction of an unused remainder that still has value at the next shop."""
-    root = category_root(category)
     # Frozen wins over any stated life: a stated 2-day life on a freezer product
     # is about the thaw, and the planner is not going to thaw it early.
-    if root == "Frozen Food":
-        return SALVAGE_BY_CATEGORY[root]
+    if is_frozen(category):
+        return SALVAGE_BY_CATEGORY["Frozen Food"]
     if shelf_life_days is not None:
         for limit, fraction in SALVAGE_BY_SHELF_LIFE:
             if shelf_life_days <= limit:
                 return fraction
         return SALVAGE_LONG_LIFE
-    if root in SALVAGE_BY_CATEGORY:
-        return SALVAGE_BY_CATEGORY[root]
-    return SALVAGE_UNKNOWN
+    from_category = category_salvage(category)
+    return SALVAGE_UNKNOWN if from_category is None else from_category
 
 
 def clamp_salvage(value: float) -> float:

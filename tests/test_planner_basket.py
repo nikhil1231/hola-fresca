@@ -51,12 +51,13 @@ def write_freq_csv(path, rows):
     return path
 
 
-def pack(capacity_g, price, *, salvage=0.85, match_type="exact", sku=None, available=True):
+def pack(capacity_g, price, *, salvage=0.85, match_type="exact", sku=None, available=True,
+         rating=None, ratings=None):
     label = sku or f"{capacity_g:g}g"
     return Pack(
         sku=label, product_name=f"pack {label}", capacity_g=capacity_g, price=price,
         salvage=salvage, rank=1, match_type=match_type, pack_size_raw=label,
-        available=available,
+        available=available, rating=rating, ratings_count=ratings,
     )
 
 
@@ -86,6 +87,33 @@ def test_ambient_goods_salvage_more_than_fresh():
 def test_missing_shelf_life_is_not_treated_as_short():
     """Ocado states no life for ambient stock; that must not read as perishable."""
     assert W.salvage_fraction(None, "Food Cupboard > Cooking Ingredients") > 0.5
+
+
+def test_an_aisle_shelved_under_a_brand_is_still_that_aisle():
+    """Ocado files a good deal of its range by brand or cuisine, not by aisle.
+
+    Read only from the root, two identical bags of sugar came out with different
+    keeping qualities and the planner preferred the dearer one.
+    """
+    cupboard = W.salvage_fraction(None, "Food Cupboard > Home Baking > Baking Ingredients")
+    assert W.salvage_fraction(None, "M&S > M&S Food Cupboard, Bakery & Drinks > M&S Bakery") == cupboard
+    assert W.salvage_fraction(None, "Ocado Own Range > Bakery & Food Cupboard > Food Cupboard") == cupboard
+    # Spices arrive shelved by cuisine, and they are exactly where bulk pays.
+    assert W.salvage_fraction(None, "Indian Spices > Spices & Seasonings") == cupboard
+
+
+def test_the_ice_cream_aisle_does_not_make_a_sauce_frozen():
+    """``is_frozen`` overrides a stated shelf life, so it has to mean it."""
+    path = "Events & Inspiration > Summer Shop > Ice Cream, Snacks & Treats > Ice Cream"
+    assert W.is_frozen(path) is False
+    assert W.is_frozen("Frozen Food > Fish") is True
+    assert W.salvage_fraction(2, "Frozen Food > Fish") == 0.90
+
+
+def test_shelving_too_vague_to_read_stays_unknown():
+    """A confident guess off a brand range is worse than admitting ignorance."""
+    assert W.salvage_fraction(None, "M&S > M&S Own Brands > M&S Remarksable Value") == W.SALVAGE_UNKNOWN
+    assert W.category_salvage("Events & Inspiration > Big Brand Offers") is None
 
 
 def test_frozen_overrides_a_short_stated_life():
@@ -125,12 +153,43 @@ def test_cover_mixes_pack_sizes_when_that_is_cheaper():
 
 
 def test_cover_pays_more_cash_to_avoid_wasting_something_perishable():
-    """With nothing salvageable, a tight cover beats a cheaper oversized one."""
-    small, big = pack(30, 1.00, salvage=0.0), pack(100, 1.60, salvage=0.0)
+    """With nothing salvageable, a tight cover beats a *dearer* oversized one."""
+    small, big = pack(30, 1.00, salvage=0.0), pack(100, 2.50, salvage=0.0)
     cover = B._cover_with_packs((small, big), need_g=50)
     assert cover.packs == 2 and cover.choices[0].pack.capacity_g == 30
-    assert cover.cost > big.price  # more money out of pocket...
-    assert cover.score < B._score_multiset([B.PackChoice(big, 1)], 50).score  # ...less thrown away
+    assert cover.cost == pytest.approx(2.00)
+    assert cover.score < B._score_multiset([B.PackChoice(big, 1)], 50).score
+
+
+def test_more_food_for_less_money_is_taken_however_perishable():
+    """Two 30 g packs cost £2.00; one 100 g pack costs £1.60 and wastes half.
+
+    Waste can talk the score out of a real price cut - this is where it used to
+    buy the smaller, dearer tomatoes. Paying more for less is not a trade-off
+    worth modelling, whatever happens to the remainder.
+    """
+    small, big = pack(30, 1.00, salvage=0.0), pack(100, 1.60, salvage=0.0)
+    cover = B._cover_with_packs((small, big), need_g=50)
+
+    assert cover.packs == 1 and cover.choices[0].pack.capacity_g == 100
+    assert cover.cost == pytest.approx(1.60)
+    assert cover.waste_gbp > 0, "and it is still honest about the half that is binned"
+
+
+def test_taking_the_better_deal_never_costs_more_than_not_taking_it():
+    """The rule applies to the decision, not to the shortlist.
+
+    Struck out of the candidates instead, the 180 g pack's rejection let the
+    scoring settle on the 250 g one - dearer than the option it had just turned
+    down. Whatever this rule does, it must not end up spending more.
+    """
+    tight = pack(180, 2.40, salvage=0.0, sku="tight")
+    dearer = pack(250, 2.45, salvage=0.0, sku="dearer")
+    deal = pack(210, 2.30, salvage=0.0, sku="deal")
+    cover = B._cover_with_packs((tight, dearer, deal), need_g=180)
+
+    assert cover.choices[0].pack.sku == "deal"
+    assert cover.cost <= tight.price
 
 
 def test_cover_uses_the_cheap_big_pack_when_leftovers_keep():
@@ -257,6 +316,60 @@ def test_bulk_is_not_offered_when_it_costs_too_much_to_fund():
     _, options = _options(catering)
     assert options["10kg"].unit_cost < options["500g"].unit_cost, "genuinely cheaper per kilo"
     assert options["10kg"].better_value is False, "and still not what to do with £12"
+
+
+def test_a_bulk_pack_is_not_offered_if_it_is_a_step_down_in_quality():
+    """Five stars to two is not worth 40% off the kilo price."""
+    good = pack(100, 2.00, salvage=0.85, sku="good", rating=4.8, ratings=120)
+    cheap = pack(500, 4.50, salvage=0.85, sku="bulk", rating=2.6, ratings=90)
+    ing = ingredient(good, cheap, key="name:rice", recipe_pct=9.4)
+    _, options = _options(ing, need_g=100)
+
+    assert "bulk" not in options, "poorly rated and clearly beaten - off the list entirely"
+
+
+def test_a_bulk_pack_that_is_merely_a_little_worse_is_still_offered():
+    """The bar is a step down in quality, not any difference at all."""
+    good = pack(100, 2.00, salvage=0.85, sku="good", rating=4.6, ratings=120)
+    bulk = pack(500, 4.50, salvage=0.85, sku="bulk", rating=4.0, ratings=90)
+    _, options = _options(ingredient(good, bulk, key="name:rice", recipe_pct=9.4), need_g=100)
+
+    assert options["bulk"].better_value is True
+
+
+def test_a_two_star_product_is_dropped_when_something_better_exists():
+    """The cheapest garlic in the mapping is 2.2 stars beside a 3.8-star one."""
+    poor = pack(200, 0.70, sku="poor", rating=2.2, ratings=95)
+    better = pack(200, 0.90, sku="better", rating=3.8, ratings=474)
+    cover = B.cover_need(PlanIndex(), ingredient(poor, better, key="name:garlic"), need_g=150)
+
+    assert cover.choices[0].pack.sku == "better"
+
+
+def test_a_badly_rated_product_is_still_bought_when_it_is_the_only_one():
+    """An unpopular ingredient is still one the recipe asked for."""
+    only = pack(200, 0.70, sku="only", rating=1.4, ratings=95)
+    cover = B.cover_need(PlanIndex(), ingredient(only, key="name:natto"), need_g=150)
+
+    assert cover.choices[0].pack.sku == "only"
+
+
+def test_a_rating_nobody_has_voted_on_is_not_evidence():
+    unloved = pack(200, 0.70, sku="cheap", rating=1.0, ratings=2)
+    popular = pack(200, 0.90, sku="dear", rating=4.8, ratings=474)
+    cover = B.cover_need(PlanIndex(), ingredient(unloved, popular, key="name:x"), need_g=150)
+
+    assert cover.choices[0].pack.sku == "cheap", "two votes is an anecdote, not a verdict"
+
+
+def test_supply_is_measured_in_weeks_of_cooking_not_weeks_of_need():
+    """A jar holding 20 weeks of one meal is four years of an ingredient that
+    only turns up in one recipe in fifty."""
+    ing = ingredient(pack(1000, 2.50, sku="1kg"), key="name:cumin", recipe_pct=2.0)
+
+    often = B.weeks_of_supply(ing, capacity=1000, need=50, recipes=5, uses=1)
+    assert often == pytest.approx(200.0)  # 20x the need, but cooked once in ten weeks
+    assert B.weeks_of_supply(ing, capacity=1000, need=50, recipes=0, uses=1) is None
 
 
 def test_a_pinned_size_is_bought_whatever_the_week_needs():

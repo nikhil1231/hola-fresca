@@ -249,6 +249,11 @@ class BasketPackOptionOut(BaseModel):
     chosen: bool = False
     pinned: bool = False
     better_value: bool = False
+    rating: float | None = None
+    ratings_count: int | None = None
+    #: Estimated from how often the library cooks this, so it reads as a scale
+    #: ("months" against "years") rather than as a promise.
+    weeks_of_supply: float | None = None
 
 
 class PackPreferenceIn(BaseModel):
