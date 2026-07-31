@@ -35,6 +35,7 @@ import {
   IconFlame,
   IconHeart,
   IconHeartFilled,
+  IconEyeOff,
   IconMinus,
   IconPhoto,
   IconPlus,
@@ -46,6 +47,7 @@ import {
 
 import {
   useAuditRecipe,
+  useHideRecipe,
   usePlannerBasket,
   usePersonalRecipeRating,
   useRecipe,
@@ -425,6 +427,24 @@ function RecipeRatings({ recipe, personalRating, wishlist }) {
   )
 }
 
+function RecipeOptionsMenu({ pending, onHide }) {
+  return (
+    <Menu shadow="md" position="bottom-end" withinPortal>
+      <Menu.Target>
+        <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Recipe options">
+          {pending ? <Loader size={14} /> : <IconDots size={18} />}
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>Recipe</Menu.Label>
+        <Menu.Item color="red" leftSection={<IconEyeOff size={14} />} onClick={onHide} disabled={pending}>
+          Hide from library
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  )
+}
+
 function MacroStat({ label, value, unit, corrected }) {
   return (
     <Paper withBorder radius="md" p="sm" className={classes.macro}>
@@ -633,6 +653,7 @@ export default function RecipeDetailPage() {
   const revert = useRevertRecipeEdits(id)
   const personalRating = usePersonalRecipeRating(id)
   const wishlist = useRecipeWishlist(id)
+  const hideRecipe = useHideRecipe(id)
 
   if (isLoading) {
     return (
@@ -740,6 +761,14 @@ export default function RecipeDetailPage() {
                   setRecipePortions(upcomingWeekStart, recipe.id, portions)
                 }
               />
+              <RecipeOptionsMenu
+                pending={hideRecipe.isPending}
+                onHide={() => {
+                  if (!window.confirm('Hide this recipe from the library?')) return
+                  removeRecipeFromWeek(upcomingWeekStart, recipe.id)
+                  hideRecipe.mutate(undefined, { onSuccess: () => navigate('/') })
+                }}
+              />
               {marginalPerPortion != null && (
                 <Tooltip
                   label={
@@ -833,6 +862,12 @@ export default function RecipeDetailPage() {
       {wishlist.isError && (
         <Alert color="red" variant="light">
           {wishlist.error?.message ?? "Couldn't update your wishlist."}
+        </Alert>
+      )}
+
+      {hideRecipe.isError && (
+        <Alert color="red" variant="light">
+          {hideRecipe.error?.message ?? "Couldn't hide this recipe."}
         </Alert>
       )}
 

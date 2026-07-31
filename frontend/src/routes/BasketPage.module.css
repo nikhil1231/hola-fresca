@@ -113,6 +113,25 @@
 
 .spend {
   border-color: var(--mantine-color-fresh-3);
+  border-width: 2px;
+}
+
+.infoIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--mantine-color-dimmed);
+  border-radius: 999px;
+  cursor: help;
+  flex: 0 0 auto;
+}
+
+.infoIcon:hover,
+.infoIcon:focus-visible {
+  color: var(--mantine-color-fresh-7);
+  outline: none;
 }
 
 .statValue {
@@ -168,6 +187,10 @@
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
+.expandableRow:hover {
+  background: color-mix(in srgb, var(--mantine-color-fresh-0) 72%, transparent);
+}
+
 .expandableRow:focus-visible {
   outline: 2px solid var(--mantine-color-fresh-5);
   outline-offset: -2px;
@@ -175,6 +198,11 @@
 
 .highlightedRow {
   background: color-mix(in srgb, var(--mantine-color-fresh-1) 55%, transparent);
+  box-shadow: inset 3px 0 0 var(--mantine-color-fresh-6);
+}
+
+.highlightedRow:hover {
+  background: color-mix(in srgb, var(--mantine-color-fresh-1) 68%, transparent);
   box-shadow: inset 3px 0 0 var(--mantine-color-fresh-6);
 }
 

@@ -44,6 +44,7 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "source_active": "INTEGER DEFAULT 0",
         "source_published": "INTEGER DEFAULT 0",
         "course": "VARCHAR(16) DEFAULT 'main'",
+        "manually_excluded": "INTEGER DEFAULT 0",
     },
 }
 

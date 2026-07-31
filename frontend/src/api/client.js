@@ -109,6 +109,10 @@ export function setPackPreference({ ingredientKey, sku }) {
   return putJSON('/api/planner/preferences/pack', { ingredient_key: ingredientKey, sku })
 }
 
+export function hideRecipe(id) {
+  return postJSON(`/api/recipes/${id}/hide`, {})
+}
+
 // Flags the macros as suspicious and starts a background audit; poll the
 // returned job_id with fetchAuditJob until it is no longer 'running'.
 export async function flagRecipe(id) {

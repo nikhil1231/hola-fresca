@@ -167,6 +167,28 @@ def test_list_returns_only_curated(client):
     assert "Hidden" not in names
 
 
+def test_hide_recipe_removes_it_from_active_library(client):
+    rid = client.get("/api/recipes", params={"q": "taco"}).json()["items"][0]["id"]
+
+    response = client.post(f"/api/recipes/{rid}/hide")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": rid, "manually_excluded": True}
+    data = client.get("/api/recipes").json()
+    assert data["total"] == 2
+    assert {item["name"] for item in data["items"]} == {
+        "Creamy Veggie Pasta",
+        "Speedy Cajun Style Chicken Macaroni",
+    }
+    assert client.get(f"/api/recipes/{rid}").status_code == 404
+    assert client.post("/api/planner/basket", json={"selections": [{"recipe_id": rid, "portions": 4}]}).status_code == 400
+
+
+def test_hide_rejects_unknown_or_unavailable_recipes(client):
+    assert client.post("/api/recipes/4/hide").status_code == 404
+    assert client.post("/api/recipes/999/hide").status_code == 404
+
+
 def test_card_shows_derived_diet_chip(client):
     data = client.get("/api/recipes", params={"cuisine": "Italian"}).json()
     card = data["items"][0]

@@ -29,14 +29,21 @@
 
 .cardHighlighted {
   border-color: var(--mantine-color-fresh-5);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--mantine-color-fresh-5) 58%, transparent));
-  box-shadow: 0 0 0 1px var(--mantine-color-fresh-5);
+  filter: none;
+  box-shadow:
+    0 0 0 1px var(--mantine-color-fresh-5),
+    0 10px 28px -14px color-mix(in srgb, var(--mantine-color-fresh-7) 62%, transparent),
+    0 0 22px -8px color-mix(in srgb, var(--mantine-color-fresh-4) 72%, transparent);
 }
 
 .cardHighlighted:hover {
   border-color: var(--mantine-color-fresh-5);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--mantine-color-fresh-5) 58%, transparent));
-  box-shadow: 0 0 0 1px var(--mantine-color-fresh-5), var(--mantine-shadow-md);
+  filter: none;
+  box-shadow:
+    0 0 0 1px var(--mantine-color-fresh-5),
+    0 10px 28px -14px color-mix(in srgb, var(--mantine-color-fresh-7) 62%, transparent),
+    0 0 22px -8px color-mix(in srgb, var(--mantine-color-fresh-4) 72%, transparent);
+  transform: none;
 }
 
 .mainLink {

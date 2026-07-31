@@ -13,6 +13,7 @@ from app.api.recipes import (
     _filtered_recipe_ids,
     _personal_rating_map,
     _recipe_ids_with_pricing_gaps,
+    _visible_recipe_condition,
     _wishlist_map,
     _to_card,
 )
@@ -57,7 +58,7 @@ def _require_curated(session: Session, recipe_ids: list[int]) -> None:
         return
     found = set(
         session.scalars(
-            select(Recipe.id).where(Recipe.curated == 1, Recipe.id.in_(recipe_ids))
+            select(Recipe.id).where(*_visible_recipe_condition(), Recipe.id.in_(recipe_ids))
         )
     )
     missing = [rid for rid in recipe_ids if rid not in found]

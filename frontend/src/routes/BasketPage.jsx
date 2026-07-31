@@ -17,8 +17,8 @@ import {
   Stack,
   Table,
   Text,
-  Title,
   Tooltip,
+  Title,
   UnstyledButton,
 } from '@mantine/core'
 import {
@@ -32,6 +32,7 @@ import {
   IconChevronRight,
   IconClock,
   IconHome,
+  IconInfoCircle,
   IconPackages,
   IconRefresh,
   IconStarFilled,
@@ -135,12 +136,19 @@ function recipePortionPrices(lines, entries) {
   )
 }
 
-function Stat({ label, value, tone = 'default' }) {
+function Stat({ label, value, description, tone = 'default' }) {
   return (
     <Box className={`${classes.stat} ${classes[tone] ?? ''}`}>
-      <Text size="xs" c="dimmed" fw={700} tt="uppercase">
-        {label}
-      </Text>
+      <Group gap={5} justify="space-between" align="center" wrap="nowrap">
+        <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+          {label}
+        </Text>
+        <Tooltip label={description} withArrow position="top">
+          <span className={classes.infoIcon} aria-label={`${label} explanation`} tabIndex={0}>
+            <IconInfoCircle size={14} stroke={2} />
+          </span>
+        </Tooltip>
+      </Group>
       <Text fw={800} className={classes.statValue}>
         {value}
       </Text>
@@ -413,7 +421,7 @@ function LineTable({
         </Title>
       </Group>
       <Table.ScrollContainer minWidth={720}>
-        <Table highlightOnHover verticalSpacing="sm" className={classes.lineTable}>
+        <Table verticalSpacing="sm" className={classes.lineTable}>
           <colgroup>
             <col className={classes.colOwned} />
             <col className={classes.colIngredient} />
@@ -652,6 +660,7 @@ export default function BasketPage() {
   const [openLineKey, setOpenLineKey] = useState(null)
   const [activeLineKey, setActiveLineKey] = useState(null)
   const [hoverLineKey, setHoverLineKey] = useState(null)
+  const [glowLineKey, setGlowLineKey] = useState(null)
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
   const { ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
   const { packOverrides, setWeekPack } = useWeekPackChoices(weekStart)
@@ -737,17 +746,33 @@ export default function BasketPage() {
     const line = allLines.find(([key]) => key === selectedLineKey)?.[1]
     return contributionIds(line)
   }, [allLines, selectedLineKey])
+  const glowRecipeIds = useMemo(() => {
+    const line = allLines.find(([key]) => key === glowLineKey)?.[1]
+    return contributionIds(line)
+  }, [allLines, glowLineKey])
 
   useEffect(() => {
     setOpenLineKey(null)
     setActiveLineKey(null)
     setHoverLineKey(null)
+    setGlowLineKey(null)
     setHoverRecipeId(null)
   }, [weekStart, selections])
 
   useEffect(() => {
-    if (!hoverLineKey || selectedRecipeIds.size === 0) return undefined
-    const recipeId = selectedRecipeIds.values().next().value
+    if (!hoverLineKey) {
+      setGlowLineKey(activeLineKey)
+      return undefined
+    }
+    const handle = window.setTimeout(() => {
+      setGlowLineKey(hoverLineKey)
+    }, 280)
+    return () => window.clearTimeout(handle)
+  }, [activeLineKey, hoverLineKey])
+
+  useEffect(() => {
+    if (!hoverLineKey || glowRecipeIds.size === 0) return undefined
+    const recipeId = glowRecipeIds.values().next().value
     const handle = window.setTimeout(() => {
       const container = recipesScrollRef.current
       const node = recipeRefs.current.get(recipeId)
@@ -769,9 +794,9 @@ export default function BasketPage() {
           behavior: 'smooth',
         })
       }
-    }, 280)
+    }, 40)
     return () => window.clearTimeout(handle)
-  }, [hoverLineKey, selectedRecipeIds])
+  }, [hoverLineKey, glowRecipeIds])
 
   return (
     <Stack gap="xl" className={classes.pageStack}>
@@ -828,7 +853,7 @@ export default function BasketPage() {
                     <RecipeCard
                       recipe={entry.recipe}
                       basketBadgeLabel={`${formatMoney(recipePrices.get(entry.recipe.id))} pp share`}
-                      highlighted={selectedRecipeIds.has(entry.recipe.id)}
+                      highlighted={glowRecipeIds.has(entry.recipe.id)}
                       plannerEntry={entry}
                       plannerControlsVisible
                       onRemoveFromPlan={() => removeRecipeFromWeek(weekStart, entry.recipe.id)}
@@ -903,10 +928,27 @@ export default function BasketPage() {
           ) : (
             <>
               <Box className={classes.statsGrid}>
-                <Stat label="Spend" value={formatMoney(orderCost)} tone="spend" />
-                <Stat label="Waste" value={formatMoney(orderWaste)} />
-                <Stat label="Score" value={formatMoney(orderCost + orderWaste)} />
-                <Stat label="Portion price" value={formatMoney(basketPortionPrice)} />
+                <Stat
+                  label="Spend"
+                  value={formatMoney(orderCost)}
+                  description="Estimated total cost of basket items not marked as owned."
+                  tone="spend"
+                />
+                <Stat
+                  label="Waste"
+                  value={formatMoney(orderWaste)}
+                  description="Estimated value of unused pack leftovers after this week's recipes."
+                />
+                <Stat
+                  label="Score"
+                  value={formatMoney(orderCost + orderWaste)}
+                  description="Spend plus waste, used to compare basket efficiency."
+                />
+                <Stat
+                  label="Portion price"
+                  value={formatMoney(basketPortionPrice)}
+                  description="Estimated spend divided by the total planned portions."
+                />
               </Box>
 
               {data.unmapped.length > 0 && (

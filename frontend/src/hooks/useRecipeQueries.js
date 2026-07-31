@@ -9,6 +9,7 @@ import {
   fetchRecipe,
   fetchRecipes,
   flagRecipe,
+  hideRecipe,
   revertRecipeEdits,
   setPackPreference,
   setPersonalRecipeRating,
@@ -169,6 +170,20 @@ export function useRecipeWishlist(id) {
       qc.setQueryData(['recipe', id], data)
       qc.invalidateQueries({ queryKey: ['recipes'] })
       qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
+    },
+  })
+}
+
+export function useHideRecipe(id) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => hideRecipe(id),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ['recipe', id] })
+      qc.invalidateQueries({ queryKey: ['recipes'] })
+      qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
+      qc.invalidateQueries({ queryKey: ['facets'] })
+      qc.invalidateQueries({ queryKey: ['planner-basket'] })
     },
   })
 }

@@ -214,7 +214,7 @@ def _derive_count_metadata(
     stmt = (
         select(RecipeIngredient)
         .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
-        .where(Recipe.curated == 1)
+        .where(Recipe.curated == 1, Recipe.manually_excluded == 0)
     )
     for line in session.scalars(stmt):
         raw_key = sid_index.get(line.source_ingredient_id or "")
@@ -450,7 +450,7 @@ def _load_recipes(
     if recipe_ids is not None:
         stmt = stmt.where(Recipe.id.in_(recipe_ids))
     elif curated_only:
-        stmt = stmt.where(Recipe.curated == 1)
+        stmt = stmt.where(Recipe.curated == 1, Recipe.manually_excluded == 0)
 
     recipes: dict[int, PlanRecipe] = {}
     for recipe in session.scalars(stmt).unique():

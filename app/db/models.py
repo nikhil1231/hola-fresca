@@ -135,6 +135,11 @@ class Recipe(Base):
     # re-run with different rules.
     curated: Mapped[bool] = mapped_column(Integer, default=0, index=True)
 
+    # Manual override for broken source rows that survive automated curation.
+    # Kept separate from ``curated`` because curation is regenerated from source
+    # data, while this records a local human decision.
+    manually_excluded: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+
     # Raised by hand from the recipe page ("these macros look wrong"), distinct
     # from the computed ``macros_suspect`` heuristic: this one records that a
     # person asked for a second look, and survives the audit that answers it.

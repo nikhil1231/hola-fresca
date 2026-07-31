@@ -64,6 +64,11 @@ def _main_protein_match(keywords: list[str]):
     )
     return Recipe.ingredients.any(and_(protein_names, ~non_main_names))
 
+
+def _visible_recipe_condition():
+    """The human-facing library: curated by rules, not manually suppressed."""
+    return Recipe.curated == 1, Recipe.manually_excluded == 0
+
 router = APIRouter(prefix="/api", tags=["recipes"])
 
 CARD_WIDTH = 500
@@ -265,7 +270,7 @@ def _apply_filters(
     wishlisted: bool = False,
     course: list[str] | None = None,
 ) -> Select:
-    stmt = stmt.where(Recipe.curated == 1)
+    stmt = stmt.where(*_visible_recipe_condition())
     stmt = _apply_course(stmt, course)
     if cuisine:
         stmt = stmt.where(Recipe.cuisines.any(RecipeCuisine.name.in_(cuisine)))
@@ -510,7 +515,7 @@ def _unmapped_recipe_ids(session: Session, csv_path: Path | None) -> set[int]:
             select(RecipeIngredient.recipe_id)
             .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
             .where(
-                Recipe.curated == 1,
+                *_visible_recipe_condition(),
                 or_(
                     RecipeIngredient.source_ingredient_id.is_(None),
                     RecipeIngredient.source_ingredient_id.not_in(approved_source_ids),
@@ -660,7 +665,7 @@ def get_recipe(
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated:
+    if recipe is None or not recipe.curated or recipe.manually_excluded:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     steps = sorted(recipe.steps, key=lambda s: s.index)
@@ -754,7 +759,7 @@ def set_personal_rating(
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated:
+    if recipe is None or not recipe.curated or recipe.manually_excluded:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     existing = session.get(PersonalRecipeRating, recipe_id)
@@ -777,7 +782,7 @@ def set_wishlist(
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated:
+    if recipe is None or not recipe.curated or recipe.manually_excluded:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     existing = session.get(PersonalRecipeWishlist, recipe_id)
@@ -787,6 +792,17 @@ def set_wishlist(
         session.delete(existing)
     session.commit()
     return get_recipe(recipe_id, session, csv_path)
+
+
+@router.post("/recipes/{recipe_id}/hide")
+def hide_recipe(recipe_id: int, session: Session = Depends(get_session)) -> dict[str, int | bool]:
+    """Remove a bad source recipe from the active local library."""
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or not recipe.curated or recipe.manually_excluded:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe.manually_excluded = 1
+    session.commit()
+    return {"id": recipe_id, "manually_excluded": True}
 
 # --------------------------------------------------------------------------
 # Macro audit
@@ -803,7 +819,7 @@ def flag_recipe(recipe_id: int, session: Session = Depends(get_session)) -> Audi
     from app import audit as audit_mod
 
     recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated:
+    if recipe is None or not recipe.curated or recipe.manually_excluded:
         raise HTTPException(status_code=404, detail="Recipe not found")
     audit_mod.flag_recipe(session, recipe_id)
     job = audit_mod.start_background(_session_factory(), recipe_id)
@@ -841,7 +857,7 @@ def get_facets(
     session: Session = Depends(get_session),
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> FacetsOut:
-    curated = Recipe.curated == 1
+    curated = and_(*_visible_recipe_condition())
 
     # Cuisines above the noise threshold, cleaned for display.
     cuisine_rows = session.execute(
@@ -926,7 +942,7 @@ def get_facets(
     course_counts = dict(
         session.execute(
             select(func.coalesce(Recipe.course, facet_cfg.MAIN), func.count())
-            .where(Recipe.curated == 1)
+            .where(*_visible_recipe_condition())
             .group_by(func.coalesce(Recipe.course, facet_cfg.MAIN))
         ).all()
     )
