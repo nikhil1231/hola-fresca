@@ -24,6 +24,7 @@ RETAILER = "ocado"
 @dataclass(frozen=True)
 class UsageStats:
     line_count: int
+    name: str | None = None
     metric_unit: str | None = None
     median: float | None = None
     p25: float | None = None
@@ -80,6 +81,7 @@ def load_usage_stats(csv_path: Path | None = None) -> dict[str, UsageStats]:
         for row in csv.DictReader(f):
             stats[row["ingredient_key"]] = UsageStats(
                 line_count=int(row["line_count"]),
+                name=row.get("name") or None,
                 metric_unit=row.get("metric_unit") or None,
                 median=_f(row.get("median_metric_amount")),
                 p25=_f(row.get("p25_metric_amount")),
@@ -123,7 +125,7 @@ def gather_candidates(
     ).all()
 
     candidates: list[Candidate] = []
-    display_name = name
+    display_name = name or (usage.name if usage else None)
     line_count = usage.line_count if usage else 0
     for hit, product in rows:
         display_name = display_name or hit.search_term

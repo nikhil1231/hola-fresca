@@ -6,7 +6,7 @@ from urllib.parse import quote
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db.models import Recipe, RecipeCuisine, RecipeIngredient
+from app.db.models import IngredientMapping, Recipe, RecipeCuisine, RecipeIngredient
 from tests.conftest import seed_candidates
 
 KEY = "name:chicken breast"
@@ -71,10 +71,29 @@ def test_detail_before_any_decision_lists_candidates(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] is None
+    assert body["name"] == "Chicken Breast"
     assert len(body["candidates"]) == 2
     assert body["usage"]["median"] == 450
     assert body["ingredient_icon_url"].startswith("https://img.hellofresh.com/")
     assert body["example_recipes"][0]["name"] == "Chicken Dinner"
+
+
+def test_detail_uses_frequency_name_when_mapping_name_is_stale(client, factory):
+    with factory() as s:
+        s.add(
+            IngredientMapping(
+                retailer="ocado",
+                ingredient_key=KEY,
+                name="Stale Search Term",
+                line_count=500,
+                status="needs_review",
+            )
+        )
+        s.commit()
+
+    r = client.get(f"/api/mapping/ingredients/{KEY_Q}")
+    assert r.status_code == 200
+    assert r.json()["name"] == "Chicken Breast"
 
 
 def test_unknown_ingredient_returns_404(client):

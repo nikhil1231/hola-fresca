@@ -353,9 +353,12 @@ def get_detail(session: Session, ic: IngredientCandidates, retailer: str = RETAI
     views.sort(key=lambda v: (not v.accepted, v.rank or 0, v.candidate.result_rank))
 
     usage = _usage_dict(ic)
+    display_name = ic.name
+    if display_name == ic.ingredient_key and mapping is not None:
+        display_name = mapping.name
     return IngredientDetail(
         ingredient_key=ic.ingredient_key,
-        name=(mapping.name if mapping else ic.name),
+        name=display_name,
         status=mapping.status if mapping else None,
         line_count=ic.line_count,
         spend_score=mapping.spend_score if mapping else None,
