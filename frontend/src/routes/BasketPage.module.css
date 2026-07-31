@@ -216,18 +216,102 @@
 }
 
 .expansionShellOpen {
-  /* Roomier than the pack list alone needs: the size menu sits below it, and a
-     clipped "always buy" button is a control nobody knows exists. */
-  max-height: 560px;
+  /* Back to holding just the packs and the out-of-stock note: the size menu
+     moved out to its own modal. */
+  max-height: 400px;
   overflow-y: auto;
   opacity: 1;
   transform: translateY(0);
 }
 
-.optionBox {
-  border-top: 1px solid var(--mantine-color-default-border);
-  background: color-mix(in srgb, var(--mantine-color-default) 14%, transparent);
-  padding: 10px 14px 12px;
+.colPackSwap {
+  width: 52px;
+}
+
+.packSwapCell {
+  text-align: right;
+}
+
+/* Driven through ActionIcon's own variables rather than its `color` prop, which
+   resolves "gray" and "green" to light shades in dark mode - right for text on a
+   dark surface, far too bright for an idle icon in a table row.
+   `!important` because Mantine resolves variant colours in JS and writes these
+   same variables inline, which a stylesheet cannot otherwise outrank. */
+.packSwapButton {
+  --ai-color: light-dark(var(--mantine-color-gray-6), var(--mantine-color-dark-2)) !important;
+  --ai-hover-color: light-dark(var(--mantine-color-gray-8), var(--mantine-color-dark-0)) !important;
+  --ai-hover: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-5)) !important;
+}
+
+.packSwapDeal {
+  --ai-color: light-dark(var(--mantine-color-green-7), var(--mantine-color-green-5)) !important;
+  --ai-hover-color: light-dark(var(--mantine-color-green-8), var(--mantine-color-green-4)) !important;
+  --ai-bg: light-dark(
+    var(--mantine-color-green-0),
+    color-mix(in srgb, var(--mantine-color-green-9) 32%, transparent)
+  ) !important;
+  --ai-hover: light-dark(
+    var(--mantine-color-green-1),
+    color-mix(in srgb, var(--mantine-color-green-9) 48%, transparent)
+  ) !important;
+}
+
+/* Two sizes, side by side, pick one. The comparison is the interface, so the
+   cards are equal width and only the figures that decide it are on them. */
+.packCard {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+/* A ring rather than a thicker border: border-width would reflow the card's
+   contents on hover, and painting the second pixel outside the box is what keeps
+   the edge crisp while the card lifts. */
+.packCard:hover:not(:disabled) {
+  border-color: var(--mantine-color-fresh-5);
+  box-shadow:
+    0 0 0 1px var(--mantine-color-fresh-5),
+    0 2px 8px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.4));
+  transform: translateY(-1px);
+}
+
+.packCardActive {
+  border-color: var(--mantine-color-fresh-6);
+  box-shadow: 0 0 0 1px var(--mantine-color-fresh-6);
+}
+
+.packCardActive:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px var(--mantine-color-fresh-6),
+    0 2px 8px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.4));
+}
+
+.packArrow {
+  flex: 0 0 auto;
+  width: 76px;
+  color: var(--mantine-color-dimmed);
+}
+
+.unitCost {
+  line-height: 1.15;
+  margin-bottom: 2px;
+}
+
+.star {
+  color: var(--mantine-color-yellow-6);
+}
+
+.otherSize {
+  padding: 4px 6px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.otherSize:hover {
+  background: color-mix(in srgb, var(--mantine-color-default) 40%, transparent);
 }
 
 .choiceList {
@@ -330,4 +414,34 @@
   .bucketGrid {
     grid-template-columns: 1fr;
   }
+}
+
+.otherSizes {
+  margin-top: var(--mantine-spacing-sm);
+}
+
+/* The row chevron rotates 90deg to point down; this one already points down. */
+.chevronFlip {
+  transform: rotate(180deg);
+}
+
+/* The cards lift 1px on hover and gain a ring; without this the ring's top edge
+   is clipped by the row's own box. */
+.packRow {
+  padding: 4px 2px;
+}
+
+.packArrowIcon {
+  color: var(--mantine-color-dimmed);
+  margin-top: 2px;
+}
+
+.supplyExpiry {
+  color: light-dark(var(--mantine-color-orange-6), var(--mantine-color-orange-5));
+  flex: 0 0 auto;
+}
+
+.supplyEaten {
+  color: light-dark(var(--mantine-color-gray-5), var(--mantine-color-dark-2));
+  flex: 0 0 auto;
 }

@@ -37,7 +37,7 @@ from app.planner.basket import (
     Selection,
     build_basket,
 )
-from app.planner.cache import get_index, get_ranking
+from app.planner.cache import get_index, get_ranking, note_pack_preference
 from app.planner.index import RETAILER, PlanIndex
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
@@ -117,12 +117,14 @@ def _option_out(option) -> BasketPackOptionOut:
         keeps=option.keeps,
         chosen=option.chosen,
         pinned=option.pinned,
+        this_week=option.this_week,
         better_value=option.better_value,
         rating=option.pack.rating,
         ratings_count=option.pack.ratings_count,
         weeks_of_supply=(
-            round(option.weeks_of_supply, 1) if option.weeks_of_supply is not None else None
+            round(option.supply.weeks, 1) if option.supply is not None else None
         ),
+        supply_limited_by=option.supply.limited_by if option.supply is not None else None,
     )
 
 
@@ -235,13 +237,14 @@ def basket(
 
     index = _load_planner_index(factory, recipe_ids, csv_path)
     selections = [_planner_selection(selection) for selection in body.selections]
-    return _basket_out(build_basket(index, selections))
+    return _basket_out(build_basket(index, selections, pack_overrides=body.pack_overrides))
 
 
 @router.put("/preferences/pack", response_model=PackPreferenceOut)
 def set_pack_preference(
     body: PackPreferenceIn,
     session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> PackPreferenceOut:
     """Fix (or release) the pack size an ingredient is always bought in.
 
@@ -266,6 +269,7 @@ def set_pack_preference(
         )
     mapping.preferred_sku = body.sku
     session.commit()
+    note_pack_preference(factory, body.ingredient_key, body.sku)
     return PackPreferenceOut(ingredient_key=body.ingredient_key, sku=body.sku)
 
 

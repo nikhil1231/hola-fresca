@@ -142,7 +142,7 @@ def _score_multiset(
 
 
 def preferred_packs(
-    ingredient: Ingredient, *, include_unavailable: bool = False
+    ingredient: Ingredient, *, include_unavailable: bool = False, override: str | None = None
 ) -> tuple[Pack, ...]:
     """The best-matching form of an ingredient that can actually be bought.
 
@@ -158,19 +158,23 @@ def preferred_packs(
     to describe the shop rather than your preferences.
     """
     if not include_unavailable:
-        pinned = pinned_pack(ingredient)
+        pinned = pinned_pack(ingredient, override)
         if pinned is not None:
             return (pinned,)
     return _preferred_tier(ingredient, include_unavailable=include_unavailable)[1]
 
 
-def pinned_pack(ingredient: Ingredient) -> Pack | None:
-    """The pack this ingredient is always bought as, if it can be bought today."""
-    if not ingredient.preferred_sku:
+def pinned_pack(ingredient: Ingredient, override: str | None = None) -> Pack | None:
+    """The pack this ingredient is bought as, if it can be bought today.
+
+    ``override`` is this week's choice, which beats the standing one: deciding
+    to buy the big bag once is a different decision from always buying it, and
+    the first should not quietly become the second.
+    """
+    sku = override or ingredient.preferred_sku
+    if not sku:
         return None
-    return next(
-        (p for p in ingredient.available_packs if p.sku == ingredient.preferred_sku), None
-    )
+    return next((p for p in ingredient.available_packs if p.sku == sku), None)
 
 
 def _preferred_tier(
@@ -422,27 +426,37 @@ def _with_substitution(
 
 
 def cover_need(
-    index: PlanIndex, ingredient: Ingredient, need_g: float, need_units: float | None = None
+    index: PlanIndex,
+    ingredient: Ingredient,
+    need_g: float,
+    need_units: float | None = None,
+    *,
+    override: str | None = None,
 ) -> Cover | None:
-    """Cover one ingredient's demand, memoised on the index."""
+    """Cover one ingredient's demand, memoised on the index.
+
+    ``override`` is a pack chosen for this week only, so it joins the cache key
+    rather than replacing the entry a plain week would use.
+    """
     if not ingredient.available_packs:
         return None
+    packs = preferred_packs(ingredient, override=override)
     if ingredient.unit_kind == "count":
         if need_units is None or need_units <= 0:
             return None
         target = math.ceil(need_units - COUNT_CEIL_EPSILON)
-        cache_key = (ingredient.key, "count", target)
+        cache_key = (ingredient.key, "count", target, override)
         if cache_key in index.cover_cache:
             return index.cover_cache[cache_key]  # type: ignore[return-value]
-        cover = _cover_count_with_packs(preferred_packs(ingredient), need_units, need_g)
+        cover = _cover_count_with_packs(packs, need_units, need_g)
     elif need_g <= 0:
         return None
     else:
         target_b = math.ceil(need_g / BUCKET_G)
-        cache_key = (ingredient.key, "g", target_b)
+        cache_key = (ingredient.key, "g", target_b, override)
         if cache_key in index.cover_cache:
             return index.cover_cache[cache_key]  # type: ignore[return-value]
-        cover = _cover_with_packs(preferred_packs(ingredient), need_g)
+        cover = _cover_with_packs(packs, need_g)
 
     if len(ingredient.available_packs) != len(ingredient.packs):
         cover = _with_substitution(cover, ingredient, need_g, need_units)
@@ -479,12 +493,19 @@ class PackOption:
     leftover_delta: float
     quantity_unit: str = "g"
     chosen: bool = False
+    #: Standing choice, held on the mapping and honoured every week.
     pinned: bool = False
+    #: Chosen for this week only, and gone by the next one.
+    this_week: bool = False
     better_value: bool = False
     #: Roughly how long this pack lasts, allowing for how often the library
     #: actually cooks the ingredient. The one thing the gates cannot judge -
     #: whether *you* will get through it - so it is shown rather than scored.
-    weeks_of_supply: float | None = None
+    supply: Supply | None = None
+
+    @property
+    def weeks_of_supply(self) -> float | None:
+        return self.supply.weeks if self.supply else None
 
     @property
     def keeps(self) -> bool:
@@ -512,22 +533,46 @@ def _pack_option(pack: Pack, need: float, unit: str) -> PackOption | None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Supply:
+    """How long a pack lasts, and which of the two clocks ran out first."""
+
+    weeks: float
+    #: "expiry" when the date beat you to it, "consumption" when you beat the date.
+    limited_by: str
+
+
 def weeks_of_supply(
-    ingredient: Ingredient, capacity: float, need: float, *, recipes: int, uses: int
-) -> float | None:
-    """How many weeks a pack of ``capacity`` lasts at the rate this gets cooked.
+    ingredient: Ingredient,
+    pack: Pack,
+    capacity: float,
+    need: float,
+    *,
+    recipes: int,
+    uses: int,
+) -> Supply | None:
+    """How long a pack of ``capacity`` lasts: whichever runs out first, it or you.
 
     ``need`` is a week in which the ingredient came up, which is not every week:
     an ingredient in 2% of a five-recipe library turns up about once every ten
     weeks, so a jar holding twenty weeks' worth of a single meal is really four
     years of cupboard. Estimated from the library rather than from your own
     cooking, so it is a scale ("months" against "years"), not a promise.
+
+    Capped by the stated shelf life, because how long you would *take* to eat it
+    is only the answer while it is still edible. Four months of mozzarella is two
+    weeks of mozzarella and then a fortnight of regret.
     """
     if need <= 0 or uses <= 0 or recipes <= 0 or ingredient.recipe_pct <= 0:
         return None
     expected_uses = (ingredient.recipe_pct / 100.0) * recipes
     weekly_need = need * expected_uses / uses
-    return capacity / weekly_need if weekly_need > 0 else None
+    if weekly_need <= 0:
+        return None
+    weeks = capacity / weekly_need
+    if pack.shelf_life_days and pack.shelf_life_days / 7.0 < weeks:
+        return Supply(weeks=pack.shelf_life_days / 7.0, limited_by="expiry")
+    return Supply(weeks=weeks, limited_by="consumption")
 
 
 def pack_options(
@@ -537,6 +582,7 @@ def pack_options(
     *,
     recipes: int = 0,
     uses: int = 1,
+    override: str | None = None,
 ) -> tuple[PackOption, ...]:
     """Every size this ingredient could be bought in, priced against the cover.
 
@@ -548,9 +594,9 @@ def pack_options(
     if need <= 0:
         return ()
     packs = list(_preferred_tier(ingredient)[1])
-    pinned = pinned_pack(ingredient)
-    if pinned is not None and pinned not in packs:
-        packs.append(pinned)
+    for held in (pinned_pack(ingredient), pinned_pack(ingredient, override)):
+        if held is not None and held not in packs:
+            packs.append(held)
     if len(packs) < 2:
         return ()
 
@@ -570,9 +616,10 @@ def pack_options(
                 leftover_delta=option.leftover - (cover.leftover_qty
                                                   if unit == "unit" else cover.leftover_g),
                 chosen=len(chosen_skus) == 1 and pack.sku in chosen_skus,
-                pinned=pinned is not None and pack.sku == pinned.sku,
-                weeks_of_supply=weeks_of_supply(
-                    ingredient, option.capacity, need, recipes=recipes, uses=uses
+                pinned=pack.sku == ingredient.preferred_sku,
+                this_week=override is not None and pack.sku == override,
+                supply=weeks_of_supply(
+                    ingredient, pack, option.capacity, need, recipes=recipes, uses=uses
                 ),
             )
         )
@@ -868,10 +915,17 @@ def build_basket(
     selections: Iterable[Selection],
     *,
     include_staples: bool = False,
+    pack_overrides: dict[str, str] | None = None,
 ) -> Basket:
-    """Price a week's recipes: one pack decision per canonical ingredient."""
+    """Price a week's recipes: one pack decision per canonical ingredient.
+
+    ``pack_overrides`` are this week's pack choices, ``{ingredient_key: sku}``.
+    They live with the week rather than in the database, so choosing the big bag
+    once costs nothing and is forgotten by the next shop.
+    """
     selections = list(selections)
     plan_size = len(selections)
+    pack_overrides = pack_overrides or {}
     needs, names, untracked, contributions = aggregate_needs(index, selections)
     basket = Basket(untracked_lines=untracked)
 
@@ -890,7 +944,8 @@ def build_basket(
             else:
                 basket.unpriceable.append(label)
             continue
-        cover = cover_need(index, ingredient, demand.grams, demand.units)
+        override = pack_overrides.get(key)
+        cover = cover_need(index, ingredient, demand.grams, demand.units, override=override)
         line = BasketLine(
             key=key,
             name=label,
@@ -921,6 +976,7 @@ def build_basket(
                 line.need_qty if line.quantity_unit == "unit" else line.need_g,
                 recipes=plan_size,
                 uses=len(line.contributions) or 1,
+                override=override,
             )
         basket.lines.append(line)
 

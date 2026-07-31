@@ -70,23 +70,24 @@ export function useRecipeSuggestions(
   })
 }
 
-export function usePlannerBasket(selections) {
+export function usePlannerBasket(selections, packOverrides = {}) {
   return useQuery({
-    queryKey: ['planner-basket', selections],
-    queryFn: () => fetchPlannerBasket(selections),
+    queryKey: ['planner-basket', selections, packOverrides],
+    queryFn: () => fetchPlannerBasket(selections, packOverrides),
+    // A week's pack choice re-prices the same basket, so keep the previous
+    // answer on screen while the new one lands instead of blanking the table.
+    placeholderData: (previous) => previous,
   })
 }
 
-// Pinning a pack size changes what the whole week costs - other recipes may
-// share the ingredient - so the basket and the suggestions both go stale.
+// Pinning a pack size changes what the whole week costs, since other recipes may
+// share the ingredient. Only the basket is invalidated: the ranking barely moves
+// for one pack, and re-scoring the library on every click was most of the delay.
 export function usePackPreference() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: setPackPreference,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['planner-basket'] })
-      qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-basket'] }),
   })
 }
 

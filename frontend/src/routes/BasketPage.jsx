@@ -1,12 +1,17 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActionIcon,
   Alert,
   Badge,
   Box,
   Button,
+  Center,
   Checkbox,
+  Divider,
   Group,
   Loader,
+  Modal,
+  SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
@@ -14,6 +19,7 @@ import {
   Text,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core'
 import {
   IconAlertCircle,
@@ -21,14 +27,21 @@ import {
   IconBasket,
   IconBuildingStore,
   IconCalendarWeek,
+  IconArrowRight,
+  IconChevronDown,
   IconChevronRight,
+  IconClock,
   IconHome,
+  IconPackages,
   IconRefresh,
+  IconStarFilled,
+  IconToolsKitchen2,
 } from '@tabler/icons-react'
 
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
+import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
 import { usePackPreference, usePlannerBasket } from '../hooks/useRecipeQueries.js'
 import {
   formatWeekLabel,
@@ -158,120 +171,227 @@ function formatSupply(weeks) {
   return '2+ years'
 }
 
-function formatRating(option) {
-  return option.rating == null ? null : `${option.rating.toFixed(1)}★ (${option.ratings_count ?? 0})`
+function ratingColor(rating) {
+  if (rating == null) return 'gray'
+  if (rating >= 4.5) return 'teal'
+  if (rating >= 4) return 'green'
+  if (rating >= 3.5) return 'yellow'
+  return 'orange'
 }
 
-// The size menu. The planner only ever prices one week, so it has no way to
-// know that the kilo bag is the better buy across the month - this is where
-// that judgement gets made, and stays made.
-function PackOptions({ line, packPreference }) {
-  const options = line.options ?? []
-  if (options.length < 2) return null
-  const pending = packPreference.isPending && packPreference.variables?.ingredientKey === line.key
-
+function Rating({ option }) {
+  if (option.rating == null) return <Text size="sm" c="dimmed">unrated</Text>
   return (
-    <Box className={classes.optionBox}>
-      <Group gap="xs" mb={6}>
-        <Text size="xs" fw={700} tt="uppercase" c="dimmed">
-          Pack size
-        </Text>
-        {line.options.some((option) => option.pinned) && (
-          <Text size="xs" c="dimmed">
-            pinned sizes stay put from week to week
-          </Text>
-        )}
-      </Group>
-      <Stack gap={4}>
-        {options.map((option) => (
-          <Group key={option.sku} gap="xs" wrap="nowrap" justify="space-between">
-            <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
-              <Text size="sm" truncate>
-                {option.count}x {option.pack_size_raw || formatCapacity(option.capacity, option.quantity_unit)}
-              </Text>
-              <Text size="xs" c="dimmed" truncate>
-                {option.product_name}
-              </Text>
-              {option.chosen && (
-                <Badge size="xs" variant="light" color="gray">
-                  current
-                </Badge>
-              )}
-              {option.pinned && (
-                <Badge size="xs" variant="light" color="grape">
-                  pinned
-                </Badge>
-              )}
-              {option.better_value && !option.chosen && (
-                <Badge size="xs" variant="light" color="green">
-                  better value
-                </Badge>
-              )}
-            </Group>
-            <Group gap="xs" wrap="nowrap">
-              {formatRating(option) && (
-                <Text size="xs" c="dimmed">
-                  {formatRating(option)}
-                </Text>
-              )}
-              <Tooltip
-                label={
-                  option.weeks_of_supply != null
-                    ? `${formatSupply(option.weeks_of_supply)}' supply at how often this library cooks it`
-                    : 'no usage estimate for this ingredient'
-                }
-              >
-                <Text size="xs" c="dimmed" w={78} ta="right">
-                  {formatSupply(option.weeks_of_supply) ?? '—'}
-                </Text>
-              </Tooltip>
-              <Text size="xs" c="dimmed">
-                {formatUnitCost(option)}
-              </Text>
-              <Text size="sm" fw={600}>
-                {formatMoney(option.cost)}
-              </Text>
-              <Text size="xs" c="dimmed" w={92} ta="right">
-                {option.chosen
-                  ? `${formatCapacity(option.leftover, option.quantity_unit)} left`
-                  : `${formatDelta(option.cost_delta)}, ${formatSignedCapacity(
-                      option.leftover_delta,
-                      option.quantity_unit,
-                    )} left`}
-              </Text>
-              <Button
-                size="compact-xs"
-                variant={option.pinned ? 'light' : 'subtle'}
-                color={option.pinned ? 'grape' : 'fresh'}
-                loading={pending}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  packPreference.mutate({
-                    ingredientKey: line.key,
-                    sku: option.pinned ? null : option.sku,
-                  })
-                }}
-              >
-                {option.pinned ? 'Unpin' : 'Always buy'}
-              </Button>
-            </Group>
-          </Group>
-        ))}
-      </Stack>
-      {packPreference.error && (
-        <Text size="xs" c="red" mt={6}>
-          {packPreference.error.message}
-        </Text>
-      )}
-    </Box>
+    <Group gap={4} wrap="nowrap">
+      <IconStarFilled size={13} className={classes.star} />
+      <Text size="sm" fw={700} c={ratingColor(option.rating)}>
+        {option.rating.toFixed(1)}
+      </Text>
+      <Text size="xs" c="dimmed">({option.ratings_count ?? 0})</Text>
+    </Group>
   )
 }
+
+// Which of the two clocks ran out first. "About four weeks" means one thing for
+// halloumi and quite another for cumin, and the difference decides whether the
+// leftover is stock or a slow bin.
+function SupplyIcon({ option }) {
+  const expiry = option.supply_limited_by === 'expiry'
+  return (
+    <Tooltip
+      label={
+        expiry
+          ? 'Limited by the use-by date, not by how fast you get through it'
+          : 'Limited by how often this library cooks it, not by a date'
+      }
+    >
+      {expiry ? (
+        <IconClock size={13} className={classes.supplyExpiry} />
+      ) : (
+        <IconToolsKitchen2 size={13} className={classes.supplyEaten} />
+      )}
+    </Tooltip>
+  )
+}
+
+// One size, as a card you can pick. Only the three things that decide it: how
+// big, what it costs per kilo, and whether anyone rates it. The brand name is
+// not one of them.
+function PackCard({ option, active, cheaper, onPick, disabled }) {
+  return (
+    <UnstyledButton
+      className={`${classes.packCard} ${active ? classes.packCardActive : ''}`}
+      onClick={onPick}
+      disabled={disabled}
+    >
+      <Group justify="space-between" wrap="nowrap" mb={2}>
+        <Text fw={800} size="lg">
+          {option.pack_size_raw || formatCapacity(option.capacity / option.count, option.quantity_unit)}
+        </Text>
+        {active && <Badge size="xs" variant="filled" color="fresh">in basket</Badge>}
+        {!active && cheaper && <Badge size="xs" variant="light" color="green">better value</Badge>}
+      </Group>
+
+      <Text fw={800} size="xl" c={cheaper ? 'green' : undefined} className={classes.unitCost}>
+        {formatUnitCost(option)}
+      </Text>
+
+      <Rating option={option} />
+
+      <Group gap={4} wrap="nowrap" mt={6}>
+        <Text size="xs" c="dimmed">
+          {option.count > 1 ? `${option.count} packs · ` : ''}
+          {formatMoney(option.cost)}
+          {option.weeks_of_supply != null ? ` · ${formatSupply(option.weeks_of_supply)}` : ''}
+        </Text>
+        {option.weeks_of_supply != null && <SupplyIcon option={option} />}
+      </Group>
+    </UnstyledButton>
+  )
+}
+
+function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset, pending }) {
+  const [showAll, setShowAll] = useState(false)
+  const options = line?.options ?? []
+  const current = options.find((option) => option.chosen)
+  const alternative =
+    options.find((option) => option.better_value && !option.chosen) ??
+    options.find((option) => option !== current && option.unit_cost < (current?.unit_cost ?? 0))
+  const held = options.find((option) => option.pinned || option.this_week)
+  const rest = options.filter((option) => option !== current && option !== alternative)
+
+  useEffect(() => {
+    if (!opened) setShowAll(false)
+  }, [opened])
+
+  if (!line) return null
+
+  return (
+    <Modal.Root opened={opened} onClose={onClose} size="lg" centered>
+      <Modal.Overlay />
+      <Modal.Content>
+        <Modal.Header>
+          <Modal.Title fw={700}>{line.name}</Modal.Title>
+          <Group gap="sm" wrap="nowrap">
+            <SegmentedControl
+              size="xs"
+              value={scope}
+              onChange={setScope}
+              data={[
+                { label: 'This week', value: 'week' },
+                { label: 'Always', value: 'always' },
+              ]}
+            />
+            <Modal.CloseButton />
+          </Group>
+        </Modal.Header>
+
+        <Modal.Body>
+          <Group align="stretch" justify="center" gap="sm" wrap="nowrap" className={classes.packRow}>
+            {current && (
+              <PackCard
+                option={current}
+                active
+                cheaper={false}
+                disabled={pending}
+                onPick={() => onPick(current.sku)}
+              />
+            )}
+            {alternative && (
+              <>
+                <Stack className={classes.packArrow} gap={0} align="center" justify="center">
+                  <Text size="sm" fw={700} c={alternative.cost_delta > 0 ? 'orange' : 'green'}>
+                    {formatDelta(alternative.cost_delta)}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {formatSignedCapacity(alternative.leftover_delta, alternative.quantity_unit)}
+                  </Text>
+                  <IconArrowRight size={22} className={classes.packArrowIcon} />
+                </Stack>
+                <PackCard
+                  option={alternative}
+                  active={false}
+                  cheaper={alternative.unit_cost < (current?.unit_cost ?? Infinity)}
+                  disabled={pending}
+                  onPick={() => onPick(alternative.sku)}
+                />
+              </>
+            )}
+          </Group>
+
+          <Divider my="md" />
+
+          <Group justify="flex-end" gap="xs" wrap="nowrap">
+            {held && (
+              <Button size="compact-xs" variant="subtle" color="gray" onClick={onReset}>
+                Let the planner choose
+              </Button>
+            )}
+            {rest.length > 0 && (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                rightSection={
+                  <IconChevronDown
+                    size={14}
+                    className={`${classes.chevron} ${showAll ? classes.chevronFlip : ''}`}
+                  />
+                }
+                onClick={() => setShowAll((value) => !value)}
+              >
+                {rest.length} other {rest.length === 1 ? 'size' : 'sizes'}
+              </Button>
+            )}
+          </Group>
+
+          {/* Rendered outright rather than inside a Collapse: that measures its
+              child's height, and a child carrying a margin measures as nothing,
+              which is exactly how this list came to open onto an empty gap. */}
+          {showAll && (
+            <Stack gap={4} className={classes.otherSizes}>
+              {rest.map((option) => (
+                <Group
+                  key={option.sku}
+                  justify="space-between"
+                  wrap="nowrap"
+                  className={classes.otherSize}
+                >
+                  <Group gap="sm" wrap="nowrap">
+                    <Text size="sm" fw={700} w={72}>
+                      {option.pack_size_raw ||
+                        formatCapacity(option.capacity / option.count, option.quantity_unit)}
+                    </Text>
+                    <Text size="sm" c="dimmed" w={88}>{formatUnitCost(option)}</Text>
+                    <Rating option={option} />
+                  </Group>
+                  <Group gap="sm" wrap="nowrap">
+                    <Text size="sm">{formatMoney(option.cost)}</Text>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      disabled={pending}
+                      onClick={() => onPick(option.sku)}
+                    >
+                      Pick
+                    </Button>
+                  </Group>
+                </Group>
+              ))}
+            </Stack>
+          )}
+        </Modal.Body>
+      </Modal.Content>
+    </Modal.Root>
+  )
+}
+
 
 function LineTable({
   title,
   icon,
   lines,
-  packPreference,
+  onOpenPacks,
+  busyPackKey,
   openLineKey,
   setOpenLineKey,
   tableId,
@@ -302,6 +422,7 @@ function LineTable({
             <col className={classes.colLeft} />
             <col className={classes.colCost} />
             <col className={classes.colWaste} />
+            <col className={classes.colPackSwap} />
           </colgroup>
           <Table.Thead>
             <Table.Tr>
@@ -312,6 +433,7 @@ function LineTable({
               <Table.Th>Left</Table.Th>
               <Table.Th>Cost</Table.Th>
               <Table.Th>Waste</Table.Th>
+              <Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -324,7 +446,9 @@ function LineTable({
                 selectedLineKey === rowKey || (hoverRecipeId && lineRecipeIds.has(hoverRecipeId))
               const owned = ownedItemKeySet.has(line.key)
               const upsize = (line.options ?? []).find((option) => option.better_value)
-              const pinnedOption = (line.options ?? []).find((option) => option.pinned)
+              const heldOption = (line.options ?? []).find(
+                (option) => option.pinned || option.this_week,
+              )
 
               return (
                 <Fragment key={rowKey}>
@@ -394,34 +518,10 @@ function LineTable({
                                 </Badge>
                               </Tooltip>
                             )}
-                            {pinnedOption && (
+                            {heldOption && (
                               <Badge size="xs" color="grape" variant="light">
-                                {pinnedOption.pack_size_raw || 'pinned'}
+                                {heldOption.pack_size_raw || 'chosen size'}
                               </Badge>
-                            )}
-                            {upsize && !pinnedOption && (
-                              <Tooltip
-                                multiline
-                                w={300}
-                                label={[
-                                  `${upsize.product_name}: ${formatUnitCost(upsize)} against ${formatUnitCost(
-                                    line.options.find((option) => option.chosen) ?? upsize,
-                                  )}`,
-                                  `${formatDelta(upsize.cost_delta)} now, ${formatSignedCapacity(
-                                    upsize.leftover_delta,
-                                    upsize.quantity_unit,
-                                  )} left over`,
-                                  upsize.weeks_of_supply != null
-                                    ? `${formatSupply(upsize.weeks_of_supply)}' supply at how often this library cooks it`
-                                    : null,
-                                ]
-                                  .filter(Boolean)
-                                  .join(' — ')}
-                              >
-                                <Badge size="xs" color="green" variant="light">
-                                  bigger is cheaper
-                                </Badge>
-                              </Tooltip>
                             )}
                           </Group>
                           {line.contributions?.length > 0 && (
@@ -439,11 +539,32 @@ function LineTable({
                     <Table.Td>{formatQuantity(line.leftover_qty ?? line.leftover_g, line.quantity_unit)}</Table.Td>
                     <Table.Td>{formatMoney(line.cost)}</Table.Td>
                     <Table.Td>{formatMoney(line.waste_gbp)}</Table.Td>
+                    <Table.Td className={classes.packSwapCell}>
+                      {(line.options?.length ?? 0) > 1 && (
+                        <Tooltip label={upsize ? 'A bigger pack is cheaper per kilo' : 'Change pack size'}>
+                          <ActionIcon
+                            variant="subtle"
+                            size="md"
+                            className={`${classes.packSwapButton} ${
+                              upsize ? classes.packSwapDeal : ''
+                            }`}
+                            loading={busyPackKey === line.key}
+                            aria-label={`Change pack size for ${line.name}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onOpenPacks(line.key)
+                            }}
+                          >
+                            <IconPackages size={17} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </Table.Td>
                   </Table.Tr>
 
                   {canExpand && (
                     <Table.Tr className={classes.expansionRow} aria-hidden={!expanded}>
-                      <Table.Td colSpan={7} className={classes.expansionCell}>
+                      <Table.Td colSpan={8} className={classes.expansionCell}>
                         <div
                           className={`${classes.expansionShell} ${
                             expanded ? classes.expansionShellOpen : ''
@@ -489,7 +610,6 @@ function LineTable({
                               </div>
                             ))}
                           </div>
-                          <PackOptions line={line} packPreference={packPreference} />
                         </div>
                       </Table.Td>
                     </Table.Tr>
@@ -534,8 +654,11 @@ export default function BasketPage() {
   const [hoverLineKey, setHoverLineKey] = useState(null)
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
   const { ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
+  const { packOverrides, setWeekPack } = useWeekPackChoices(weekStart)
   const stockRefresh = useOcadoStockRefresh()
   const packPreference = usePackPreference()
+  const [packLineKey, setPackLineKey] = useState(null)
+  const [packScope, setPackScope] = useState('week')
   const recipesScrollRef = useRef(null)
   const recipeRefs = useRef(new Map())
 
@@ -545,7 +668,7 @@ export default function BasketPage() {
 
   const entries = getWeekRecipes(weekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
-  const { data, isLoading, isError, error } = usePlannerBasket(selections)
+  const { data, isLoading, isError, error } = usePlannerBasket(selections, packOverrides)
   const onlineLines = useMemo(
     () => data?.lines?.filter((line) => !line.external) ?? [],
     [data?.lines],
@@ -572,6 +695,35 @@ export default function BasketPage() {
   )
   const recipePrices = useMemo(() => recipePortionPrices(buyLines, entries), [buyLines, entries])
   const stockAge = formatAge(data?.stock_checked_at)
+  const packLine = useMemo(
+    () => (data?.lines ?? []).find((line) => line.key === packLineKey) ?? null,
+    [data?.lines, packLineKey],
+  )
+
+  // "This week" is local state, so it lands immediately; "Always" is a write and
+  // shows a pending state until the re-priced basket comes back. Either way the
+  // modal closes on the click rather than sitting there looking broken.
+  const pickPack = useCallback(
+    (sku) => {
+      if (!packLine) return
+      if (packScope === 'always') {
+        packPreference.mutate({ ingredientKey: packLine.key, sku })
+      } else {
+        setWeekPack(packLine.key, sku)
+      }
+      setPackLineKey(null)
+    },
+    [packLine, packScope, packPreference, setWeekPack],
+  )
+
+  const resetPack = useCallback(() => {
+    if (!packLine) return
+    setWeekPack(packLine.key, null)
+    if (packLine.options?.some((option) => option.pinned)) {
+      packPreference.mutate({ ingredientKey: packLine.key, sku: null })
+    }
+    setPackLineKey(null)
+  }, [packLine, packPreference, setWeekPack])
   const basketPortionPrice = totalPortions > 0 ? orderCost / totalPortions : 0
   const selectedLineKey = hoverLineKey ?? activeLineKey
   const allLines = useMemo(
@@ -713,7 +865,7 @@ export default function BasketPage() {
                 leftSection={<IconRefresh size={16} />}
                 loading={stockRefresh.isPending}
                 disabled={!selections.length}
-                onClick={() => stockRefresh.mutate({ selections })}
+                onClick={() => stockRefresh.mutate({ selections, packOverrides })}
               >
                 Refresh stock
               </Button>
@@ -804,7 +956,10 @@ export default function BasketPage() {
                       setHoverLineKey={setHoverLineKey}
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
-                      packPreference={packPreference}
+                      onOpenPacks={setPackLineKey}
+                      busyPackKey={
+                        packPreference.isPending ? packPreference.variables?.ingredientKey : null
+                      }
                     />
                     <LineTable
                       title="Source elsewhere"
@@ -819,7 +974,10 @@ export default function BasketPage() {
                       setHoverLineKey={setHoverLineKey}
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
-                      packPreference={packPreference}
+                      onOpenPacks={setPackLineKey}
+                      busyPackKey={
+                        packPreference.isPending ? packPreference.variables?.ingredientKey : null
+                      }
                     />
                     <Box className={classes.bucketGrid}>
                       <NameList title="Pantry staples" names={data.staples} muted />
@@ -833,6 +991,17 @@ export default function BasketPage() {
           )}
         </Box>
       </Box>
+
+      <PackSizeModal
+        line={packLine}
+        opened={packLine != null}
+        onClose={() => setPackLineKey(null)}
+        scope={packScope}
+        setScope={setPackScope}
+        onPick={pickPack}
+        onReset={resetPack}
+        pending={packPreference.isPending}
+      />
     </Stack>
   )
 }

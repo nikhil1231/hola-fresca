@@ -24,6 +24,7 @@ import {
 
 import { usePlannerBasket } from '../hooks/useRecipeQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
+import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
 import { formatWeekLabel, toPlannerSelections, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 import {
   useOcadoBasket,
@@ -287,9 +288,10 @@ function PushSummary({ result }) {
 export default function OcadoPage() {
   const { upcomingWeekStart, getWeekRecipes } = useWeeklyPlan()
   const { ownedItemKeys, ownedItemKeySet } = useOwnedBasketItems(upcomingWeekStart)
+  const { packOverrides } = useWeekPackChoices(upcomingWeekStart)
   const entries = getWeekRecipes(upcomingWeekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
-  const planner = usePlannerBasket(selections)
+  const planner = usePlannerBasket(selections, packOverrides)
   const status = useOcadoStatus()
   const login = useOcadoLogin()
   const sessionRefresh = useOcadoSessionRefresh()
@@ -438,7 +440,7 @@ export default function OcadoPage() {
                     leftSection={<IconBasketUp size={16} />}
                     disabled={!selections.length || status.data?.status !== 'ready'}
                     loading={push.isPending}
-                    onClick={() => push.mutate({ selections, ownedItemKeys })}
+                    onClick={() => push.mutate({ selections, ownedItemKeys, packOverrides })}
                   >
                     Push basket to Ocado
                   </Button>

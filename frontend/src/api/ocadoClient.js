@@ -41,14 +41,18 @@ export function submitOcadoOtp(code) {
   return postJSON('/api/ocado/otp', { code })
 }
 
-export function pushOcadoBasket({ selections, ownedItemKeys = [] }) {
-  return postJSON('/api/ocado/basket/push', { selections, owned_item_keys: ownedItemKeys })
+export function pushOcadoBasket({ selections, ownedItemKeys = [], packOverrides = {} }) {
+  return postJSON('/api/ocado/basket/push', {
+    selections,
+    owned_item_keys: ownedItemKeys,
+    pack_overrides: packOverrides,
+  })
 }
 
 // Re-reads stock and price for every product this basket could be covered from.
 // Needs no Ocado login, so the basket page can offer it unconditionally.
-export function refreshOcadoStock({ selections }) {
-  return postJSON('/api/ocado/stock/refresh', { selections })
+export function refreshOcadoStock({ selections, packOverrides = {} }) {
+  return postJSON('/api/ocado/stock/refresh', { selections, pack_overrides: packOverrides })
 }
 
 export function fetchOcadoBasket() {

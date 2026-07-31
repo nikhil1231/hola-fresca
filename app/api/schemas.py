@@ -212,6 +212,9 @@ class PlannerFiltersIn(BaseModel):
 class BasketIn(BaseModel):
     selections: list[PlannerSelectionIn] = Field(default_factory=list)
     owned_item_keys: list[str] = Field(default_factory=list)
+    #: ``{ingredient_key: sku}`` chosen for this week only. Held by the client
+    #: alongside the week itself, so it costs no write and expires with it.
+    pack_overrides: dict[str, str] = Field(default_factory=dict)
 
 
 class BasketPackChoiceOut(BaseModel):
@@ -248,12 +251,15 @@ class BasketPackOptionOut(BaseModel):
     keeps: bool = False
     chosen: bool = False
     pinned: bool = False
+    this_week: bool = False
     better_value: bool = False
     rating: float | None = None
     ratings_count: int | None = None
     #: Estimated from how often the library cooks this, so it reads as a scale
     #: ("months" against "years") rather than as a promise.
     weeks_of_supply: float | None = None
+    #: Which clock ran out first: "expiry" or "consumption".
+    supply_limited_by: str | None = None
 
 
 class PackPreferenceIn(BaseModel):

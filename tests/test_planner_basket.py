@@ -365,11 +365,25 @@ def test_a_rating_nobody_has_voted_on_is_not_evidence():
 def test_supply_is_measured_in_weeks_of_cooking_not_weeks_of_need():
     """A jar holding 20 weeks of one meal is four years of an ingredient that
     only turns up in one recipe in fifty."""
-    ing = ingredient(pack(1000, 2.50, sku="1kg"), key="name:cumin", recipe_pct=2.0)
+    jar = pack(1000, 2.50, sku="1kg")
+    ing = ingredient(jar, key="name:cumin", recipe_pct=2.0)
 
-    often = B.weeks_of_supply(ing, capacity=1000, need=50, recipes=5, uses=1)
-    assert often == pytest.approx(200.0)  # 20x the need, but cooked once in ten weeks
-    assert B.weeks_of_supply(ing, capacity=1000, need=50, recipes=0, uses=1) is None
+    often = B.weeks_of_supply(ing, jar, capacity=1000, need=50, recipes=5, uses=1)
+    assert often.weeks == pytest.approx(200.0)  # 20x the need, cooked once in ten weeks
+    assert often.limited_by == "consumption"
+    assert B.weeks_of_supply(ing, jar, capacity=1000, need=50, recipes=0, uses=1) is None
+
+
+def test_supply_stops_at_the_use_by_date():
+    """Four months of mozzarella is two weeks of mozzarella."""
+    ball = Pack(
+        sku="big", product_name="big ball", capacity_g=1000, price=2.5, salvage=0.15,
+        rank=1, match_type="exact", shelf_life_days=14,
+    )
+    ing = ingredient(ball, key="name:mozzarella", recipe_pct=2.0)
+
+    supply = B.weeks_of_supply(ing, ball, capacity=1000, need=50, recipes=5, uses=1)
+    assert supply.weeks == 2.0 and supply.limited_by == "expiry"
 
 
 def test_a_pinned_size_is_bought_whatever_the_week_needs():
@@ -377,6 +391,25 @@ def test_a_pinned_size_is_bought_whatever_the_week_needs():
 
     assert [c.pack.sku for c in cover.choices] == ["1kg"]
     assert cover.cost == pytest.approx(2.50)
+
+
+def test_a_choice_made_for_one_week_beats_the_standing_one():
+    """Buying the big bag once is a different decision from always buying it."""
+    ing = _rice(recipe_pct=9.4, preferred_sku="1kg")
+    cover = B.cover_need(PlanIndex(), ing, need_g=300, override="500g")
+
+    assert [c.pack.sku for c in cover.choices] == ["500g"]
+
+
+def test_a_weeks_choice_gets_its_own_cache_entry():
+    """Otherwise one week's override would be served to every other week."""
+    index, ing = PlanIndex(), _rice(recipe_pct=9.4)
+    plain = B.cover_need(index, ing, need_g=300)
+    overridden = B.cover_need(index, ing, need_g=300, override="1kg")
+
+    assert plain.choices[0].pack.sku == "500g"
+    assert overridden.choices[0].pack.sku == "1kg"
+    assert B.cover_need(index, ing, need_g=300).choices[0].pack.sku == "500g"
 
 
 def test_a_pin_on_something_sold_out_is_ignored_rather_than_obeyed():

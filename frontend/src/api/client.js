@@ -69,8 +69,8 @@ export function fetchRecipes(filters, page, pageSize = 24, { offset, excludeIds 
   return getJSON(`/api/recipes?${params.toString()}`)
 }
 
-export function fetchPlannerBasket(selections) {
-  return postJSON('/api/planner/basket', { selections })
+export function fetchPlannerBasket(selections, packOverrides = {}) {
+  return postJSON('/api/planner/basket', { selections, pack_overrides: packOverrides })
 }
 
 export function fetchPlannerSuggestions({

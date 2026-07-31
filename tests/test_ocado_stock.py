@@ -22,6 +22,7 @@ from app.mapping.candidates import gather_candidates
 from app.ocado import availability
 from app.ocado.availability import ProductStatus
 from app.planner.basket import Basket, BasketLine, Cover, PackChoice
+from app.planner.cache import get_index
 from app.planner.index import Pack
 from main import app
 from tests.conftest import seed_candidates
@@ -243,6 +244,40 @@ def test_a_pinned_pack_survives_the_round_trip_through_the_catalogue(stock_clien
     client.put("/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": None})
     line = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
     assert line["choices"][0]["sku"] == CHEAP
+
+
+def test_a_pack_chosen_for_this_week_costs_no_write_and_reaches_the_push(stock_client, monkeypatch):
+    """The whole point of the week scope: instant, and gone by the next shop."""
+    client, recipe_id, cart = stock_client
+    _shelves(monkeypatch)
+    body = {**_selections(recipe_id), "pack_overrides": {KEY_RICE: DEARER}}
+
+    line = client.post("/api/planner/basket", json=body).json()["lines"][0]
+    assert line["choices"][0]["sku"] == DEARER
+    assert [o["this_week"] for o in line["options"] if o["sku"] == DEARER] == [True]
+    assert [o["pinned"] for o in line["options"]] == [False, False], "nothing was written"
+
+    client.post("/api/ocado/basket/push", json=body)
+    assert cart.quantities == {DEARER: 1}, "pushes what the page showed"
+
+    # And the next week, unasked, is back to the planner's own choice.
+    plain = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
+    assert plain["choices"][0]["sku"] == CHEAP
+
+
+def test_setting_a_preference_does_not_throw_the_cached_index_away(stock_client):
+    """One click used to cost a full index rebuild - seconds - for a change that
+    touches a single ingredient."""
+    client, recipe_id, _ = stock_client
+    factory = app.dependency_overrides[get_session_factory]()
+    before = get_index(factory)
+
+    client.put("/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": DEARER})
+
+    assert get_index(factory) is before, "patched in place, not rebuilt"
+    assert before.ingredient(KEY_RICE).preferred_sku == DEARER
+    line = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
+    assert line["choices"][0]["sku"] == DEARER
 
 
 def test_a_push_checks_the_shelves_before_filling_the_trolley(stock_client, monkeypatch):

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -154,6 +154,39 @@ def get_index(
     """
     with _LOCK:
         return _entry(factory, statuses, retailer, csv_path).index
+
+
+def note_pack_preference(
+    factory: sessionmaker[Session], ingredient_key: str, sku: str | None
+) -> None:
+    """Fold a just-written pack preference into the cached index in place.
+
+    Staleness is normally decided by stat-ing the database, which is right for
+    writes this process cannot see - but a preference it just made itself is not
+    one of those. Left to the stat, one click cost a full index rebuild and a
+    re-rank of the library, several seconds of staring at an unchanged page for
+    a change that touches exactly one ingredient. So the change is applied to the
+    snapshot directly and the fingerprint moved on.
+
+    Anything derived from the old covering is dropped rather than patched:
+    rankings and standalone prices are cheap to recompute lazily and expensive
+    to get subtly wrong.
+    """
+    db = _db_path(factory)
+    with _LOCK:
+        for key, entry in list(_CACHE.items()):
+            if key[0] != str(db):
+                continue
+            ingredient = entry.index.ingredients.get(ingredient_key)
+            if ingredient is None:
+                _CACHE.pop(key, None)
+                continue
+            entry.index.ingredients[ingredient_key] = replace(ingredient, preferred_sku=sku)
+            for cached in [k for k in entry.index.cover_cache if k[0] == ingredient_key]:
+                entry.index.cover_cache.pop(cached, None)
+            entry.standalone.clear()
+            entry.rankings.clear()
+            entry.fingerprint = _fingerprint(db, Path(key[3]) if key[3] else None)
 
 
 def get_standalone_prices(

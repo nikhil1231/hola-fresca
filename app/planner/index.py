@@ -61,6 +61,9 @@ class Pack:
     #: cheap one is a two-star product, so this is a term in the pack choice.
     rating: float | None = None
     ratings_count: int | None = None
+    #: Guaranteed minimum life on delivery. A bigger pack is only a longer supply
+    #: until this runs out - four months of mozzarella is two weeks of mozzarella.
+    shelf_life_days: int | None = None
 
     @property
     def cost_per_g(self) -> float:
@@ -139,7 +142,8 @@ class PlanIndex:
     ingredients: dict[str, Ingredient] = field(default_factory=dict)
     recipes: dict[int, PlanRecipe] = field(default_factory=dict)
     statuses: tuple[str, ...] = DEFAULT_STATUSES
-    cover_cache: dict[tuple[str, str, int], object] = field(default_factory=dict)
+    # (ingredient, unit, rounded demand, this-week pack override)
+    cover_cache: dict[tuple[str, str, int, str | None], object] = field(default_factory=dict)
 
     def ingredient(self, key: str) -> Ingredient | None:
         return self.ingredients.get(key)
@@ -356,6 +360,7 @@ def _build_pack(
         stock_checked_at=product.stock_checked_at,
         rating=product.avg_rating,
         ratings_count=product.ratings_count,
+        shelf_life_days=product.shelf_life_days,
     )
 
 
