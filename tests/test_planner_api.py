@@ -41,6 +41,12 @@ def _recipe(name: str, ingredients: list[RecipeIngredient], *, curated: int = 1)
     )
 
 
+def _side(name: str, ingredients: list[RecipeIngredient]) -> Recipe:
+    recipe = _recipe(name, ingredients)
+    recipe.course = "side"
+    return recipe
+
+
 @pytest.fixture
 def planner_client(tmp_path):
     engine = make_engine(tmp_path / "planner-api.db")
@@ -169,12 +175,16 @@ def planner_client(tmp_path):
                 RecipeIngredient(name="Macaroni", source_ingredient_id=SID_MACARONI, amount=100, unit="g", amount_g=100),
             ],
         )
+        side = _side(
+            "Rice Side",
+            [RecipeIngredient(name="Rice", source_ingredient_id=SID_RICE, amount=100, unit="g", amount_g=100)],
+        )
         hidden = _recipe(
             "Hidden Rice",
             [RecipeIngredient(name="Rice", source_ingredient_id=SID_RICE, amount=100, unit="g", amount_g=100)],
             curated=0,
         )
-        s.add_all([pinned, shared, standalone, gap_heavy, unpriceable_only, speedy, hidden])
+        s.add_all([pinned, shared, standalone, gap_heavy, unpriceable_only, speedy, side, hidden])
         s.commit()
         ids = {
             "pinned": pinned.id,
@@ -183,6 +193,7 @@ def planner_client(tmp_path):
             "gap_heavy": gap_heavy.id,
             "hidden": hidden.id,
             "speedy": speedy.id,
+            "side": side.id,
         }
 
     def _override_session():
@@ -336,6 +347,21 @@ def test_suggestions_apply_fuzzy_search(planner_client):
 
     assert data["total"] == 1
     assert data["items"][0]["name"] == "Speedy Cajun Style Chicken Macaroni"
+
+
+def test_suggestions_apply_course_filter(planner_client):
+    client, ids = planner_client
+    data = client.post(
+        "/api/planner/suggestions",
+        json={
+            "selections": [{"recipe_id": ids["pinned"], "portions": 2}],
+            "filters": {"course": ["side"]},
+        },
+    ).json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["name"] == "Rice Side"
+    assert data["items"][0]["course"] == "side"
 
 
 def test_suggestions_can_exclude_unmapped_recipes(planner_client):
