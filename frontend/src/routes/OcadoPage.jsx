@@ -8,6 +8,7 @@ import {
   Loader,
   PasswordInput,
   Stack,
+  Table,
   Tabs,
   Text,
   Title,
@@ -18,6 +19,7 @@ import {
   IconCalendarClock,
   IconCheck,
   IconClock,
+  IconEye,
   IconLogin,
   IconRefresh,
 } from '@tabler/icons-react'
@@ -31,6 +33,7 @@ import {
   useOcadoLogin,
   useOcadoOtp,
   useOcadoPush,
+  useOcadoPushPlan,
   useOcadoReserve,
   useOcadoSessionRefresh,
   useOcadoSlots,
@@ -225,38 +228,228 @@ function formatDelta(value) {
   return `${rounded > 0 ? '+' : '-'}${money.format(Math.abs(rounded))}`
 }
 
-// A drop is only useful in the ingredient's terms: "Sesame seeds" says what the
-// week is now missing, where the brand name of the pack Ocado refused does not.
-function dropText(line) {
-  const product = line.name ?? line.sku
-  const short =
-    line.wanted != null && line.got != null && line.got > 0
-      ? ` (${line.got} of ${line.wanted})`
-      : ''
-  const why = line.reason ? ` - ${line.reason}` : ''
-  return line.ingredient ? `${line.ingredient}: ${product}${short}${why}` : `${product}${short}${why}`
+// Your own items have no ingredient behind them and may not be in the catalogue
+// at all, so the SKU is the last resort rather than the first thing tried.
+function productName(line) {
+  return line.name ?? line.sku
+}
+
+const CHANGES = {
+  add: { label: 'Add', color: 'teal', sign: '+' },
+  cart: { label: 'In cart', color: 'teal', sign: '' },
+  restore: { label: 'Put back', color: 'orange', sign: '+' },
+  remove: { label: 'Remove', color: 'yellow', sign: '−' },
+  short: { label: 'Short', color: 'red', sign: '' },
+  keep: { label: 'Yours', color: 'grape', sign: '' },
+}
+
+// One row per product per fate. A SKU can legitimately appear twice - as HF's
+// two packs and your own one - and collapsing that would hide the very thing
+// the table exists to show. Only the HF-owned fates are deduped against each
+// other, first group winning, so a restored line is not also listed as bought.
+function diffRows(groups) {
+  const claimed = new Set()
+  const rows = []
+  for (const { kind, lines } of groups) {
+    for (const line of lines ?? []) {
+      if (kind !== 'keep') {
+        if (claimed.has(line.sku)) continue
+        claimed.add(line.sku)
+      }
+      rows.push({ kind, line })
+    }
+  }
+  return rows
+}
+
+function quantityCell({ kind, line }) {
+  // A shortfall is the one case where the bare number lies: "1" reads as a
+  // success until you know three were wanted.
+  if (kind === 'short' && line.wanted != null) return `${line.got ?? 0} of ${line.wanted}`
+  return `${CHANGES[kind].sign}${line.quantity}`
+}
+
+function DiffTable({ groups }) {
+  const rows = diffRows(groups)
+  if (!rows.length) return null
+  const showNote = rows.some(({ line }) => line.reason)
+  return (
+    <Table.ScrollContainer minWidth={420}>
+      <Table verticalSpacing={6} className={classes.diffTable}>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th w={96}>Change</Table.Th>
+            <Table.Th>Item</Table.Th>
+            <Table.Th w={150}>For</Table.Th>
+            <Table.Th w={64} ta="right">Qty</Table.Th>
+            {showNote && <Table.Th w={140}>Note</Table.Th>}
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {rows.map((row) => (
+            <Table.Tr key={`${row.kind}:${row.line.sku}`}>
+              <Table.Td>
+                <Badge color={CHANGES[row.kind].color} variant="light" size="sm">
+                  {CHANGES[row.kind].label}
+                </Badge>
+              </Table.Td>
+              <Table.Td>
+                <Text size="sm" fw={500} lineClamp={2}>{productName(row.line)}</Text>
+              </Table.Td>
+              {/* The ingredient, not the brand: "Sesame seeds" is what tells you
+                  which part of the week a removal or a shortfall touches. */}
+              <Table.Td>
+                <Text size="sm" c="dimmed" lineClamp={2}>{row.line.ingredient ?? '—'}</Text>
+              </Table.Td>
+              <Table.Td ta="right">
+                <Text size="sm" fw={700} ff="monospace">{quantityCell(row)}</Text>
+              </Table.Td>
+              {showNote && (
+                <Table.Td>
+                  <Text size="xs" c="dimmed">{row.line.reason ?? ''}</Text>
+                </Table.Td>
+              )}
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+    </Table.ScrollContainer>
+  )
+}
+
+// Written by the server as UTC without an offset, so it needs marking as such
+// before it is read back in local time.
+function formatSyncedAt(value) {
+  if (!value) return 'earlier'
+  const parsed = new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`)
+  if (Number.isNaN(parsed.getTime())) return 'earlier'
+  return parsed.toLocaleString(undefined, {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function countUnits(lines) {
+  return (lines ?? []).reduce((total, line) => total + (line.quantity ?? 0), 0)
+}
+
+function DiffPanel({ icon, title, aside, badges, children }) {
+  return (
+    <Box className={classes.diffPanel}>
+      <Group justify="space-between" align="center" wrap="nowrap" mb="xs">
+        <Group gap={6}>
+          {icon}
+          <Text fw={700} size="sm">{title}</Text>
+        </Group>
+        {aside}
+      </Group>
+      <Group gap="xs" mb="sm">{badges}</Group>
+      {children}
+    </Box>
+  )
+}
+
+// The cart is shared with the rest of your week's shopping, so a sync that can
+// remove things has to say what it will touch before it touches it.
+function PlanSummary({ plan, loading }) {
+  if (loading) return <Loader size="sm" />
+  if (!plan) return null
+  const yours = countUnits(plan.yours)
+  const nothingToDo = !plan.added.length && !plan.removed.length && !plan.restored.length
+  return (
+    <DiffPanel
+      icon={<IconEye size={16} />}
+      title="What this sync will change"
+      aside={
+        plan.synced ? (
+          <Text size="xs" c="dimmed">
+            last synced {formatSyncedAt(plan.synced_at)}
+            {plan.synced_week_start ? ` for ${formatWeekLabel(plan.synced_week_start)}` : ''}
+          </Text>
+        ) : (
+          <Text size="xs" c="dimmed">first sync</Text>
+        )
+      }
+      badges={
+        <>
+          <Badge color={plan.added.length ? 'teal' : 'gray'} variant="light">
+            {countUnits(plan.added)} to add
+          </Badge>
+          <Badge color={plan.removed.length ? 'yellow' : 'gray'} variant="light">
+            {countUnits(plan.removed)} to remove
+          </Badge>
+          {plan.restored.length > 0 && (
+            <Badge color="orange" variant="light">{countUnits(plan.restored)} to put back</Badge>
+          )}
+          <Badge color={yours ? 'grape' : 'gray'} variant="light">{yours} of yours untouched</Badge>
+        </>
+      }
+    >
+      {nothingToDo && (
+        <Text size="sm" c="dimmed" mb="xs">The cart already matches this week.</Text>
+      )}
+      {/* Removals first: they are the only thing here that takes something out
+          of a cart you may have filled yourself. */}
+      <DiffTable
+        groups={[
+          { kind: 'remove', lines: plan.removed },
+          { kind: 'restore', lines: plan.restored },
+          { kind: 'add', lines: plan.added },
+          { kind: 'keep', lines: plan.yours },
+        ]}
+      />
+      {!plan.synced && (
+        <Text size="xs" c="dimmed" mt="xs">
+          Anything already in the cart that this week also needs is treated as
+          HF's own from a previous push, rather than bought again.
+        </Text>
+      )}
+    </DiffPanel>
+  )
 }
 
 function PushSummary({ result }) {
   if (!result) return null
   const swaps = result.swaps ?? []
   const soldOut = result.sold_out ?? []
+  const yours = countUnits(result.yours)
   return (
-    <Alert color={result.dropped.length ? 'yellow' : 'teal'} variant="light" icon={<IconCheck size={18} />}>
-      <Group gap="xs">
-        <Badge color="teal" variant="light">{result.applied.length} applied</Badge>
-        <Badge color={swaps.length ? 'blue' : 'gray'} variant="light">
-          {swaps.length} swapped
-        </Badge>
-        <Badge color={result.dropped.length ? 'yellow' : 'gray'} variant="light">
-          {result.dropped.length} dropped
-        </Badge>
-        <Badge color={result.unmapped.length ? 'red' : 'gray'} variant="light">
-          {result.unmapped.length} unmapped
-        </Badge>
-      </Group>
+    <DiffPanel
+      icon={<IconCheck size={16} />}
+      title="Sync result"
+      badges={
+        <>
+          <Badge color="teal" variant="light">{result.applied.length} applied</Badge>
+          <Badge color={swaps.length ? 'blue' : 'gray'} variant="light">
+            {swaps.length} swapped
+          </Badge>
+          <Badge color={result.removed?.length ? 'yellow' : 'gray'} variant="light">
+            {countUnits(result.removed)} removed
+          </Badge>
+          <Badge color={yours ? 'grape' : 'gray'} variant="light">{yours} of yours kept</Badge>
+          <Badge color={result.dropped.length ? 'red' : 'gray'} variant="light">
+            {result.dropped.length} short
+          </Badge>
+          <Badge color={result.unmapped.length ? 'red' : 'gray'} variant="light">
+            {result.unmapped.length} unmapped
+          </Badge>
+        </>
+      }
+    >
+      {/* Shortfalls first, then the two moves that touched what was already in
+          the cart, then the ordinary week's shopping. */}
+      <DiffTable
+        groups={[
+          { kind: 'short', lines: result.dropped },
+          { kind: 'remove', lines: result.removed },
+          { kind: 'restore', lines: result.restored },
+          { kind: 'cart', lines: result.applied },
+          { kind: 'keep', lines: result.yours },
+        ]}
+      />
       {swaps.length > 0 && (
-        <Stack gap={2} mt="xs">
+        <Stack gap={2} mt="sm">
           {swaps.map((swap) => (
             <Text size="sm" key={swap.ingredient_key}>
               {swap.ingredient}: {swap.from_products.join(', ')} out of stock →{' '}
@@ -266,22 +459,14 @@ function PushSummary({ result }) {
           ))}
         </Stack>
       )}
-      {result.dropped.length > 0 && (
-        <Text size="sm" mt="xs">
-          Ocado would not take: {result.dropped.map(dropText).join('; ')}
-        </Text>
-      )}
+      {/* Ingredient-level facts, with no cart line to sit against. */}
       {soldOut.length > 0 && (
-        <Text size="sm" mt="xs">
-          Nothing in stock for: {soldOut.join(', ')}
-        </Text>
+        <Text size="sm" mt="sm">Nothing in stock for: {soldOut.join(', ')}</Text>
       )}
       {result.unmapped.length > 0 && (
-        <Text size="sm" mt="xs">
-          Not sent to Ocado: {result.unmapped.join(', ')}
-        </Text>
+        <Text size="sm" mt="xs">Not sent to Ocado: {result.unmapped.join(', ')}</Text>
       )}
-    </Alert>
+    </DiffPanel>
   )
 }
 
@@ -299,6 +484,10 @@ export default function OcadoPage() {
   const otp = useOcadoOtp()
   const push = useOcadoPush()
   const basket = useOcadoBasket({ enabled: status.data?.status === 'ready' })
+  const plan = useOcadoPushPlan(
+    { selections, ownedItemKeys, packOverrides },
+    { enabled: status.data?.status === 'ready' },
+  )
   const [otpCode, setOtpCode] = useState('')
   const [reservation, setReservation] = useState(null)
   const slots = useOcadoSlots(undefined, { enabled: status.data?.status === 'ready' })
@@ -436,11 +625,30 @@ export default function OcadoPage() {
                       <Text fw={800}>{planner.data?.unmapped?.length ?? 0}</Text>
                     </div>
                   </Box>
+                  {/* What the sync will touch, before it touches it - the cart
+                      holds the rest of the week's shopping too. */}
+                  {connected && !push.data && (
+                    <PlanSummary plan={plan.data} loading={plan.isLoading} />
+                  )}
+                  {/* Worth saying rather than swallowing: without the preview
+                      you are pressing a button that can remove things. */}
+                  {connected && plan.error && (
+                    <Alert color="yellow" icon={<IconAlertCircle size={18} />}>
+                      Could not preview the sync: {plan.error.message}
+                    </Alert>
+                  )}
                   <Button
                     leftSection={<IconBasketUp size={16} />}
                     disabled={!selections.length || status.data?.status !== 'ready'}
                     loading={push.isPending}
-                    onClick={() => push.mutate({ selections, ownedItemKeys, packOverrides })}
+                    onClick={() =>
+                      push.mutate({
+                        selections,
+                        ownedItemKeys,
+                        packOverrides,
+                        weekStart: upcomingWeekStart,
+                      })
+                    }
                   >
                     Push basket to Ocado
                   </Button>

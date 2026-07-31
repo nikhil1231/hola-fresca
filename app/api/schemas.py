@@ -213,6 +213,10 @@ class PlannerFiltersIn(BaseModel):
 class BasketIn(BaseModel):
     selections: list[PlannerSelectionIn] = Field(default_factory=list)
     owned_item_keys: list[str] = Field(default_factory=list)
+    #: Which week this basket is for. Recorded against the cart ledger so a
+    #: stale claim can be read as "that was last week's shop", and ignored
+    #: everywhere else.
+    week_start: str | None = None
     #: ``{ingredient_key: sku}`` chosen for this week only. Held by the client
     #: alongside the week itself, so it costs no write and expires with it.
     pack_overrides: dict[str, str] = Field(default_factory=dict)
@@ -594,9 +598,35 @@ class OcadoPushResultOut(BaseModel):
     dropped: list[PushLineOut] = Field(default_factory=list)
     unmapped: list[str] = Field(default_factory=list)
     deltas: dict[str, int] = Field(default_factory=dict)
+    #: Products in the cart the sync attributed to you and left alone.
+    yours: list[PushLineOut] = Field(default_factory=list)
+    #: HF items you had deleted or cut back, put back to what the week needs.
+    #: Reported because a reduction is indistinguishable from a deletion, and
+    #: overriding one silently is how a sync loses your trust.
+    restored: list[PushLineOut] = Field(default_factory=list)
+    #: HF items the week no longer needs, taken back out.
+    removed: list[PushLineOut] = Field(default_factory=list)
     swaps: list[OcadoSwapOut] = Field(default_factory=list)
     sold_out: list[str] = Field(default_factory=list)
     stock_checked_at: datetime | None = None
+
+
+class OcadoPushPlanOut(BaseModel):
+    """What a push would do, without doing it."""
+
+    added: list[PushLineOut] = Field(default_factory=list)
+    removed: list[PushLineOut] = Field(default_factory=list)
+    restored: list[PushLineOut] = Field(default_factory=list)
+    yours: list[PushLineOut] = Field(default_factory=list)
+    unmapped: list[str] = Field(default_factory=list)
+    deltas: dict[str, int] = Field(default_factory=dict)
+    #: False before the first sync, when products already in the cart that the
+    #: week also wants are adopted rather than bought again.
+    synced: bool = False
+    #: When the cart was last synced, and which week for - so a plan that wants
+    #: to remove half the cart can be read against "that was last week's shop".
+    synced_at: datetime | None = None
+    synced_week_start: str | None = None
 
 
 class OcadoStockRefreshOut(BaseModel):

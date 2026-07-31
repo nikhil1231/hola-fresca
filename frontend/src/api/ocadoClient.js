@@ -41,8 +41,20 @@ export function submitOcadoOtp(code) {
   return postJSON('/api/ocado/otp', { code })
 }
 
-export function pushOcadoBasket({ selections, ownedItemKeys = [], packOverrides = {} }) {
+export function pushOcadoBasket({ selections, ownedItemKeys = [], packOverrides = {}, weekStart = null }) {
   return postJSON('/api/ocado/basket/push', {
+    selections,
+    owned_item_keys: ownedItemKeys,
+    pack_overrides: packOverrides,
+    week_start: weekStart,
+  })
+}
+
+// What a push would change, without changing it. The cart is shared with the
+// rest of your shopping and a sync can now remove things, so this is what makes
+// the button safe to press: it names what of yours gets left alone.
+export function planOcadoBasket({ selections, ownedItemKeys = [], packOverrides = {} }) {
+  return postJSON('/api/ocado/basket/plan', {
     selections,
     owned_item_keys: ownedItemKeys,
     pack_overrides: packOverrides,

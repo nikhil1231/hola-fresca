@@ -520,6 +520,50 @@ class IngredientMapping(Base):
     )
 
 
+class OcadoCartSync(Base):
+    """One row, recording that a sync has happened at all.
+
+    Not redundant with an empty :class:`OcadoCartLedger`: no ledger lines means
+    "HF owns nothing in the cart", which is true after a checkout empties it and
+    false before the first sync ever ran. Only the second case may assume the
+    packs already sitting in the cart are its own from a pre-ledger push.
+    """
+
+    __tablename__ = "ocado_cart_sync"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    week_start: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class OcadoCartLedger(Base):
+    """What the last sync put in the Ocado cart, one row per product.
+
+    The cart is shared with the rest of the week's shopping, so a sync has to
+    know its own contributions from yours - see :mod:`app.ocado.sync`. Rows are
+    written from the cart as re-read after the push, never from what was asked
+    for, so a refusal or a partial fill cannot leave the ledger over-claiming.
+
+    ``ingredient_name`` is carried purely so a removal can be reported in terms
+    that mean something: "Chorizo, which you dropped with the paella", not a
+    bare product id.
+    """
+
+    __tablename__ = "ocado_cart_ledger"
+    __table_args__ = (UniqueConstraint("sku", name="uq_ocado_cart_ledger_sku"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sku: Mapped[str] = mapped_column(String(128), index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ingredient_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ingredient_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    week_start: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class IngredientMappingProduct(Base):
     """A candidate product for an ingredient mapping, with the accept decision."""
 

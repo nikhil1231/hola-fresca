@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
@@ -21,6 +23,7 @@ from app.api.schemas import (
     OcadoBasketOut,
     OcadoLoginOut,
     OcadoOtpIn,
+    OcadoPushPlanOut,
     OcadoPushResultOut,
     OcadoReserveIn,
     OcadoReserveOut,
@@ -30,17 +33,24 @@ from app.api.schemas import (
     OcadoSwapOut,
     PushLineOut,
 )
+from app.db.models import Product
 from app.ocado.auth import AUTH
 from app.ocado.availability import mark_unavailable, refresh_stock
 from app.ocado.client import OcadoClient
+from app.ocado.ledger import read_ledger, write_ledger
 from app.ocado.session import get_shared_session
-from app.ocado.sync import push_basket
+from app.ocado.sync import PushLine, plan_push, push_basket
 from app.planner.basket import Basket, Selection, build_basket
 from app.planner.index import PlanIndex
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ocado", tags=["ocado"])
+
+#: Read cart -> merge -> write cart is not atomic, and the ledger written at the
+#: end describes the cart as the *last* writer left it. One live session and one
+#: cart, so serialising the whole push is both sufficient and cheap.
+_PUSH_LOCK = threading.Lock()
 
 
 def get_ocado_client() -> OcadoClient:
@@ -182,6 +192,73 @@ def stock_refresh(
     )
 
 
+def _out_lines(
+    factory: sessionmaker[Session], lines: list[PushLine]
+) -> list[PushLineOut]:
+    """Push lines with a product name filled in wherever HF has none.
+
+    Which is exactly your own items: they never came out of a basket cover, so
+    nothing upstream knows what they are called. The catalogue usually does, and
+    "2 x Cathedral City Mature" beats a UUID in a report whose whole job is to
+    show you what was left alone.
+    """
+    missing = sorted({line.sku for line in lines if not line.name})
+    names: dict[str, str] = {}
+    if missing:
+        with factory() as session:
+            names = dict(
+                session.execute(
+                    select(Product.sku, Product.name)
+                    .where(Product.sku.in_(missing))
+                    .where(Product.retailer == "ocado")
+                ).all()
+            )
+    # asdict, not vars: these dataclasses use slots and so have no __dict__.
+    return [
+        PushLineOut(**{**asdict(line), "name": line.name or names.get(line.sku)})
+        for line in lines
+    ]
+
+
+@router.post("/basket/plan", response_model=OcadoPushPlanOut)
+def plan(
+    body: BasketIn,
+    session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    csv_path: Path | None = Depends(get_planner_csv_path),
+    client: OcadoClient = Depends(get_ocado_client),
+) -> OcadoPushPlanOut:
+    """What a push would change, without changing it.
+
+    Deliberately cheaper than the push: no stock check, so it covers from the
+    cached catalogue and can name a pack the push then substitutes away from.
+    The question it answers - what of yours gets touched - does not depend on
+    which pack of sesame seeds wins.
+    """
+    recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
+    _require_curated(session, recipe_ids)
+    selections = [_planner_selection(selection) for selection in body.selections]
+    _, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)
+    ledger = read_ledger(factory)
+    try:
+        result = plan_push(
+            client, basket, ledger=ledger, owned_item_keys=set(body.owned_item_keys)
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Ocado basket plan failed: {exc}") from exc
+    return OcadoPushPlanOut(
+        added=_out_lines(factory, result.added),
+        removed=_out_lines(factory, result.removed),
+        restored=_out_lines(factory, result.restored),
+        yours=_out_lines(factory, result.yours),
+        unmapped=result.unmapped,
+        deltas=result.deltas,
+        synced=ledger.synced,
+        synced_at=ledger.synced_at,
+        synced_week_start=ledger.week_start,
+    )
+
+
 @router.post("/basket/push", response_model=OcadoPushResultOut)
 def push(
     body: BasketIn,
@@ -207,23 +284,31 @@ def push(
             return None
         return _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)[1]
 
-    try:
-        result = push_basket(
-            client,
-            basket,
-            owned_item_keys=set(body.owned_item_keys),
-            recover=recover,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Ocado basket push failed: {exc}") from exc
+    with _PUSH_LOCK:
+        try:
+            result = push_basket(
+                client,
+                basket,
+                ledger=read_ledger(factory),
+                owned_item_keys=set(body.owned_item_keys),
+                recover=recover,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Ocado basket push failed: {exc}") from exc
+        # Inside the lock: the ledger describes the cart the push just left, and
+        # a second push reading it before this write would merge against a stale
+        # claim and buy the week twice.
+        write_ledger(factory, result.ledger, week_start=body.week_start)
 
     pushed = result.basket or basket
-    # asdict, not vars: these dataclasses use slots and so have no __dict__.
     return OcadoPushResultOut(
-        applied=[PushLineOut(**asdict(line)) for line in result.applied],
-        dropped=[PushLineOut(**asdict(line)) for line in result.dropped],
+        applied=_out_lines(factory, result.applied),
+        dropped=_out_lines(factory, result.dropped),
         unmapped=result.unmapped,
         deltas=result.deltas,
+        yours=_out_lines(factory, result.yours),
+        restored=_out_lines(factory, result.restored),
+        removed=_out_lines(factory, result.removed),
         swaps=_swaps(pushed),
         sold_out=pushed.sold_out,
         stock_checked_at=_stock_checked_at(pushed),

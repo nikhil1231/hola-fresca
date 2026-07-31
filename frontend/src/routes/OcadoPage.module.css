@@ -6,9 +6,12 @@
   color: var(--mantine-color-fresh-7);
 }
 
+/* The week basket carries the sync diff - a five-column table - so it takes the
+   wider half. The cart summary and the slot grid opposite are both happy narrow:
+   a handful of stats and a two-up grid of buttons. */
 .layout {
   display: grid;
-  grid-template-columns: minmax(280px, 0.85fr) minmax(420px, 1.25fr);
+  grid-template-columns: minmax(460px, 1.45fr) minmax(300px, 0.8fr);
   gap: var(--mantine-spacing-lg);
   align-items: start;
   min-width: 0;
@@ -37,6 +40,37 @@
   border-radius: 8px;
   padding: var(--mantine-spacing-sm);
   min-height: 76px;
+}
+
+/* A nested panel rather than an Alert: the diff is a table, and Alert's padded,
+   centred body makes a table look like it fell in by accident. */
+.diffPanel {
+  border: 1px solid var(--mantine-color-gray-3);
+  border-radius: 8px;
+  background: var(--mantine-color-gray-0);
+  padding: var(--mantine-spacing-sm);
+  min-width: 0;
+}
+
+.diffTable {
+  background: transparent;
+}
+
+.diffTable th {
+  font-size: var(--mantine-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--mantine-color-dimmed);
+}
+
+.diffTable th:first-child,
+.diffTable td:first-child {
+  padding-left: 0;
+}
+
+.diffTable th:last-child,
+.diffTable td:last-child {
+  padding-right: 0;
 }
 
 .slotGrid {

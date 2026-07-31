@@ -4,6 +4,7 @@ import {
   fetchOcadoBasket,
   fetchOcadoSlots,
   fetchOcadoStatus,
+  planOcadoBasket,
   pushOcadoBasket,
   refreshOcadoSession,
   refreshOcadoStock,
@@ -55,7 +56,24 @@ export function useOcadoPush() {
       // A push re-checks stock and may swap packs, so the priced basket the
       // page is showing is out of date the moment it returns.
       qc.invalidateQueries({ queryKey: ['planner-basket'] })
+      // The cart and the ledger both moved, so the preview is answering an
+      // old question.
+      qc.invalidateQueries({ queryKey: ['ocado-plan'] })
     },
+  })
+}
+
+// The preview of what a push would do. A query rather than a mutation: it
+// changes nothing, and it should follow the week around as you edit it. Costs
+// one cart read, so it waits for a connection rather than failing without one.
+export function useOcadoPushPlan(
+  { selections, ownedItemKeys, packOverrides },
+  { enabled = true } = {},
+) {
+  return useQuery({
+    queryKey: ['ocado-plan', selections, ownedItemKeys, packOverrides],
+    queryFn: () => planOcadoBasket({ selections, ownedItemKeys, packOverrides }),
+    enabled: enabled && selections.length > 0,
   })
 }
 
