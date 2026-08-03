@@ -117,7 +117,13 @@ def client(tmp_path):
             RecipeIngredient(name="Lentils", source_ingredient_id="sid-lentils", position=1, amount=1, unit="carton(s)", amount_g=250, canonical_unit="g"),
             RecipeIngredient(name="Chicken Stock Paste", source_ingredient_id="sid-chicken-stock", position=3, amount=0, unit="sachet(s)", amount_g=0),
         ]
-        italian.steps = [RecipeStep(index=1, instructions_text="Boil pasta")]
+        italian.steps = [
+            RecipeStep(
+                index=1,
+                instructions_text="Boil pasta",
+                image_path="/steps/boil-pasta.jpg",
+            )
+        ]
         italian.nutrition = [RecipeNutrition(name="Protein", amount=50, unit="g")]
 
         mexican = _make_recipe(
@@ -318,6 +324,7 @@ def test_detail_shape_and_image(client):
     assert lentils["amount_g"] == 250
     assert lentils["canonical_unit"] == "g"
     assert detail["steps"][0]["text"] == "Boil pasta"
+    assert detail["steps"][0]["image_url"].endswith("/steps/boil-pasta.jpg")
     assert all(not i["unmapped"] for i in detail["ingredients"])
     assert detail["image_url"].startswith("https://img.hellofresh.com/")
     assert "w_1200" in detail["image_url"]

@@ -1,0 +1,94 @@
+.page {
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--mantine-color-body);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  min-height: 64px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--mantine-color-gray-2);
+  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+}
+
+.recipeName {
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.stepArea {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(220px, 1fr) minmax(0, 1fr);
+}
+
+.stepImage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: cover;
+  background: var(--mantine-color-gray-1);
+}
+
+.instructions {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px 20px 32px;
+  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+}
+
+.stepLabel {
+  margin-bottom: 10px;
+  letter-spacing: 0.06em;
+}
+
+.stepText {
+  font-size: clamp(1.05rem, 4.5vw, 1.25rem);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.navigation {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 16px;
+  min-height: 76px;
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--mantine-color-gray-2);
+  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+}
+
+.loadingImage {
+  height: 100%;
+}
+
+.errorPage {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-md);
+  justify-content: center;
+  padding: 24px;
+}
+
+@media (min-width: 768px) {
+  .page,
+  .errorPage {
+    width: min(100%, 640px);
+    margin: 0 auto;
+    box-shadow: 0 0 0 1px var(--mantine-color-gray-2);
+  }
+}

@@ -444,6 +444,7 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
             index=s.index,
             instructions_text=s.instructions_text,
             instructions_html=s.instructions_html,
+            image_path=s.image_path,
         )
         for s in recipe.steps
     ]

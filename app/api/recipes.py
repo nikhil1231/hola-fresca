@@ -734,7 +734,10 @@ def get_recipe(
             )
             for i in ingredients
         ],
-        steps=[StepOut(index=s.index, text=s.instructions_text) for s in steps],
+        steps=[
+            StepOut(index=s.index, text=s.instructions_text, image_url=image_url(s.image_path, 1200))
+            for s in steps
+        ],
         nutrition=[
             NutritionOut(name=n.name, amount=n.amount, unit=n.unit)
             for n in recipe.nutrition

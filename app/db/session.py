@@ -29,6 +29,7 @@ def make_engine(db_path: Path | None = None) -> Engine:
 # enrich pass would break it in the meantime.
 _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
     "recipe_ingredients": {"position": "INTEGER"},
+    "recipe_steps": {"image_path": "TEXT"},
     "ingredient_mappings": {"unit_kind": "TEXT DEFAULT 'mass'", "preferred_sku": "VARCHAR(128)"},
     "products": {"stock_checked_at": "DATETIME"},
     "ocado_cart_sync": {"account_id": "VARCHAR(64)"},

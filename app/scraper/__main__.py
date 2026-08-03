@@ -50,8 +50,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "backfill",
-        help="refresh source-stated fields (ratings, revision identity) from cached "
-             "payloads, without rebuilding recipes",
+        help="refresh source-stated fields (ratings, revision identity, step images) from cached "
+        "payloads, without rebuilding recipes",
     )
 
     p_cur = sub.add_parser("curate", help="flag the active library (Profile A by default)")

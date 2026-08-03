@@ -114,6 +114,7 @@ def test_steps_have_text_and_html(source: HelloFreshSource) -> None:
     assert "<p>" in (first.instructions_html or "")
     assert "<p>" not in (first.instructions_text or "")
     assert "Preheat" in (first.instructions_text or "")
+    assert first.image_path == "/693adbb51101204cae74ecbc/step-baa42500.jpg"
 
 
 def test_allergens_aggregated_from_ingredients(source: HelloFreshSource) -> None:
@@ -169,4 +170,5 @@ def test_iso_duration(value, expected) -> None:
 
 def test_strip_html() -> None:
     assert strip_html("<p>Hello <strong>world</strong></p>") == "Hello world"
+    assert strip_html("<p>Don&amp;#39;t overcook it.</p>") == "Don't overcook it."
     assert strip_html(None) is None

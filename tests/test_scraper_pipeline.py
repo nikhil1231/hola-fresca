@@ -85,6 +85,7 @@ def test_normalize_from_seeded_raw(env, source):
         assert recipe.is_complete == 1
         assert len(recipe.ingredients) == 13
         assert recipe.protein_g == 51.5
+        assert recipe.steps[0].image_path == "/693adbb51101204cae74ecbc/step-baa42500.jpg"
         state = session.query(ScrapeState).one()
         assert state.status == "normalized"
         assert state.normalized_at is not None

@@ -33,6 +33,7 @@ class NormalizedStep:
     index: int
     instructions_text: str | None = None
     instructions_html: str | None = None
+    image_path: str | None = None
 
 
 @dataclass

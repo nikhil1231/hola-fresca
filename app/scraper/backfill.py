@@ -36,6 +36,8 @@ _RECIPE_COLUMNS = {
     "source_published": "INTEGER DEFAULT 0",
 }
 
+_STEP_COLUMNS = {"image_path": "TEXT"}
+
 
 @dataclass
 class BackfillReport:
@@ -54,6 +56,7 @@ def backfill_source_fields(
 
     with session_factory() as session:
         ensure_columns(session, "recipes", _RECIPE_COLUMNS)
+        ensure_columns(session, "recipe_steps", _STEP_COLUMNS)
         source_ids = list(
             session.scalars(select(Recipe.source_id).where(Recipe.source == source.name))
         )
@@ -120,5 +123,17 @@ def _apply(row: Recipe, parsed, report: BackfillReport) -> bool:
     for field, value in updates.items():
         if getattr(row, field) != value:
             setattr(row, field, value)
+            changed = True
+
+    parsed_paths = {step.index: step.image_path for step in parsed.steps}
+    parsed_text = {step.index: step.instructions_text for step in parsed.steps}
+    for step in row.steps:
+        image_path = parsed_paths.get(step.index)
+        if step.image_path != image_path:
+            step.image_path = image_path
+            changed = True
+        instructions_text = parsed_text.get(step.index)
+        if instructions_text is not None and step.instructions_text != instructions_text:
+            step.instructions_text = instructions_text
             changed = True
     return changed

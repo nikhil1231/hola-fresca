@@ -12,6 +12,7 @@ import App from './App.jsx'
 import BasketPage from './routes/BasketPage.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
 import CuisinesPage from './routes/CuisinesPage.jsx'
+import CookingPage from './routes/CookingPage.jsx'
 import RecipeDetailPage from './routes/RecipeDetailPage.jsx'
 import MappingAliasesPage from './routes/MappingAliasesPage.jsx'
 import MappingManualPage from './routes/MappingManualPage.jsx'
@@ -31,6 +32,7 @@ createRoot(document.getElementById('root')).render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Routes>
+            <Route path="recipes/:id/cook" element={<CookingPage />} />
             <Route element={<App />}>
               <Route index element={<BrowsePage />} />
               <Route path="dashboard" element={<BasketPage />} />

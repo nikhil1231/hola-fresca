@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from html import unescape
 from html.parser import HTMLParser
 
 _ISO_DURATION = re.compile(
@@ -45,5 +46,8 @@ def strip_html(html: str | None) -> str | None:
         return None
     parser = _TextExtractor()
     parser.feed(html)
-    text = re.sub(r"\s+", " ", parser.text).strip()
+    # HTMLParser resolves ordinary entities, but HelloFresh sometimes encodes an
+    # entity twice (for example, ``&amp;#39;``). One final unescape keeps the
+    # instruction text readable without rendering source HTML in the UI.
+    text = re.sub(r"\s+", " ", unescape(parser.text)).strip()
     return text or None

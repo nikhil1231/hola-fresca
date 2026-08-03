@@ -291,6 +291,7 @@ class RecipeStep(Base):
     index: Mapped[int] = mapped_column(Integer)
     instructions_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     instructions_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     recipe: Mapped[Recipe] = relationship(back_populates="steps")
 

@@ -57,6 +57,7 @@ import {
   useRecipeWishlist,
   useRevertRecipeEdits,
 } from '../hooks/useRecipeQueries.js'
+import { usePreloadStepImages } from '../hooks/usePreloadStepImages.js'
 import {
   DEFAULT_PORTIONS,
   MAX_PORTIONS,
@@ -811,6 +812,7 @@ export default function RecipeDetailPage() {
   const personalRating = usePersonalRecipeRating(id)
   const wishlist = useRecipeWishlist(id)
   const hideRecipe = useHideRecipe(id)
+  usePreloadStepImages(recipe?.steps)
 
   if (isLoading) {
     return (
@@ -930,6 +932,17 @@ export default function RecipeDetailPage() {
             )}
 
             <Group gap="sm" mt="xs">
+              {recipe.steps.length > 0 && (
+                <Button
+                  component={Link}
+                  to={`/recipes/${recipe.id}/cook`}
+                  replace
+                  color="fresh"
+                  leftSection={<IconChefHat size={17} />}
+                >
+                  Let's cook!
+                </Button>
+              )}
               <PlannerControls
                 entry={plannerEntry}
                 disabled={!plannerEntry && upcomingWeekFull}

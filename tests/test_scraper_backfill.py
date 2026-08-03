@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app import config as app_config
-from app.db.models import PersonalRecipeRating, Recipe, RecipeEdit
+from app.db.models import PersonalRecipeRating, Recipe, RecipeEdit, RecipeStep
 from app.db.session import init_db, make_engine, make_session_factory
 from app.scraper import storage
 from app.scraper.backfill import backfill_source_fields
@@ -53,7 +53,9 @@ def _seed(env, **overrides):
     )
     fields.update(overrides)
     with env() as session:
-        session.add(Recipe(**fields))
+        recipe = Recipe(**fields)
+        recipe.steps = [RecipeStep(index=1, instructions_text="Older instruction")]
+        session.add(recipe)
         session.commit()
     return source_id
 
@@ -76,6 +78,8 @@ def test_backfill_fills_lineage_ratings_and_revision_identity(env, source):
         assert r.family_code == "R17041"
         assert r.unique_recipe_code == "R17041-18"
         assert r.source_active == 1
+        assert r.steps[0].image_path == "/693adbb51101204cae74ecbc/step-baa42500.jpg"
+        assert r.steps[0].instructions_text.startswith("Preheat your oven")
 
 
 def test_backfill_preserves_human_and_derived_state(env, source):

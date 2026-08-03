@@ -80,6 +80,7 @@ class IngredientOut(BaseModel):
 class StepOut(BaseModel):
     index: int
     text: str | None = None
+    image_url: str | None = None
 
 
 class NutritionOut(BaseModel):

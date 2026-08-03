@@ -189,11 +189,20 @@ class HelloFreshSource:
         steps: list[NormalizedStep] = []
         for i, step in enumerate(r.get("steps", []), start=1):
             html = step.get("instructionsHTML") or step.get("instructions")
+            image_path = next(
+                (
+                    image.get("path")
+                    for image in step.get("images", [])
+                    if image.get("path")
+                ),
+                None,
+            )
             steps.append(
                 NormalizedStep(
                     index=step.get("index") or i,
                     instructions_text=strip_html(html),
                     instructions_html=html or None,
+                    image_path=image_path,
                 )
             )
         return steps
