@@ -25,6 +25,7 @@ import {
   useMappingList,
   useMappingStats,
 } from '../hooks/useMappingQueries.js'
+import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 
 const STATUS_COLORS = {
   proposed: 'blue',
@@ -85,6 +86,24 @@ function Rating({ value, count }) {
       {value.toFixed(1)}
       {count != null && count > 0 ? ` (${count.toLocaleString('en-GB')})` : ''}
     </Text>
+  )
+}
+
+// Keep the live input state in this small component. If it lives in
+// MappingPage, every keystroke re-renders the entire 100-row results table even
+// though the debounced query has not changed yet.
+function MappingSearch({ value, onCommit }) {
+  const [searchValue, setSearchValue] = useDebouncedSearch(value, onCommit)
+
+  return (
+    <TextInput
+      value={searchValue}
+      onChange={(e) => setSearchValue(e.currentTarget.value)}
+      placeholder="Search ingredients"
+      aria-label="Search ingredients"
+      size="sm"
+      w={{ base: '100%', sm: 280 }}
+    />
   )
 }
 
@@ -220,14 +239,7 @@ export default function MappingPage() {
       <Group justify="space-between" align="flex-end">
         <Stack gap="xs">
           <SegmentedControl value={filter} onChange={setFilter} data={FILTERS} size="sm" />
-          <TextInput
-            value={q}
-            onChange={(e) => setSearch(e.currentTarget.value)}
-            placeholder="Search ingredients"
-            aria-label="Search ingredients"
-            size="sm"
-            w={{ base: '100%', sm: 280 }}
-          />
+          <MappingSearch value={q} onCommit={setSearch} />
         </Stack>
         {filter === 'proposed' && proposedKeys.length > 0 && (
           <Button

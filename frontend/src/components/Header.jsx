@@ -1,34 +1,22 @@
-import { useEffect, useState } from 'react'
-import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Box, Container, Group, TextInput, Title } from '@mantine/core'
 import { IconSearch } from '@tabler/icons-react'
 
+import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 import classes from './Header.module.css'
 
 // Debounced search box that writes ?q= and lands on the browse page.
 function SearchBox() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [value, setValue] = useState(searchParams.get('q') ?? '')
-
-  // Keep the box in sync when the URL changes elsewhere (e.g. Clear all).
-  useEffect(() => {
-    setValue(searchParams.get('q') ?? '')
-  }, [searchParams])
-
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      const current = searchParams.get('q') ?? ''
-      if (value === current) return
-      const next = new URLSearchParams(searchParams)
-      if (value) next.set('q', value)
-      else next.delete('q')
-      next.delete('page')
-      navigate({ pathname: '/', search: next.toString() })
-    }, 300)
-    return () => clearTimeout(handle)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value])
+  const q = searchParams.get('q') ?? ''
+  const [value, setValue] = useDebouncedSearch(q, (nextValue) => {
+    const next = new URLSearchParams(searchParams)
+    if (nextValue) next.set('q', nextValue)
+    else next.delete('q')
+    next.delete('page')
+    navigate({ pathname: '/', search: next.toString() })
+  })
 
   return (
     <TextInput
@@ -44,6 +32,8 @@ function SearchBox() {
 }
 
 export default function Header() {
+  const { pathname } = useLocation()
+
   return (
     <Box className={classes.header}>
       <Container size="xl" h="100%">
@@ -70,7 +60,7 @@ export default function Header() {
               </NavLink>
             </Group>
           </Group>
-          <SearchBox />
+          {pathname === '/' && <SearchBox />}
         </Group>
       </Container>
     </Box>

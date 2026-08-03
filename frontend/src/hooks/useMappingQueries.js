@@ -26,6 +26,10 @@ export function useMappingList(status, options = {}) {
   return useQuery({
     queryKey: ['mapping-list', status ?? 'all', page, pageSize, q],
     queryFn: () => fetchMappingList(status, { page, pageSize, q }),
+    // List-level counts feed the coverage summary. Keep the last response in
+    // place while a new filter/search request is in flight so that summary and
+    // the table do not briefly disappear between keystrokes.
+    placeholderData: (previous) => previous,
   })
 }
 
