@@ -16,19 +16,26 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import config
 from app.db.models import OcadoCartLedger, OcadoCartSync
 from app.ocado.sync import CartLedger, LedgerLine
 
-#: The sync row is a singleton; its id is fixed so the upsert needs no lookup.
-SYNC_ROW_ID = 1
+
+def _account_id(account_id: str | None) -> str:
+    return account_id or config.DEFAULT_OCADO_ACCOUNT_ID
 
 
-def read_ledger(factory: sessionmaker[Session]) -> CartLedger:
+def read_ledger(factory: sessionmaker[Session], *, account_id: str | None = None) -> CartLedger:
+    account_id = _account_id(account_id)
     with factory() as session:
         rows = session.execute(
-            select(OcadoCartLedger).order_by(OcadoCartLedger.sku)
+            select(OcadoCartLedger)
+            .where(OcadoCartLedger.account_id == account_id)
+            .order_by(OcadoCartLedger.sku)
         ).scalars().all()
-        sync = session.get(OcadoCartSync, SYNC_ROW_ID)
+        sync = session.execute(
+            select(OcadoCartSync).where(OcadoCartSync.account_id == account_id)
+        ).scalar_one_or_none()
         synced_at = sync.synced_at if sync else None
         week_start = sync.week_start if sync else None
     return CartLedger(
@@ -53,6 +60,7 @@ def write_ledger(
     factory: sessionmaker[Session],
     ledger: CartLedger,
     *,
+    account_id: str | None = None,
     week_start: str | None = None,
 ) -> None:
     """Replace the ledger wholesale.
@@ -61,11 +69,13 @@ def write_ledger(
     *disappear* from the ledger, and reconciling row by row is how you end up
     with a stale claim on something HF gave back years ago.
     """
+    account_id = _account_id(account_id)
     now = datetime.now(timezone.utc)
     with factory() as session:
-        session.execute(delete(OcadoCartLedger))
+        session.execute(delete(OcadoCartLedger).where(OcadoCartLedger.account_id == account_id))
         session.add_all(
             OcadoCartLedger(
+                account_id=account_id,
                 sku=line.sku,
                 quantity=line.quantity,
                 name=line.name,
@@ -77,23 +87,26 @@ def write_ledger(
             for line in ledger.lines
             if line.quantity > 0
         )
-        row = session.get(OcadoCartSync, SYNC_ROW_ID)
+        row = session.execute(
+            select(OcadoCartSync).where(OcadoCartSync.account_id == account_id)
+        ).scalar_one_or_none()
         if row is None:
-            session.add(OcadoCartSync(id=SYNC_ROW_ID, week_start=week_start, synced_at=now))
+            session.add(OcadoCartSync(account_id=account_id, week_start=week_start, synced_at=now))
         else:
             row.week_start = week_start
             row.synced_at = now
         session.commit()
 
 
-def forget_ledger(factory: sessionmaker[Session]) -> None:
+def forget_ledger(factory: sessionmaker[Session], *, account_id: str | None = None) -> None:
     """Drop every claim and the sync marker with it.
 
     For starting over after the cart has been meddled with beyond recognition.
     Not needed for checkout: an emptied cart already merges to "HF owns nothing"
     on its own, and the next push writes that back.
     """
+    account_id = _account_id(account_id)
     with factory() as session:
-        session.execute(delete(OcadoCartLedger))
-        session.execute(delete(OcadoCartSync))
+        session.execute(delete(OcadoCartLedger).where(OcadoCartLedger.account_id == account_id))
+        session.execute(delete(OcadoCartSync).where(OcadoCartSync.account_id == account_id))
         session.commit()

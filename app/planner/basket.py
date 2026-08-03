@@ -20,7 +20,8 @@ from statistics import median
 from typing import Iterable, Sequence
 
 from app.planner import waste as waste_mod
-from app.planner.index import Ingredient, Pack, PlanIndex
+from app.planner.index import Ingredient, Pack, PlanIndex, modified_needs
+from app.protein import ProteinModifier
 
 BUCKET_G = 5
 MAX_BUCKETS = 10_000
@@ -665,10 +666,16 @@ def _best_value(
 
 @dataclass(frozen=True, slots=True)
 class Selection:
-    """A recipe in the week's plan, cooked for ``servings`` people."""
+    """A recipe in the week's plan, cooked for ``servings`` people.
+
+    ``protein`` is this week's swap or scale for the dish, held with the week
+    rather than in the database for the same reason ``pack_overrides`` is: it is
+    a decision about one shop, and the recipe it modifies is left as published.
+    """
 
     recipe_id: int
     servings: int | None = None
+    protein: ProteinModifier | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -816,7 +823,7 @@ def aggregate_needs(
         servings = selection.servings or recipe.base_yield
         factor = servings / recipe.base_yield if recipe.base_yield else 1.0
         untracked += recipe.untracked_lines
-        for need in recipe.needs:
+        for need in modified_needs(index, recipe, selection.protein):
             grams = need.grams * factor
             units = need.units * factor if need.units is not None else None
             current = needs[need.key]
@@ -867,7 +874,7 @@ def score_basket(index: PlanIndex, selections: Iterable[Selection]) -> BasketSco
         servings = selection.servings or recipe.base_yield
         factor = servings / recipe.base_yield if recipe.base_yield else 1.0
         gaps += recipe.untracked_lines
-        for need in recipe.needs:
+        for need in modified_needs(index, recipe, selection.protein):
             grams = need.grams * factor
             units = need.units * factor if need.units is not None else None
             current = needs.get(need.key)

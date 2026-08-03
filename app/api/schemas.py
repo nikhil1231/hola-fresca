@@ -7,8 +7,11 @@ image URL.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from app import protein as protein_mod
 
 
 class PersonalRatingIn(BaseModel):
@@ -124,6 +127,116 @@ class RecipeDetail(BaseModel):
     audited_at: datetime | None = None
     edits: list["RecipeEditOut"] = Field(default_factory=list)
 
+    # Present only when a line of this recipe is a protein we recognise; a
+    # lentil dahl simply has nothing to swap.
+    protein: "ProteinProfileOut | None" = None
+
+
+# --- protein modifiers ------------------------------------------------------
+
+class MacrosOut(BaseModel):
+    kcal: float = 0
+    protein_g: float = 0
+    fat_g: float = 0
+    carbs_g: float = 0
+
+    @classmethod
+    def of(cls, macros: protein_mod.Macros) -> "MacrosOut":
+        rounded = macros.rounded()
+        return cls(
+            kcal=rounded.kcal,
+            protein_g=rounded.protein_g,
+            fat_g=rounded.fat_g,
+            carbs_g=rounded.carbs_g,
+        )
+
+
+class ProteinTargetOut(BaseModel):
+    """A protein this recipe can be swapped to, in the form it would arrive in."""
+
+    id: str
+    label: str
+    ingredient_key: str
+    ingredient_name: str
+    cook_note: str
+    per_100g: MacrosOut
+    #: False when the retailer has nothing shoppable for it today. Still offered,
+    #: because the recipe page is not the checkout and a sold-out swap is worth
+    #: knowing about rather than silently missing.
+    available: bool = True
+
+
+class ProteinProfileOut(BaseModel):
+    """The recipe's own protein, and what may replace it."""
+
+    ingredient_key: str
+    name: str
+    label: str
+    type: str
+    form: str
+    grams: float
+    per_100g: MacrosOut
+    targets: list[ProteinTargetOut] = Field(default_factory=list)
+
+
+class ProteinModifierIn(BaseModel):
+    """A swap, a scale, or a per-portion macro target — combinable.
+
+    ``scale`` and a target are alternatives; when both arrive, ``scale`` wins,
+    because it is the one the user set by hand.
+    """
+
+    swap_to: str | None = None
+    scale: float | None = Field(default=None, ge=protein_mod.MIN_FACTOR, le=protein_mod.MAX_FACTOR)
+    target_mode: Literal["protein_g", "energy_kcal"] | None = None
+    target_value: float | None = Field(default=None, gt=0, le=2000)
+
+    def to_domain(self) -> protein_mod.ProteinModifier:
+        return protein_mod.ProteinModifier(
+            swap_to=self.swap_to,
+            scale=self.scale,
+            target_mode=self.target_mode,
+            target_value=self.target_value,
+        )
+
+
+class ProteinPreviewIn(ProteinModifierIn):
+    pass
+
+
+class ProteinPreviewOut(BaseModel):
+    """The modified recipe, ready to render in place of the stored one.
+
+    The whole ingredient list and every step come back rewritten rather than a
+    diff, so the page renders a modified recipe exactly as it renders a plain
+    one. Quantities stay at the recipe's base yield for the same reason: portion
+    scaling is the client's, and a preview that had already applied it could not
+    be re-scaled without compounding.
+    """
+
+    factor: float
+    swapped: bool
+    changed: bool
+    swap_id: str | None = None
+    swap_label: str | None = None
+    cook_note: str | None = None
+
+    protein_name: str
+    protein_name_after: str | None = None
+    grams_before: float
+    grams_after: float
+
+    macros_before: MacrosOut
+    macros_after: MacrosOut
+
+    ingredients: list[IngredientOut] = Field(default_factory=list)
+    steps: list["StepOut"] = Field(default_factory=list)
+    #: Diet flags recomputed over the modified ingredient list, and the ones that
+    #: actually changed, phrased for display ("Now vegetarian").
+    diet: dict[str, bool] = Field(default_factory=dict)
+    diet_changes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
 
 class RecipeEditOut(BaseModel):
     """A corrected number, and the one it replaced."""
@@ -191,6 +304,9 @@ class FacetsOut(BaseModel):
 class PlannerSelectionIn(BaseModel):
     recipe_id: int
     portions: int = Field(ge=1, le=20)
+    #: This week's protein swap/scale for the dish. Travels with the selection
+    #: rather than being stored, so it expires with the week it belongs to.
+    protein: ProteinModifierIn | None = None
 
 
 class PlannerFiltersIn(BaseModel):
@@ -213,6 +329,7 @@ class PlannerFiltersIn(BaseModel):
 class BasketIn(BaseModel):
     selections: list[PlannerSelectionIn] = Field(default_factory=list)
     owned_item_keys: list[str] = Field(default_factory=list)
+    account_id: str | None = None
     #: Which week this basket is for. Recorded against the cart ledger so a
     #: stale claim can be read as "that was last week's shop", and ignored
     #: everywhere else.
@@ -563,11 +680,31 @@ class ManualProductListOut(BaseModel):
 
 # --- Ocado basket/session ----------------------------------------------------
 
-class OcadoLoginOut(BaseModel):
+class OcadoAccountOut(BaseModel):
+    id: str
+    label: str
+    email: str | None = None
     status: str
 
 
-class OcadoOtpIn(BaseModel):
+class OcadoAccountsOut(BaseModel):
+    items: list[OcadoAccountOut] = Field(default_factory=list)
+    default_account_id: str
+
+
+class OcadoAccountIn(BaseModel):
+    account_id: str | None = None
+
+
+class OcadoLoginOut(BaseModel):
+    account_id: str
+    status: str
+    #: Which rung of the auth ladder is running, for a caller polling /status
+    #: while a slow login is in flight. "idle" when nothing is.
+    stage: str = "idle"
+
+
+class OcadoOtpIn(OcadoAccountIn):
     code: str = Field(min_length=1)
 
 
@@ -659,6 +796,7 @@ class OcadoSlotsOut(BaseModel):
 
 
 class OcadoReserveIn(BaseModel):
+    account_id: str | None = None
     slot_id: str
     ddid: str | None = None
     region: str | None = None

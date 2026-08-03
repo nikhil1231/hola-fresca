@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from app import config
+from app.ocado import otp_mail
 
 log = logging.getLogger("holafresca.ocado")
 
@@ -40,6 +41,12 @@ BASE_URL = "https://www.ocado.com"
 LOGIN_TIMEOUT_S = 90.0
 #: How long a browser job may take before the caller gives up on the worker.
 JOB_TIMEOUT_S = 180.0
+#: How long to keep re-harvesting cookies after Ocado accepts the login. The SSO
+#: redirect chain outlives the URL change that ends the login step, and the
+#: session cookie the site actually runs on is issued at the end of it.
+SESSION_SETTLE_TIMEOUT_S = 30.0
+SESSION_SETTLE_POLL_S = 2.0
+NETWORK_IDLE_TIMEOUT_MS = 10_000
 
 EMAIL_SELECTORS = ("input[type=email]", "input[name=usernamelogin]", "input[name*=email i]")
 PASSWORD_SELECTORS = ("input[type=password]", "input[name=passwordlogin]")
@@ -89,6 +96,22 @@ class AuthState(StrEnum):
     LOGGED_OUT = "logged_out"
     AWAITING_OTP = "awaiting_otp"
     READY = "ready"
+
+
+class AuthStage(StrEnum):
+    """Which rung of the ladder is running right now.
+
+    Separate from ``AuthState``, which is where the login *ended up*. A full
+    login can take three minutes - a browser launch, reCAPTCHA, then a wait for
+    the emailed code - and for most of that the state is simply LOGGED_OUT. The
+    stage is what a caller polling /status can show instead of a bare spinner.
+    """
+
+    IDLE = "idle"
+    CHECKING_SESSION = "checking_session"
+    SIGNING_IN = "signing_in"
+    WAITING_FOR_CODE = "waiting_for_code"
+    ENTERING_CODE = "entering_code"
 
 
 @dataclass
@@ -196,15 +219,28 @@ class AuthLadder:
     """Refresh the Ocado cookie jar, escalating from free checks to full login."""
 
     profile_dir: Path | None = None
+    email: str | None = None
+    password: str | None = None
     headless: bool | None = None
+    #: Where to read the emailed code from. ``None`` means ask a human for it.
+    otp_mailbox: otp_mail.MailboxConfig | None = None
+    #: What distinguishes this account's mail in a mailbox shared by both.
+    otp_markers: tuple[str, ...] = ()
     state: AuthState = AuthState.LOGGED_OUT
+    #: Read from other request threads while a login runs; only ever a plain
+    #: assignment, so it needs no lock.
+    stage: AuthStage = AuthStage.IDLE
     _worker: _BrowserWorker | None = field(default=None, repr=False)
     _pending_session: "OcadoSession | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.profile_dir = self.profile_dir or (config.DATA_DIR / "ocado" / "browser-profile")
+        self.email = self.email if self.email is not None else config.OCADO_EMAIL
+        self.password = self.password if self.password is not None else config.OCADO_PASSWORD
         if self.headless is None:
             self.headless = config.OCADO_LOGIN_HEADLESS
+        if self.otp_mailbox is None:
+            self.otp_mailbox = otp_mail.mailbox_from_env()
 
     @property
     def worker(self) -> _BrowserWorker:
@@ -229,20 +265,24 @@ class AuthLadder:
         need nothing from the user, but the third emails an OTP - so anything
         automatic (a page load, say) must not be able to reach it.
         """
-        if trust_existing and session.probe_authenticated():
-            log.info("ocado auth: existing jar still works")
-            self.state = AuthState.READY
-            return self.state
-        if self.try_silent(session):
-            log.info("ocado auth: silent refresh succeeded")
-            self.state = AuthState.READY
-            return self.state
-        if not allow_login:
-            log.info("ocado auth: quiet refresh exhausted, a full login is needed")
-            self.state = AuthState.LOGGED_OUT
-            return self.state
-        log.info("ocado auth: silent refresh failed, falling back to full login")
-        return self.start_login(session)
+        self.stage = AuthStage.CHECKING_SESSION
+        try:
+            if trust_existing and session.probe_authenticated():
+                log.info("ocado auth: existing jar still works")
+                self.state = AuthState.READY
+                return self.state
+            if self.try_silent(session):
+                log.info("ocado auth: silent refresh succeeded")
+                self.state = AuthState.READY
+                return self.state
+            if not allow_login:
+                log.info("ocado auth: quiet refresh exhausted, a full login is needed")
+                self.state = AuthState.LOGGED_OUT
+                return self.state
+            log.info("ocado auth: silent refresh failed, falling back to full login")
+            return self.start_login(session)
+        finally:
+            self.stage = AuthStage.IDLE
 
     def try_silent(self, session: "OcadoSession") -> bool:
         """Re-auth with no password, if the upstream SSO session is still alive."""
@@ -260,11 +300,12 @@ class AuthLadder:
         return session.probe_authenticated()
 
     def start_login(self, session: "OcadoSession") -> AuthState:
-        email = config.OCADO_EMAIL
-        password = config.OCADO_PASSWORD
+        email = self.email
+        password = self.password
         if not email or not password:
             self.state = AuthState.LOGGED_OUT
             return self.state
+        self.stage = AuthStage.SIGNING_IN
 
         def job(worker: _BrowserWorker) -> tuple[str, str | None]:
             page = worker.start_browser()
@@ -276,6 +317,10 @@ class AuthLadder:
             _click_first(page, SUBMIT_SELECTORS)
             return _await_login_outcome(page)
 
+        # Stamped before the password step, because that is what makes Ocado send
+        # the mail. Anything already in the mailbox is from an earlier attempt and
+        # is either expired or about to be.
+        started_at = time.time()
         try:
             outcome, detail = self.worker.submit(job)
         except Exception:
@@ -290,6 +335,9 @@ class AuthLadder:
         if outcome == "otp":
             self._pending_session = session
             self.state = AuthState.AWAITING_OTP
+            self._auto_otp(since=started_at)
+            # Not the value _auto_otp returned: a browser failure inside
+            # submit_otp resets the state, and that is what the caller needs.
             return self.state
 
         if outcome == "error":
@@ -300,6 +348,44 @@ class AuthLadder:
         self._finish(session)
         return self.state
 
+    def _auto_otp(self, *, since: float) -> bool:
+        """Read the emailed code and submit it, so re-auth needs nobody present.
+
+        Every failure here is soft, and deliberately so: the login is parked at
+        AWAITING_OTP with the browser still open, so an unconfigured mailbox, a
+        code that never arrives and a code Ocado rejects all leave the manual
+        ``/ocado/otp`` endpoint able to finish the job by hand.
+        """
+        if self.otp_mailbox is None:
+            log.info("ocado auth: no OTP mailbox configured, waiting for a code by hand")
+            return False
+        self.stage = AuthStage.WAITING_FOR_CODE
+        try:
+            code = otp_mail.fetch_code(
+                self.otp_mailbox,
+                otp_mail.OtpQuery(markers=self.otp_markers),
+                since=since,
+                wait_s=config.OCADO_OTP_WAIT_S,
+                poll_s=config.OCADO_OTP_POLL_S,
+            )
+        except Exception:  # noqa: BLE001 - a broken mailbox must not fail the login
+            log.warning("ocado auth: could not read the OTP mailbox", exc_info=True)
+            return False
+        if code is None:
+            log.info(
+                "ocado auth: no OTP mail matched %s within %.0fs, waiting for a code by hand",
+                self.otp_markers or "(any sender)",
+                config.OCADO_OTP_WAIT_S,
+            )
+            return False
+        log.info("ocado auth: read a %d-digit code from the mailbox", len(code))
+        try:
+            self.submit_otp(code)
+        except Exception:  # noqa: BLE001
+            log.warning("ocado auth: the emailed code was not accepted", exc_info=True)
+            return False
+        return self.state == AuthState.READY
+
     def submit_otp(self, code: str) -> AuthState:
         code = code.strip()
         if not code:
@@ -309,6 +395,7 @@ class AuthLadder:
         if session is None:
             self.state = AuthState.LOGGED_OUT
             return self.state
+        self.stage = AuthStage.ENTERING_CODE
 
         def job(worker: _BrowserWorker) -> tuple[str, str | None]:
             page = worker.page
@@ -319,38 +406,75 @@ class AuthLadder:
             return _await_login_outcome(page, watch_for_otp=False)
 
         try:
-            outcome, detail = self.worker.submit(job)
-        except Exception:
-            self._safe_stop()
+            try:
+                outcome, detail = self.worker.submit(job)
+            except Exception:
+                self._safe_stop()
+                self._pending_session = None
+                self.state = AuthState.LOGGED_OUT
+                raise
+
+            log.info("ocado auth: otp step outcome=%s detail=%s", outcome, detail)
+
+            if outcome in {"error", "timeout"}:
+                # Keep the browser open: a mistyped or slow code deserves another go.
+                raise RuntimeError(
+                    f"Ocado rejected the code: {detail}"
+                    if outcome == "error"
+                    else "timed out waiting for Ocado to accept the code"
+                )
+
             self._pending_session = None
-            self.state = AuthState.LOGGED_OUT
-            raise
-
-        log.info("ocado auth: otp step outcome=%s detail=%s", outcome, detail)
-
-        if outcome in {"error", "timeout"}:
-            # Keep the browser open: a mistyped or slow code deserves another go.
-            raise RuntimeError(
-                f"Ocado rejected the code: {detail}"
-                if outcome == "error"
-                else "timed out waiting for Ocado to accept the code"
-            )
-
-        self._pending_session = None
-        self._finish(session)
-        return self.state
+            self._finish(session)
+            return self.state
+        finally:
+            # /ocado/otp calls this directly, so it cannot rely on the reset in
+            # ensure_authenticated to clear the stage behind it.
+            self.stage = AuthStage.IDLE
 
     def _finish(self, session: "OcadoSession") -> None:
-        """Harvest cookies, close the browser, and record what we ended up with."""
-        self.worker.submit(lambda worker: _export_cookies(worker, session))
+        """Harvest cookies until the jar works, close the browser, record it."""
+        authenticated = self._harvest_until_authenticated(session)
         self._safe_stop()
-        authenticated = session.probe_authenticated()
         log.info(
             "ocado auth: finished, cookies=%d authenticated=%s",
             len(session.client.cookies.jar),
             authenticated,
         )
         self.state = AuthState.READY if authenticated else AuthState.LOGGED_OUT
+
+    def _harvest_until_authenticated(self, session: "OcadoSession") -> bool:
+        """Re-harvest the browser's cookies until the jar proves itself.
+
+        Harvesting once is a race the login usually loses.
+        ``_await_login_outcome`` reports "ready" the moment the URL leaves
+        /login, but Ocado's SSO is still redirecting then: the jar at that
+        instant holds ``global_sid`` and the in-flight ``sso.codeVerifier`` /
+        ``nonce`` / ``state``, and *not* the ``ocado_session`` the site issues at
+        the end of the chain. So a login Ocado had accepted came back with 25
+        cookies and authenticated=False.
+
+        Probing is the check rather than watching for a cookie by name, because
+        the question being asked is exactly "does this jar work yet".
+        """
+        deadline = time.monotonic() + SESSION_SETTLE_TIMEOUT_S
+        attempt = 0
+        while True:
+            attempt += 1
+            revisit = attempt > 1
+            self.worker.submit(lambda worker: _settle_and_export(worker, session, revisit))
+            if session.probe_authenticated():
+                log.info("ocado auth: session settled after %d harvest(s)", attempt)
+                return True
+            if time.monotonic() >= deadline:
+                log.warning(
+                    "ocado auth: Ocado accepted the login but the session never became"
+                    " usable after %d harvests over %.0fs",
+                    attempt,
+                    SESSION_SETTLE_TIMEOUT_S,
+                )
+                return False
+            time.sleep(SESSION_SETTLE_POLL_S)
 
     def _safe_stop(self) -> None:
         try:
@@ -363,6 +487,24 @@ def _export_cookies(worker: _BrowserWorker, session: "OcadoSession") -> None:
     if worker.context is None:
         return
     session.import_playwright_cookies(worker.context.cookies())
+
+
+def _settle_and_export(worker: _BrowserWorker, session: "OcadoSession", revisit: bool) -> None:
+    """Let the login finish landing, then copy the cookies across.
+
+    ``revisit`` loads the homepage first. The tail of the SSO redirect chain does
+    not always issue the site's own session cookie; one plain request as the
+    newly signed-in user does.
+    """
+    page = worker.page
+    if page is not None:
+        try:
+            if revisit:
+                page.goto(BASE_URL, wait_until="domcontentloaded")
+            page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
+        except Exception:  # noqa: BLE001 - a page that stays busy is still worth harvesting
+            pass
+    _export_cookies(worker, session)
 
 
 def _dismiss_cookie_banner(page: Any) -> None:
@@ -439,6 +581,3 @@ def _click_first(page: Any, selectors: tuple[str, ...]) -> None:
     if locator is None:
         raise RuntimeError("could not find the Ocado login submit button")
     locator.click()
-
-
-AUTH = AuthLadder()

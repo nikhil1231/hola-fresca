@@ -20,6 +20,9 @@ from app.api.planner import (
 )
 from app.api.schemas import (
     BasketIn,
+    OcadoAccountIn,
+    OcadoAccountOut,
+    OcadoAccountsOut,
     OcadoBasketOut,
     OcadoLoginOut,
     OcadoOtpIn,
@@ -34,11 +37,15 @@ from app.api.schemas import (
     PushLineOut,
 )
 from app.db.models import Product
-from app.ocado.auth import AUTH
 from app.ocado.availability import mark_unavailable, refresh_stock
 from app.ocado.client import OcadoClient
 from app.ocado.ledger import read_ledger, write_ledger
-from app.ocado.session import get_shared_session
+from app.ocado.session import (
+    OcadoAccountRuntime,
+    get_account_runtime,
+    get_shared_session,
+    list_account_runtimes,
+)
 from app.ocado.sync import PushLine, plan_push, push_basket
 from app.planner.basket import Basket, Selection, build_basket
 from app.planner.index import PlanIndex
@@ -53,51 +60,94 @@ router = APIRouter(prefix="/api/ocado", tags=["ocado"])
 _PUSH_LOCK = threading.Lock()
 
 
-def get_ocado_client() -> OcadoClient:
-    return OcadoClient(get_shared_session())
+def _runtime(account_id: str | None = None) -> OcadoAccountRuntime:
+    try:
+        return get_account_runtime(account_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown Ocado account: {exc.args[0]}") from exc
+
+
+def get_ocado_client(account_id: str | None = None) -> OcadoClient:
+    return OcadoClient(get_shared_session(account_id))
+
+
+def _login_out(runtime: OcadoAccountRuntime, state: str | None = None) -> OcadoLoginOut:
+    return OcadoLoginOut(
+        account_id=runtime.account.id,
+        status=state if state is not None else runtime.auth.state,
+        stage=runtime.auth.stage,
+    )
+
+
+def _client_for_body(
+    body_account_id: str | None,
+    injected: OcadoClient,
+) -> tuple[OcadoAccountRuntime, OcadoClient]:
+    runtime = _runtime(body_account_id)
+    if body_account_id is None:
+        return runtime, injected
+    return runtime, OcadoClient(runtime.session)
+
+
+@router.get("/accounts", response_model=OcadoAccountsOut)
+def accounts() -> OcadoAccountsOut:
+    runtimes = list_account_runtimes()
+    return OcadoAccountsOut(
+        default_account_id=runtimes[0].account.id,
+        items=[
+            OcadoAccountOut(
+                id=runtime.account.id,
+                label=runtime.account.label,
+                email=runtime.account.email,
+                status=runtime.auth.state,
+            )
+            for runtime in runtimes
+        ],
+    )
 
 
 @router.get("/status", response_model=OcadoLoginOut)
-def status() -> OcadoLoginOut:
-    return OcadoLoginOut(status=AUTH.state)
+def status(account_id: str | None = None) -> OcadoLoginOut:
+    return _login_out(_runtime(account_id))
 
 
 @router.post("/login", response_model=OcadoLoginOut)
-def login() -> OcadoLoginOut:
+def login(body: OcadoAccountIn) -> OcadoLoginOut:
     # Deliberately not closed: when this returns AWAITING_OTP the ladder keeps a
     # reference to this session for the /otp call that follows.
-    session = get_shared_session()
+    runtime = _runtime(body.account_id)
     try:
-        state = AUTH.ensure_authenticated(session)
+        state = runtime.auth.ensure_authenticated(runtime.session)
     except Exception as exc:  # noqa: BLE001 - browser/login failures surface as bad gateway
         raise HTTPException(status_code=502, detail=f"Ocado login failed: {exc}") from exc
-    return OcadoLoginOut(status=state)
+    return _login_out(runtime, state)
 
 
 @router.post("/session/refresh", response_model=OcadoLoginOut)
-def refresh_session() -> OcadoLoginOut:
+def refresh_session(body: OcadoAccountIn) -> OcadoLoginOut:
     """Become ready if that is possible without asking the user anything.
 
     Safe to call automatically on page load: it stops before the password step,
     which would email an OTP to someone who only opened the page.
     """
-    session = get_shared_session()
+    runtime = _runtime(body.account_id)
     try:
-        state = AUTH.ensure_authenticated(session, allow_login=False)
+        state = runtime.auth.ensure_authenticated(runtime.session, allow_login=False)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado session refresh failed: {exc}") from exc
-    return OcadoLoginOut(status=state)
+    return _login_out(runtime, state)
 
 
 @router.post("/otp", response_model=OcadoLoginOut)
 def otp(body: OcadoOtpIn) -> OcadoLoginOut:
+    runtime = _runtime(body.account_id)
     try:
-        state = AUTH.submit_otp(body.code)
+        state = runtime.auth.submit_otp(body.code)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado OTP failed: {exc}") from exc
-    return OcadoLoginOut(status=state)
+    return _login_out(runtime, state)
 
 
 def _candidate_skus(index: PlanIndex, basket: Basket) -> list[str]:
@@ -226,7 +276,7 @@ def plan(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
-    client: OcadoClient = Depends(get_ocado_client),
+    injected_client: OcadoClient = Depends(get_ocado_client),
 ) -> OcadoPushPlanOut:
     """What a push would change, without changing it.
 
@@ -239,7 +289,8 @@ def plan(
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
     _, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)
-    ledger = read_ledger(factory)
+    runtime, client = _client_for_body(body.account_id, injected_client)
+    ledger = read_ledger(factory, account_id=runtime.account.id)
     try:
         result = plan_push(
             client, basket, ledger=ledger, owned_item_keys=set(body.owned_item_keys)
@@ -265,7 +316,7 @@ def push(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
-    client: OcadoClient = Depends(get_ocado_client),
+    injected_client: OcadoClient = Depends(get_ocado_client),
 ) -> OcadoPushResultOut:
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
@@ -285,11 +336,12 @@ def push(
         return _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)[1]
 
     with _PUSH_LOCK:
+        runtime, client = _client_for_body(body.account_id, injected_client)
         try:
             result = push_basket(
                 client,
                 basket,
-                ledger=read_ledger(factory),
+                ledger=read_ledger(factory, account_id=runtime.account.id),
                 owned_item_keys=set(body.owned_item_keys),
                 recover=recover,
             )
@@ -298,7 +350,7 @@ def push(
         # Inside the lock: the ledger describes the cart the push just left, and
         # a second push reading it before this write would merge against a stale
         # claim and buy the week twice.
-        write_ledger(factory, result.ledger, week_start=body.week_start)
+        write_ledger(factory, result.ledger, account_id=runtime.account.id, week_start=body.week_start)
 
     pushed = result.basket or basket
     return OcadoPushResultOut(
@@ -325,6 +377,7 @@ def basket(client: OcadoClient = Depends(get_ocado_client)) -> OcadoBasketOut:
 
 @router.get("/slots", response_model=OcadoSlotsOut)
 def slots(
+    account_id: str | None = None,
     ddid: str | None = None,
     region: str | None = None,
     client: OcadoClient = Depends(get_ocado_client),
@@ -339,8 +392,9 @@ def slots(
 @router.post("/slots/reserve", response_model=OcadoReserveOut)
 def reserve(
     body: OcadoReserveIn,
-    client: OcadoClient = Depends(get_ocado_client),
+    injected_client: OcadoClient = Depends(get_ocado_client),
 ) -> OcadoReserveOut:
+    _, client = _client_for_body(body.account_id, injected_client)
     try:
         payload = client.reserve(body.slot_id, ddid=body.ddid, region=body.region)
     except Exception as exc:  # noqa: BLE001

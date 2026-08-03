@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 import main
+from app.api import ocado as ocado_api
 from app.api.ocado import get_ocado_client
+from app.ocado.auth import AuthStage, AuthState
 from app.ocado.client import Slot, normalize_slots
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ocado"
@@ -34,9 +37,19 @@ class FakeClient:
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     fake = FakeClient()
     main.app.dependency_overrides[get_ocado_client] = lambda: fake
+    monkeypatch.setattr(ocado_api, "OcadoClient", lambda session: fake)
+    monkeypatch.setattr(
+        ocado_api,
+        "_runtime",
+        lambda account_id=None: SimpleNamespace(
+            session=None,
+            account=SimpleNamespace(id=account_id or "default"),
+            auth=SimpleNamespace(state=AuthState.LOGGED_OUT, stage=AuthStage.IDLE),
+        ),
+    )
     with TestClient(main.app) as test_client:
         test_client.fake = fake
         yield test_client
@@ -48,6 +61,21 @@ def test_status_reports_the_ladder_state(client):
 
     assert response.status_code == 200
     assert response.json()["status"] in {"logged_out", "awaiting_otp", "ready"}
+    assert response.json()["account_id"] == "default"
+
+
+def test_status_also_reports_the_stage(client):
+    """What the page polls for while a login request is still blocked."""
+    response = client.get("/api/ocado/status")
+
+    assert response.json()["stage"] == "idle"
+
+
+def test_unknown_account_is_rejected():
+    with TestClient(main.app) as test_client:
+        response = test_client.get("/api/ocado/status?account_id=__missing__")
+
+    assert response.status_code == 404
 
 
 def test_slots_serialise_the_dataclass(client):

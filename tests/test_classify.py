@@ -94,49 +94,154 @@ def test_low_carb_threshold():
 
 # --- course ----------------------------------------------------------------
 
+# A plate with a base and a portion on it, so that the tag and title rules under
+# test are what decide, not the fallback.
+DINNER = [
+    ("Basmati Rice", 150.0),
+    ("British Chicken Breasts", 260.0),
+    ("Onion", 110.0),
+    ("Garlic Clove", 10.0),
+    ("Coriander", 10.0),
+]
+
+
 def test_a_single_ingredient_recipe_is_a_bought_product():
     """Nothing to cook: houmous, a garlic baguette, a tub of chips. The source
     files some of these under veggie or nothing at all, so structure decides."""
-    assert course(["grocery", "addon-veggie"], 1) == "product"
-    assert course(["veggie"], 1) == "product"
-    assert course([], 1) == "product"
-    assert course(["lunch-readymeals"], 1) == "product"
+    tub = [("Houmous", 300.0)]
+    assert course(["grocery", "addon-veggie"], tub) == "product"
+    assert course(["veggie"], tub) == "product"
+    assert course([], tub) == "product"
+    assert course(["lunch-readymeals"], tub) == "product"
 
 
 def test_a_single_ingredient_dessert_is_still_a_dessert():
-    assert course(["dessert-ready"], 1) == "dessert"
+    assert course(["dessert-ready"], [("Gü Chocolate Mousse", 250.0)]) == "dessert"
 
 
 def test_ready_meals_are_products_however_many_lines_they_list():
-    assert course(["lunch-readymeals"], 4) == "product"
+    assert course(["lunch-readymeals"], DINNER) == "product"
 
 
 def test_desserts_are_recognised_even_when_they_are_real_cooking():
-    assert course(["dessert-baking"], 9) == "dessert"
-    assert course(["dessert-baking", "eggs-not-included"], 7) == "dessert"
+    assert course(["dessert-baking"], DINNER) == "dessert"
+    assert course(["dessert-baking", "eggs-not-included"], DINNER) == "dessert"
 
 
-def test_small_side_tagged_dishes_are_sides():
-    assert course(["sides-salad"], 7) == "side"
-    assert course(["sides-bites"], 5) == "side"
-    assert course(["grocery-bakery"], 4) == "side"
-
-
-def test_a_side_tag_on_a_full_dinner_does_not_demote_it():
-    """Bacon and Sweet Potato Risotto carries sides-bread because bread comes
-    alongside it. Ten ingredients in, it is still dinner."""
-    assert course(["sides-bread", "grocery-bakery"], 10) == "main"
+def test_side_tagged_dishes_are_sides_however_big_they_are():
+    """The source uses these on nine-ingredient sharing platters as readily as
+    on a tub of slaw, so there is no size at which the tag stops meaning side."""
+    assert course(["sides-salad"], DINNER) == "side"
+    assert course(["sides-bites"], DINNER) == "side"
+    assert course(["grocery-bakery"], DINNER) == "side"
 
 
 def test_lunch_and_addon_tags_are_not_course_markers():
     """These sound like accompaniments and are not: a Green Goddess Rump Steak
     Salad and a Chicken and Chorizo Paella carry them."""
-    assert course(["lunch-salad"], 9) == "main"
-    assert course(["lunch-pasta"], 10) == "main"
-    assert course(["addon-veggie"], 11) == "main"
-    assert course(["addon-highprotein", "high-protein"], 18) == "main"
+    assert course(["lunch-salad"], DINNER) == "main"
+    assert course(["lunch-pasta"], DINNER) == "main"
+    assert course(["addon-veggie"], DINNER) == "main"
+    assert course(["addon-highprotein", "high-protein"], DINNER) == "main"
+
+
+def test_breakfast_is_its_own_course():
+    assert course(["breakfast-kits"], DINNER) == "breakfast"
+    assert course(["breakfast-juices", "addon-veggie"], DINNER) == "breakfast"
+    assert course(
+        [], DINNER, name="Zesty Cream Cheese & Avocado Breakfast Ciabatta"
+    ) == "breakfast"
+    assert course([], DINNER, name="Super Green Smoothie Kit") == "breakfast"
+
+
+def test_a_course_printed_in_the_title_block_is_believed():
+    """#30948: nine ingredients and 40 g of chicken, and the source says Starter."""
+    assert course(
+        [],
+        DINNER,
+        name="Bestselling Chicken Peanut Satay Style Skewers",
+        headline="Starter | with a Sticky Peanut Dipping Sauce and Lime",
+    ) == "side"
+    assert course([], DINNER, name="BLT Side Salad") == "side"
+    assert course(
+        [], DINNER, headline="Sharing Dish | with Cheddar Cheese"
+    ) == "side"
+
+
+def test_a_course_word_describing_the_accompaniment_is_not_the_course():
+    """Eighty real dinners come "with a Rocket Side Salad"."""
+    assert course(
+        [],
+        DINNER,
+        name="Honeyed Chorizo & Cheddar Pan-Fried Panini",
+        headline="Serves 2 | with a Rocket Side Salad",
+    ) == "main"
+    assert course(
+        [], DINNER, name="Veggie Enchiladas with a Side Helping of Mexican Trivia"
+    ) == "main"
+
+
+def test_a_plate_with_neither_base_nor_portion_is_a_side():
+    """#20405 Garlicky Greens: cavolo nero and a 45 g-a-head scattering of
+    lardons. #28356 is six ingredients of dressed kale."""
+    assert course(
+        [],
+        [
+            ("Garlic Clove", 10.0),
+            ("Hazelnuts", 25.0),
+            ("British Smoked Bacon Lardons", 90.0),
+            ("Chopped Cavolo Nero", 200.0),
+            ("Water", 30.0),
+        ],
+        name="Garlicky Greens",
+        headline="with Bacon and Hazelnuts",
+        servings=2,
+    ) == "side"
+    assert course(
+        [],
+        [
+            ("Sesame Oil", 15.0),
+            ("Soy Sauce", 30.0),
+            ("Honey", 20.0),
+            ("Chopped Kale", 200.0),
+            ("Salted Peanuts", 25.0),
+            ("Lime", 65.0),
+        ],
+        name="Stir fried Asian Style Kale Salad",
+        servings=2,
+    ) == "side"
+
+
+def test_an_unquantified_base_still_counts_as_one():
+    """The source leaves whole recipes at 0 g. A Chicken Biryani whose rice and
+    thighs both read zero is still a biryani, not a side."""
+    assert course(
+        [],
+        [
+            ("Basmati Rice", 0.0),
+            ("Diced British Chicken Thigh", 0.0),
+            ("Onion", 0.0),
+            ("Sri Lankan Curry Powder", None),
+        ],
+        name="Chicken Biryani",
+        headline="with Herby Chilli Yoghurt",
+        servings=2,
+    ) == "main"
 
 
 def test_an_ordinary_dinner_is_a_main():
-    assert course(["rapid", "bestseller", "seo"], 11) == "main"
-    assert course(None, 8) == "main"
+    assert course(["rapid", "bestseller", "seo"], DINNER) == "main"
+    assert course(None, DINNER) == "main"
+    # A steak dinner has no starch on the plate; the portion carries it.
+    assert course(
+        None,
+        [
+            ("Sirloin Steak", 300.0),
+            ("Tenderstem Broccoli", 200.0),
+            ("Garlic Clove", 10.0),
+            ("Creme Fraiche", 75.0),
+        ],
+        name="Surf 'n' Turf Steak",
+        headline="with a Creamy Garlic Peppercorn Sauce",
+        servings=2,
+    ) == "main"

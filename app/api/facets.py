@@ -48,6 +48,7 @@ MAIN = "main"
 COURSES = {
     MAIN: "Mains",
     "side": "Sides",
+    "breakfast": "Breakfast",
     "dessert": "Desserts",
     "product": "Ready-made",
 }

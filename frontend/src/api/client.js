@@ -95,6 +95,12 @@ export function fetchRecipe(id) {
   return getJSON(`/api/recipes/${id}`)
 }
 
+// The recipe as it would be with a protein swap/scale applied. A POST that
+// writes nothing: the body describes a hypothetical, and the recipe is untouched.
+export function fetchProteinPreview(id, modifier) {
+  return postJSON(`/api/recipes/${id}/protein/preview`, modifier ?? {})
+}
+
 export function setPersonalRecipeRating(id, rating) {
   return putJSON(`/api/recipes/${id}/personal-rating`, { rating })
 }

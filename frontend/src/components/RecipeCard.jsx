@@ -1,10 +1,21 @@
 import { Link } from 'react-router-dom'
-import { ActionIcon, Badge, Card, Group, Image, Stack, Text, Tooltip } from '@mantine/core'
+import {
+  ActionIcon,
+  Badge,
+  Card,
+  Group,
+  Image,
+  Skeleton,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core'
 import {
   IconClock,
   IconFlame,
   IconGauge,
   IconHeartFilled,
+  IconMeat,
   IconMinus,
   IconPlus,
   IconStarFilled,
@@ -12,6 +23,7 @@ import {
 } from '@tabler/icons-react'
 
 import { MAX_PORTIONS, MIN_PORTIONS } from '../hooks/useWeeklyPlan.js'
+import { useProteinPreview } from '../hooks/useRecipeQueries.js'
 import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import classes from './RecipeCard.module.css'
 
@@ -30,6 +42,7 @@ function formatMarginalScore(value) {
 
 const COURSE_LABELS = {
   side: 'Side',
+  breakfast: 'Breakfast',
   dessert: 'Dessert',
   product: 'Ready-made',
 }
@@ -41,10 +54,44 @@ function formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable) {
   return marginal
 }
 
+const PROTEIN_SWAP_LABELS = {
+  chicken_breast: 'Chicken breast',
+  chicken_thigh: 'Chicken thigh',
+  beef: 'Beef mince',
+  pork: 'Pork mince',
+  lamb: 'Lamb mince',
+  salmon: 'Salmon',
+  basa: 'Basa',
+  tofu: 'Tofu',
+  halloumi: 'Halloumi',
+}
+
+// How the week's protein modifier reads on a card: the swap if there is one,
+// otherwise what the scaling is doing.
+function formatProteinModifier(protein) {
+  if (!protein) return null
+  const parts = []
+  if (protein.swap_to) parts.push(PROTEIN_SWAP_LABELS[protein.swap_to] ?? protein.swap_to)
+  if (protein.scale) parts.push(`${protein.scale}x protein`)
+  else if (protein.target_mode === 'protein_g') parts.push(`${protein.target_value}g protein pp`)
+  else if (protein.target_mode === 'energy_kcal') parts.push(`${protein.target_value} kcal pp`)
+  return parts.join(' · ') || null
+}
+
 function proteinDensityLevel(value) {
   if (value == null) return 0
 
   return PROTEIN_DENSITY_BREAKPOINTS.filter((breakpoint) => value >= breakpoint).length + 1
+}
+
+function densityFromMacros(proteinG, kcal) {
+  if (proteinG == null || !kcal) return null
+  return Math.round((proteinG / kcal) * 1000) / 10
+}
+
+function differsRounded(left, right) {
+  if (left == null || right == null) return false
+  return round(left) !== round(right)
 }
 
 function ProteinDensityMeter({ value }) {
@@ -198,6 +245,19 @@ export default function RecipeCard({
 }) {
   const basketBadge =
     basketBadgeLabel ?? formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable)
+  const proteinLabel = formatProteinModifier(plannerEntry?.protein)
+  const proteinPreview = useProteinPreview(recipe.id, plannerEntry?.protein, {
+    enabled: showStats && Boolean(plannerEntry?.protein),
+  })
+  const adjustedMacros = proteinPreview.data?.changed ? proteinPreview.data.macros_after : null
+  const energyKcal = adjustedMacros?.kcal ?? recipe.energy_kcal
+  const proteinG = adjustedMacros?.protein_g ?? recipe.protein_g
+  const proteinDensity = adjustedMacros
+    ? densityFromMacros(adjustedMacros.protein_g, adjustedMacros.kcal)
+    : recipe.protein_energy_ratio
+  const energyAdjusted = differsRounded(energyKcal, recipe.energy_kcal)
+  const proteinAdjusted = differsRounded(proteinG, recipe.protein_g)
+  const densityAdjusted = differsRounded(proteinDensity, recipe.protein_energy_ratio)
   const cardClass = [
     classes.card,
     plannerEntry ? classes.cardSelected : '',
@@ -284,13 +344,23 @@ export default function RecipeCard({
                 {recipe.headline}
               </Text>
             )}
-            {(recipe.course && recipe.course !== 'main') || recipe.tags?.length > 0 ? (
+            {(recipe.course && recipe.course !== 'main') ||
+            recipe.tags?.length > 0 ||
+            proteinLabel ? (
               <Group gap={6} mt={4}>
                 {/* Say what this is when it is not dinner: a side, a dessert or
                     something you just buy. Mains are the norm and go unlabelled. */}
                 {recipe.course && recipe.course !== 'main' && (
                   <Badge variant="light" color="gray" size="sm" radius="sm">
                     {COURSE_LABELS[recipe.course] ?? recipe.course}
+                  </Badge>
+                )}
+                {/* A planned recipe whose protein has been swapped or scaled is
+                    not the dish its name and macros describe, and the basket is
+                    priced for the modified one. Say so on the card. */}
+                {proteinLabel && (
+                  <Badge variant="light" color="grape" size="sm" radius="sm">
+                    {proteinLabel}
                   </Badge>
                 )}
                 {(recipe.tags ?? []).slice(0, 2).map((tag) => (
@@ -304,37 +374,46 @@ export default function RecipeCard({
 
           {showStats && (
             <div className={classes.stats}>
-            <div className={classes.statRow}>
-              <StatSlot>
-                {recipe.energy_kcal != null && (
-                  <>
-                    <IconFlame size={14} />
-                    <Text size="xs">{round(recipe.energy_kcal)} kcal</Text>
-                  </>
-                )}
-              </StatSlot>
-              <StatSlot strong>
-                {recipe.protein_g != null && (
-                  <Text size="xs">{round(recipe.protein_g)}g protein</Text>
-                )}
-              </StatSlot>
-            </div>
+              <div className={classes.statRow}>
+                <StatSlot>
+                  {energyKcal != null && (
+                    <>
+                      <IconFlame size={14} />
+                      <Text size="xs" className={energyAdjusted ? classes.adjustedStat : ''}>
+                        {round(energyKcal)} kcal
+                      </Text>
+                    </>
+                  )}
+                </StatSlot>
+                <StatSlot strong>
+                  {proteinG != null && (
+                    <>
+                      <IconMeat size={14} />
+                      <Text size="xs" className={proteinAdjusted ? classes.adjustedStat : ''}>
+                        {round(proteinG)}g protein
+                      </Text>
+                    </>
+                  )}
+                </StatSlot>
+              </div>
 
-            <div className={classes.statRow}>
-              <StatSlot>
-                {recipe.protein_energy_ratio != null && (
-                  <ProteinDensityMeter value={recipe.protein_energy_ratio} />
-                )}
-              </StatSlot>
-              <StatSlot>
-                {recipe.total_time_min != null && (
-                  <>
-                    <IconClock size={14} />
-                    <Text size="xs">{recipe.total_time_min} min</Text>
-                  </>
-                )}
-              </StatSlot>
-            </div>
+              <div className={classes.statRow}>
+                <StatSlot>
+                  {proteinDensity != null && (
+                    <span className={densityAdjusted ? classes.adjustedStat : ''}>
+                      <ProteinDensityMeter value={proteinDensity} />
+                    </span>
+                  )}
+                </StatSlot>
+                <StatSlot>
+                  {recipe.total_time_min != null && (
+                    <>
+                      <IconClock size={14} />
+                      <Text size="xs">{recipe.total_time_min} min</Text>
+                    </>
+                  )}
+                </StatSlot>
+              </div>
             </div>
           )}
         </Stack>
@@ -349,6 +428,51 @@ export default function RecipeCard({
           onRemove={onRemoveFromPlan}
         />
       </div>
+    </Card>
+  )
+}
+
+/** A loading tile built from the card's own layout.
+ *
+ * The card has no fixed height: its image is a 4/3 slice of whatever the column
+ * is wide, and the body grows with the title and stats. A plain box of a chosen
+ * height therefore never lines up — and the browse grid shows placeholders
+ * beside real cards while the next page loads, where a mismatch reads as a gap.
+ * Sharing the stylesheet keeps the two the same shape at every breakpoint, and
+ * the same `height: 100%` lets a placeholder stretch to its row.
+ */
+export function RecipeCardSkeleton({ showStats = true }) {
+  return (
+    <Card padding="0" radius="md" withBorder className={classes.card} aria-hidden>
+      <Card.Section className={classes.imageWrap}>
+        <Skeleton height="100%" radius={0} />
+      </Card.Section>
+
+      <Stack gap={6} p="sm" className={classes.body}>
+        <div className={classes.content}>
+          <Skeleton height={12} width="42%" radius="sm" />
+          <Skeleton height={18} radius="sm" />
+          <Skeleton height={18} width="72%" radius="sm" />
+          <Skeleton height={12} width="88%" radius="sm" />
+          <Group gap={6} mt={4}>
+            <Skeleton height={20} width={62} radius="sm" />
+            <Skeleton height={20} width={44} radius="sm" />
+          </Group>
+        </div>
+
+        {showStats && (
+          <div className={classes.stats}>
+            <div className={classes.statRow}>
+              <Skeleton height={18} width="72%" radius="sm" />
+              <Skeleton height={18} width="80%" radius="sm" />
+            </div>
+            <div className={classes.statRow}>
+              <Skeleton height={18} width="88%" radius="sm" />
+              <Skeleton height={18} width="56%" radius="sm" />
+            </div>
+          </div>
+        )}
+      </Stack>
     </Card>
   )
 }

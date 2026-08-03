@@ -46,7 +46,12 @@ assert SuggestionsIn.model_fields["candidate_portions"].default == 4
 
 
 def _planner_selection(body_selection) -> Selection:
-    return Selection(recipe_id=body_selection.recipe_id, servings=body_selection.portions)
+    protein = getattr(body_selection, "protein", None)
+    return Selection(
+        recipe_id=body_selection.recipe_id,
+        servings=body_selection.portions,
+        protein=protein.to_domain() if protein is not None else None,
+    )
 
 
 def _selection_ids(selections) -> list[int]:

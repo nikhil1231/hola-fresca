@@ -10,7 +10,6 @@ import {
   Loader,
   Select,
   SimpleGrid,
-  Skeleton,
   Stack,
   Text,
 } from '@mantine/core'
@@ -19,7 +18,7 @@ import { IconAdjustmentsHorizontal, IconMoodEmpty, IconSparkles } from '@tabler/
 
 import FilterPanel from '../components/FilterPanel.jsx'
 import { DEFAULT_FACETS } from '../data/defaultFacets.js'
-import RecipeCard from '../components/RecipeCard.jsx'
+import RecipeCard, { RecipeCardSkeleton } from '../components/RecipeCard.jsx'
 import { useFilters, countActiveFilters } from '../hooks/useFilters.js'
 import {
   useFacets,
@@ -263,7 +262,7 @@ export default function BrowsePage() {
           <SimpleGrid cols={GRID_COLS} spacing="lg">
             {upcomingRecipes.map((entry) => renderRecipeCard(entry.recipe))}
             {loadingTiles.map((_, i) => (
-              <Skeleton key={i} height={280} radius="md" />
+              <RecipeCardSkeleton key={i} />
             ))}
           </SimpleGrid>
         ) : displayRecipes.length === 0 ? (

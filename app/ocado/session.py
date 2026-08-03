@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
@@ -10,10 +11,9 @@ from typing import Any
 import httpx
 
 from app import config
-from app.ocado.auth import AUTH, AuthLadder, AuthState
+from app.ocado.auth import AuthLadder, AuthState
 
 BASE_URL = "https://www.ocado.com"
-SESSION_PATH = config.DATA_DIR / "ocado" / "session.json"
 CSRF_RE = re.compile(r'"csrf"\s*:\s*\{\s*"token"\s*:\s*"([^"]+)"')
 
 #: The Ocado login session. ``aws-waf-token`` deliberately is *not* here - it is a
@@ -38,8 +38,8 @@ class OcadoSession:
         base_url: str = BASE_URL,
     ):
         self.base_url = base_url.rstrip("/")
-        self.jar_path = jar_path or SESSION_PATH
-        self.auth = auth or AUTH
+        self.jar_path = jar_path or (config.DATA_DIR / "ocado" / "session.json")
+        self.auth = auth or AuthLadder()
         self.client = client or httpx.Client(
             base_url=self.base_url,
             follow_redirects=True,
@@ -204,19 +204,56 @@ def _cookie_from_json(item: dict[str, Any]) -> Cookie:
     )
 
 
-_SHARED: OcadoSession | None = None
+@dataclass(slots=True)
+class OcadoAccountRuntime:
+    account: config.OcadoAccountConfig
+    auth: AuthLadder
+    session: OcadoSession
 
 
-def get_shared_session() -> OcadoSession:
-    """The process-wide session.
+_RUNTIMES: dict[str, OcadoAccountRuntime] = {}
 
-    One session per process, not per request: the cookie jar and CSRF token are
-    shared state, and the login flow parks a browser against a specific session
-    across two separate HTTP requests - so a per-request session would be closed
-    out from under the OTP step.
+
+def account_dir(account_id: str) -> Path:
+    return config.DATA_DIR / "ocado" / "accounts" / account_id
+
+
+def _account_config(account_id: str | None = None) -> config.OcadoAccountConfig:
+    resolved = account_id or config.DEFAULT_OCADO_ACCOUNT_ID
+    for account in config.OCADO_ACCOUNTS:
+        if account.id == resolved:
+            return account
+    raise KeyError(resolved)
+
+
+def get_account_runtime(account_id: str | None = None) -> OcadoAccountRuntime:
+    account = _account_config(account_id)
+    runtime = _RUNTIMES.get(account.id)
+    if runtime is not None:
+        return runtime
+    root = account_dir(account.id)
+    auth = AuthLadder(
+        profile_dir=root / "browser-profile",
+        email=account.email,
+        password=account.password,
+        otp_markers=account.otp_markers,
+    )
+    session = OcadoSession(jar_path=root / "session.json", auth=auth)
+    runtime = OcadoAccountRuntime(account=account, auth=auth, session=session)
+    _RUNTIMES[account.id] = runtime
+    return runtime
+
+
+def list_account_runtimes() -> list[OcadoAccountRuntime]:
+    return [get_account_runtime(account.id) for account in config.OCADO_ACCOUNTS]
+
+
+def get_shared_session(account_id: str | None = None) -> OcadoSession:
+    """The process-wide session for one Ocado account.
+
+    One session per process per account, not per request: each cookie jar and
+    CSRF token is shared state, and the login flow parks a browser against a
+    specific session across two separate HTTP requests - so a per-request
+    session would be closed out from under the OTP step.
     """
-    global _SHARED
-    if _SHARED is None:
-        _SHARED = OcadoSession()
-    return _SHARED
-
+    return get_account_runtime(account_id).session

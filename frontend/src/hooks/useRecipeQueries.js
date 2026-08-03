@@ -6,6 +6,7 @@ import {
   fetchFacets,
   fetchPlannerBasket,
   fetchPlannerSuggestions,
+  fetchProteinPreview,
   fetchRecipe,
   fetchRecipes,
   flagRecipe,
@@ -97,6 +98,21 @@ export function useRecipe(id) {
     queryKey: ['recipe', id],
     queryFn: () => fetchRecipe(id),
     enabled: id != null,
+  })
+}
+
+// The recipe rewritten for a protein modifier. Only asked for when there is a
+// modifier to apply — an unmodified recipe is already on the page, and asking
+// for it again would be a round trip to be told nothing changed.
+export function useProteinPreview(id, modifier, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ['recipe', id, 'protein-preview', modifier],
+    queryFn: () => fetchProteinPreview(id, modifier),
+    enabled: enabled && id != null && Boolean(modifier),
+    // Hold the last preview while the next one loads, so changing the target
+    // does not flash the recipe back to how it is written. Dropped the moment
+    // the modifier is cleared, or a reset would keep showing the swap.
+    placeholderData: (previous) => (modifier ? previous : undefined),
   })
 }
 

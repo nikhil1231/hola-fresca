@@ -71,52 +71,6 @@ def effective_ratings(
     return own_rating, (own_count if own_count is not None else None)
 
 
-# --- course ----------------------------------------------------------------
-
-MAIN = "main"
-SIDE = "side"
-DESSERT = "dessert"
-PRODUCT = "product"
-
-# Tag types that genuinely name a course. Deliberately narrow: the source also
-# has ``lunch-salad``, ``lunch-pasta`` and ``addon-veggie``, which sound like
-# accompaniments and are not — a Green Goddess Rump Steak Salad and a Chicken
-# and Chorizo Paella carry them, and demoting those would empty the library of
-# real dinners.
-_SIDE_TAGS = ("sides", "grocery")
-_DESSERT_TAGS = ("dessert",)
-# Ready meals are sold as a course but cooked by nobody: one line, reheat.
-_PRODUCT_TAGS = ("lunch-readymeals",)
-
-# Above this a side tag is describing what a dish is served *with* rather than
-# what it is. Bacon and Sweet Potato Risotto is tagged ``sides-bread`` because
-# bread comes alongside it; it is still a ten-ingredient dinner.
-_SIDE_MAX_INGREDIENTS = 7
-
-
-def course(tag_types: list[str] | None, ingredient_count: int) -> str:
-    """Classify a recipe as a main, a side, a dessert, or a bought product.
-
-    Structure decides first and tags only refine it, because the structure
-    cannot be marketing: a recipe with one ingredient and nothing to do to it is
-    an item you buy — houmous, a garlic baguette, a tub of chips — whatever the
-    source files it under.
-    """
-    types = [(t or "").lower() for t in (tag_types or [])]
-
-    if ingredient_count <= 1:
-        return DESSERT if any(t.startswith(_DESSERT_TAGS) for t in types) else PRODUCT
-    if any(t.startswith(_PRODUCT_TAGS) for t in types):
-        return PRODUCT
-    if any(t.startswith(_DESSERT_TAGS) for t in types):
-        return DESSERT
-    if ingredient_count <= _SIDE_MAX_INGREDIENTS and any(
-        t.startswith(_SIDE_TAGS) for t in types
-    ):
-        return SIDE
-    return MAIN
-
-
 # --- diet suitability ------------------------------------------------------
 
 # Meat/fish substitutes: cancel a meat/fish keyword hit ("Plant-Based Mince",
@@ -228,3 +182,174 @@ def diet_flags(
         "is_gluten_free": is_gluten_free,
         "is_low_carb": is_low_carb,
     }
+
+
+# --- course ----------------------------------------------------------------
+
+MAIN = "main"
+SIDE = "side"
+BREAKFAST = "breakfast"
+DESSERT = "dessert"
+PRODUCT = "product"
+
+# Tag types that genuinely name a course. Deliberately narrow: the source also
+# has ``lunch-salad``, ``lunch-pasta`` and ``addon-veggie``, which sound like
+# accompaniments and are not — a Green Goddess Rump Steak Salad and a Chicken
+# and Chorizo Paella carry them, and demoting those would empty the library of
+# real dinners.
+_SIDE_TAGS = ("sides", "grocery", "light-bites", "game-snacks")
+_DESSERT_TAGS = ("dessert",)
+_BREAKFAST_TAGS = ("breakfast", "brunch", "busy-mornings")
+# Ready meals are sold as a course but cooked by nobody: one line, reheat.
+_PRODUCT_TAGS = ("lunch-readymeals",)
+
+# The source writes the course into the title block, as a ``|``-delimited
+# segment of the headline ("Starter | with a Sticky Peanut Dipping Sauce") or as
+# part of the name ("Rocket & Parmesan Side Salad"). The segments that begin
+# with a joining word describe what comes *alongside* instead — "with a Rocket
+# Side Salad" hangs off eighty perfectly good dinners — so they are skipped, and
+# the name is read only up to its own "with".
+_HEADLINE_SEGMENT = re.compile(r"\s*\|\s*")
+_ACCOMPANIMENT = re.compile(r"^(?:with|and|plus|served|topped|on a bed|in a)\b")
+_NAME_ACCOMPANIMENT = re.compile(r"\bwith\b")
+
+_SIDE_LABEL = re.compile(
+    r"\b(?:starter|sharing (?:dish|platter|board)|sides? (?:dish|salad|platter|plate)|"
+    r"perfect for sharing|meal addition|pair with|snack|snacking|nibbles|tapas)\b"
+)
+_DESSERT_LABEL = re.compile(
+    r"\b(?:dessert|brownies?|cheesecake|tiramisu|panna cotta|profiteroles?|eton mess|"
+    r"sticky toffee|ice cream|gelato|sorbet|sundae|crumble|mousse|churros?|doughnuts?)\b"
+)
+_BREAKFAST_LABEL = re.compile(
+    r"\b(?:breakfast|brunch|smoothie|porridge|granola|overnight oats|parfait)\b"
+)
+
+# What makes a plate a dinner: a carbohydrate base, or a portion of protein to
+# build the plate around. A dish with neither is an accompaniment however it is
+# filed — Garlicky Greens is cavolo nero, garlic and a scattering of lardons.
+_BASE = {
+    "rice", "basmati", "arborio", "risotto", "pilaf", "biryani", "pasta", "spaghetti",
+    "penne", "linguine", "macaroni", "fusilli", "tagliatelle", "rigatoni", "farfalle",
+    "fettuccine", "pappardelle", "conchiglie", "casarecce", "bucatini", "paccheri",
+    "orzo", "lasagne", "gnocchi", "ravioli", "tortelloni", "tortellini", "girasoli",
+    "agnolotti", "pierogi", "noodle", "noodles", "udon", "ramen", "vermicelli",
+    "potato", "potatoes", "sweet potato", "sweet potatoes", "mash", "wedges", "fries",
+    "chips", "hash brown", "hash browns", "rosti", "dauphinoise", "bread", "sourdough",
+    "baguette", "ciabatta", "brioche", "bun", "buns", "bagel", "naan", "pitta", "pita",
+    "flatbread", "flatbreads", "wrap", "wraps", "tortilla", "tortillas", "taco",
+    "tacos", "nachos", "pizza", "dough", "flour", "pastry", "filo", "croissant",
+    "crumpet", "muffin", "muffins", "waffle", "waffles", "pancake", "pancakes",
+    "yorkshire", "pie", "couscous", "cous cous", "bulgur", "bulghur", "quinoa",
+    "freekeh", "barley", "millet", "semolina", "polenta", "oats", "panko",
+    "breadcrumb", "breadcrumbs", "lentil", "lentils", "chickpea", "chickpeas",
+    "cannellini", "borlotti", "haricot", "butter bean", "butter beans", "black bean",
+    "black beans", "kidney bean", "kidney beans", "mixed beans", "baked beans",
+    "refried beans",
+}
+# Meat substitutes are not cancelled here the way they are for diet flags: the
+# question is whether the plate has a portion to build on, and Plant-Based Mince
+# is exactly that.
+_PORTION = _MEAT | _FISH | {
+    "tofu", "halloumi", "paneer", "quorn", "egg", "eggs", "falafel", "tempeh",
+    "seitan", "chickpea", "chickpeas", "lentil", "lentils",
+}
+_BASE_RE = _build_pattern(_BASE)
+_PORTION_RE = _build_pattern(_PORTION)
+
+# Per serving. A base is a base at 20 g dry weight; a portion of protein is the
+# 120–150 g the source plates a dinner with, well clear of the 45 g of lardons
+# that season a bowl of greens.
+_MIN_BASE_G = 20.0
+_MIN_PORTION_G = 60.0
+_DEFAULT_SERVINGS = 2
+
+
+def _course_labels(name: str, headline: str | None) -> list[str]:
+    """The parts of the title block that describe the dish rather than its sides."""
+    labels = [_NAME_ACCOMPANIMENT.split((name or "").lower(), maxsplit=1)[0]]
+    for segment in _HEADLINE_SEGMENT.split((headline or "").lower()):
+        segment = segment.strip()
+        if segment and not _ACCOMPANIMENT.match(segment):
+            labels.append(segment)
+    return labels
+
+
+def _plate(
+    ingredients: list[tuple[str, float | None]], servings: int | None
+) -> tuple[bool, bool]:
+    """Whether the recipe has a carbohydrate base and a portion of protein.
+
+    A missing or zero amount means the source never quantified that ingredient,
+    not that there is none of it — a Chicken Biryani whose rice and thighs both
+    read 0 g is still a biryani — so an unquantified base or portion counts.
+    """
+    base_g = portion_g = 0.0
+    base_unquantified = portion_unquantified = False
+    for ingredient_name, grams in ingredients:
+        ascii_name = _strip_accents(ingredient_name)
+        if _BASE_RE.search(ascii_name):
+            if grams:
+                base_g += grams
+            else:
+                base_unquantified = True
+        if _PORTION_RE.search(ascii_name):
+            if grams:
+                portion_g += grams
+            else:
+                portion_unquantified = True
+    per_serving = servings or _DEFAULT_SERVINGS
+    return (
+        base_unquantified or base_g / per_serving >= _MIN_BASE_G,
+        portion_unquantified or portion_g / per_serving >= _MIN_PORTION_G,
+    )
+
+
+def course(
+    tag_types: list[str] | None,
+    ingredients: list[tuple[str, float | None]],
+    *,
+    name: str = "",
+    headline: str | None = None,
+    servings: int | None = None,
+) -> str:
+    """Classify a recipe as a main, side, breakfast, dessert or bought product.
+
+    ``ingredients`` is ``(name, grams for the whole recipe)`` per ingredient.
+
+    Three layers, weakest evidence last. A recipe with one ingredient and
+    nothing to do to it is an item you buy — houmous, a garlic baguette, a tub
+    of chips — whatever the source files it under. Then the source's own word
+    for the dish, from its tags and from the course it prints in the title
+    block. Only when nothing has been declared does the plate decide, and it
+    decides on structure rather than on calories: the calorie figures are
+    per-serving on some rows and per-100 g on others, so they put a 103 kcal
+    risotto next to a 484 kcal smoothie and cannot separate the two.
+    """
+    types = [(t or "").lower() for t in (tag_types or [])]
+
+    if len(ingredients) <= 1:
+        return DESSERT if any(t.startswith(_DESSERT_TAGS) for t in types) else PRODUCT
+    if any(t.startswith(_PRODUCT_TAGS) for t in types):
+        return PRODUCT
+    if any(t.startswith(_DESSERT_TAGS) for t in types):
+        return DESSERT
+    if any(t.startswith(_BREAKFAST_TAGS) for t in types):
+        return BREAKFAST
+    # No ingredient-count gate on the side tags: the source uses them on
+    # nine-ingredient sharing platters and starters just as readily as on a tub
+    # of slaw, and it is only wrong the other way round about once in a library
+    # (a Bacon and Sweet Potato Risotto tagged ``sides-bread``).
+    if any(t.startswith(_SIDE_TAGS) for t in types):
+        return SIDE
+
+    for label in _course_labels(name, headline):
+        if _DESSERT_LABEL.search(label):
+            return DESSERT
+        if _BREAKFAST_LABEL.search(label):
+            return BREAKFAST
+        if _SIDE_LABEL.search(label):
+            return SIDE
+
+    has_base, has_portion = _plate(ingredients, servings)
+    return MAIN if has_base or has_portion else SIDE

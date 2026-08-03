@@ -31,6 +31,8 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
     "recipe_ingredients": {"position": "INTEGER"},
     "ingredient_mappings": {"unit_kind": "TEXT DEFAULT 'mass'", "preferred_sku": "VARCHAR(128)"},
     "products": {"stock_checked_at": "DATETIME"},
+    "ocado_cart_sync": {"account_id": "VARCHAR(64)"},
+    "ocado_cart_ledger": {"account_id": "VARCHAR(64)"},
     "recipes": {
         "flagged_suspicious": "INTEGER DEFAULT 0",
         "audited_at": "DATETIME",
@@ -57,6 +59,80 @@ def init_db(engine: Engine) -> None:
             for name, decl in columns.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
+        default_account = config.DEFAULT_OCADO_ACCOUNT_ID
+        conn.execute(
+            text("UPDATE ocado_cart_sync SET account_id = :account_id WHERE account_id IS NULL OR account_id = ''"),
+            {"account_id": default_account},
+        )
+        conn.execute(
+            text("UPDATE ocado_cart_ledger SET account_id = :account_id WHERE account_id IS NULL OR account_id = ''"),
+            {"account_id": default_account},
+        )
+        _rebuild_old_ocado_ledger_table(conn, default_account)
+
+
+def _rebuild_old_ocado_ledger_table(conn, default_account: str) -> None:
+    """Drop the old global SKU uniqueness so ledgers can be per account."""
+    indexes = conn.execute(text("PRAGMA index_list(ocado_cart_ledger)")).all()
+    has_global_sku_unique = False
+    for index in indexes:
+        if not index[2]:
+            continue
+        columns = [
+            row[2]
+            for row in conn.execute(text(f"PRAGMA index_info({index[1]})")).all()
+        ]
+        if columns == ["sku"]:
+            has_global_sku_unique = True
+            break
+    if not has_global_sku_unique:
+        return
+
+    conn.execute(
+        text(
+            """
+            CREATE TABLE ocado_cart_ledger_new (
+                id INTEGER NOT NULL,
+                account_id VARCHAR(64) NOT NULL,
+                sku VARCHAR(128) NOT NULL,
+                quantity INTEGER NOT NULL,
+                name TEXT,
+                ingredient_key VARCHAR(255),
+                ingredient_name TEXT,
+                week_start VARCHAR(16),
+                synced_at DATETIME NOT NULL,
+                PRIMARY KEY (id),
+                CONSTRAINT uq_ocado_cart_ledger_account_sku UNIQUE (account_id, sku)
+            )
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO ocado_cart_ledger_new (
+                id, account_id, sku, quantity, name, ingredient_key,
+                ingredient_name, week_start, synced_at
+            )
+            SELECT
+                id,
+                COALESCE(NULLIF(account_id, ''), :account_id),
+                sku,
+                quantity,
+                name,
+                ingredient_key,
+                ingredient_name,
+                week_start,
+                synced_at
+            FROM ocado_cart_ledger
+            """
+        ),
+        {"account_id": default_account},
+    )
+    conn.execute(text("DROP TABLE ocado_cart_ledger"))
+    conn.execute(text("ALTER TABLE ocado_cart_ledger_new RENAME TO ocado_cart_ledger"))
+    conn.execute(text("CREATE INDEX ix_ocado_cart_ledger_account_id ON ocado_cart_ledger (account_id)"))
+    conn.execute(text("CREATE INDEX ix_ocado_cart_ledger_sku ON ocado_cart_ledger (sku)"))
 
 
 def ensure_columns(session: Session, table: str, columns: dict[str, str]) -> None:

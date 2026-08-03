@@ -530,8 +530,10 @@ class OcadoCartSync(Base):
     """
 
     __tablename__ = "ocado_cart_sync"
+    __table_args__ = (UniqueConstraint("account_id", name="uq_ocado_cart_sync_account"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
     week_start: Mapped[str | None] = mapped_column(String(16), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -550,9 +552,10 @@ class OcadoCartLedger(Base):
     """
 
     __tablename__ = "ocado_cart_ledger"
-    __table_args__ = (UniqueConstraint("sku", name="uq_ocado_cart_ledger_sku"),)
+    __table_args__ = (UniqueConstraint("account_id", "sku", name="uq_ocado_cart_ledger_account_sku"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
     sku: Mapped[str] = mapped_column(String(128), index=True)
     quantity: Mapped[int] = mapped_column(Integer, default=0)
 

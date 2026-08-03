@@ -19,10 +19,15 @@ from app.api.schemas import (
     FacetCount,
     FacetsOut,
     IngredientOut,
+    MacrosOut,
     NumericRange,
     NutritionOut,
     PaginatedRecipes,
     PersonalRatingIn,
+    ProteinPreviewIn,
+    ProteinPreviewOut,
+    ProteinProfileOut,
+    ProteinTargetOut,
     RecipeCard,
     RecipeDetail,
     RecipeEditOut,
@@ -39,11 +44,12 @@ from app.db.models import (
     RecipeIngredient,
     RecipeTag,
 )
-from app import measures
+from app import classify, measures
+from app import protein as protein_mod
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
-from app.planner.cache import get_standalone_prices
-from app.planner.index import RETAILER
+from app.planner.cache import get_index, get_standalone_prices
+from app.planner.index import RETAILER, PlanIndex, PlanRecipe, resolve_protein
 
 
 def _ingredient_match(keywords: list[str]):
@@ -662,6 +668,7 @@ def list_recipes(
 def get_recipe(
     recipe_id: int,
     session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     recipe = session.get(Recipe, recipe_id)
@@ -679,6 +686,7 @@ def get_recipe(
     ]
     ingredient_keys = _ingredient_keys(session, ingredients, csv_path)
     unmapped_ingredient_ids = _unmapped_ingredient_ids(session, ingredients, csv_path)
+    index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path)
     return RecipeDetail(
         id=recipe.id,
         name=recipe.name,
@@ -748,6 +756,233 @@ def get_recipe(
             for e in sorted(recipe.edits, key=lambda e: (e.created_at, e.id))
             if e.status == "applied"
         ],
+        protein=_protein_profile(index, plan_recipe),
+    )
+
+
+# --- protein modifiers ------------------------------------------------------
+
+
+def _plan_recipe(
+    factory: sessionmaker[Session], recipe_id: int, csv_path: Path | None
+) -> tuple[PlanIndex, PlanRecipe | None]:
+    index = get_index(factory, csv_path=csv_path)
+    return index, index.recipes.get(recipe_id)
+
+
+def _protein_profile(index: PlanIndex, recipe: PlanRecipe | None) -> ProteinProfileOut | None:
+    """The swap panel's whole input: this dish's protein and its alternatives."""
+    if recipe is None or recipe.protein is None:
+        return None
+    line = recipe.protein
+    targets = []
+    for target in protein_mod.targets_for_form(line.form):
+        key = target.key_for(line.form)
+        if key is None:
+            continue
+        ingredient = index.ingredient(key)
+        if ingredient is None:
+            # Nothing approved to buy it with: offering the swap would produce a
+            # basket that silently cannot be shopped.
+            continue
+        reference = protein_mod.lookup(key)
+        targets.append(
+            ProteinTargetOut(
+                id=target.id,
+                label=target.label,
+                ingredient_key=key,
+                ingredient_name=ingredient.name or protein_mod.display_name(key),
+                cook_note=target.cook_note,
+                per_100g=MacrosOut.of(reference.per_100g if reference else protein_mod.Macros()),
+                available=ingredient.shoppable or ingredient.pantry_staple,
+            )
+        )
+    return ProteinProfileOut(
+        ingredient_key=line.key,
+        name=line.name,
+        label=line.ingredient.noun,
+        type=line.type,
+        form=line.form,
+        grams=round(line.grams, 1),
+        per_100g=MacrosOut.of(line.ingredient.per_100g),
+        targets=targets,
+    )
+
+
+_DIET_LABELS = {
+    "is_vegetarian": "vegetarian",
+    "is_pescatarian": "pescatarian",
+    "is_dairy_free": "dairy free",
+    "is_gluten_free": "gluten free",
+}
+
+
+def _diet_changes(before: dict[str, bool], after: dict[str, bool]) -> list[str]:
+    changes = []
+    for flag, label in _DIET_LABELS.items():
+        # Every vegetarian dish is also pescatarian, so a swap to tofu earns both
+        # flags and only one of them is news.
+        if flag == "is_pescatarian" and after.get("is_vegetarian") != before.get("is_vegetarian"):
+            continue
+        if after.get(flag) and not before.get(flag):
+            changes.append(f"Now {label}")
+        elif before.get(flag) and not after.get(flag):
+            changes.append(f"No longer {label}")
+    return changes
+
+
+def _swapped_line_quantity(
+    index: PlanIndex, key: str, grams: float
+) -> tuple[float | None, str | None, float]:
+    """``(amount, unit, amount_g)`` for a line the modifier rewrote.
+
+    Deliberately the same call the basket makes, so the count on the page is the
+    count in the order. An ingredient bought by the piece has to land on a piece.
+    """
+    ingredient = index.ingredient(key)
+    grams, units = protein_mod.swapped_quantity(
+        grams,
+        unit_kind=ingredient.unit_kind if ingredient else "mass",
+        each_to_grams=ingredient.each_to_grams if ingredient else None,
+    )
+    if units is not None:
+        return units, "unit(s)", grams
+    return round(grams, 1), "grams", grams
+
+
+def _ingredient_image(session: Session, name: str) -> str | None:
+    """Reuse the library's own picture of an ingredient this recipe never had."""
+    path = session.scalars(
+        select(RecipeIngredient.image_path)
+        .where(
+            func.lower(RecipeIngredient.name) == name.lower(),
+            RecipeIngredient.image_path.is_not(None),
+        )
+        .limit(1)
+    ).first()
+    return image_url(path, 200) if path else None
+
+
+@router.post("/recipes/{recipe_id}/protein/preview", response_model=ProteinPreviewOut)
+def preview_protein(
+    recipe_id: int,
+    body: ProteinPreviewIn,
+    session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    csv_path: Path | None = Depends(get_planner_csv_path),
+) -> ProteinPreviewOut:
+    """The recipe as it would be with this protein modifier applied.
+
+    Read-only by construction: it takes the stored recipe, the modifier and the
+    planner index, and returns a rendering. Nothing about the recipe changes,
+    which is why this is a POST that writes nothing — the request body is a
+    description of a hypothetical, not an edit.
+    """
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or not recipe.curated or recipe.manually_excluded:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path)
+    if plan_recipe is None or plan_recipe.protein is None:
+        raise HTTPException(
+            status_code=400, detail="This recipe has no protein that can be swapped or scaled."
+        )
+    resolution = resolve_protein(plan_recipe, body.to_domain())
+    if resolution is None:
+        resolution = protein_mod.resolve(
+            plan_recipe.protein,
+            protein_mod.ProteinModifier(),
+            base_yield=plan_recipe.base_yield,
+            recipe_macros=plan_recipe.macros,
+        )
+
+    ingredients = [
+        ingredient
+        for ingredient in sorted(
+            recipe.ingredients, key=lambda i: (i.position is None, i.position or 0, i.id)
+        )
+        if _has_display_quantity(ingredient)
+    ]
+    ingredient_keys = _ingredient_keys(session, ingredients, csv_path)
+    unmapped_ingredient_ids = _unmapped_ingredient_ids(session, ingredients, csv_path)
+    companions = protein_mod.companion_swaps(list(ingredient_keys.values()), resolution)
+
+    out_ingredients: list[IngredientOut] = []
+    names_before: list[str] = []
+    names_after: list[str] = []
+    for line in ingredients:
+        key = ingredient_keys.get(line.id)
+        names_before.append(line.name)
+        name, unit, amount, amount_g = line.name, line.unit, line.amount, line.amount_g
+        image = image_url(line.image_path, 200)
+        unmapped = line.id in unmapped_ingredient_ids
+        new_key = key
+
+        if key is not None and key == resolution.source.key:
+            new_key = resolution.target_key or key
+            name = resolution.target_name if resolution.swapped else line.name
+            amount, unit, amount_g = _swapped_line_quantity(
+                index, new_key, resolution.grams_after
+            )
+            if resolution.swapped:
+                image = _ingredient_image(session, name) or image
+                unmapped = index.ingredient(new_key) is None
+        elif key is not None and key in companions:
+            new_key = companions[key]
+            name = protein_mod.display_name(new_key)
+            image = _ingredient_image(session, name) or image
+        else:
+            name = protein_mod.rename_companion(line.name, resolution)
+
+        names_after.append(name)
+        out_ingredients.append(
+            IngredientOut(
+                ingredient_key=new_key,
+                name=name,
+                amount=amount,
+                unit=unit,
+                amount_g=amount_g,
+                canonical_unit=line.canonical_unit,
+                image_url=image,
+                unmapped=unmapped,
+                spoons=measures.spoons_for(name, amount, unit),
+                spoon_range=(
+                    list(rng) if (rng := measures.spoon_range_for(name, amount, unit)) else None
+                ),
+                amount_g_estimated=measures.amount_g_is_estimated(unit),
+                potency=measures.potency_for(name),
+            )
+        )
+
+    allergens = [a.name for a in recipe.allergens]
+    diet_before = classify.diet_flags(
+        names_before, allergens, recipe.carbs_g, recipe.energy_kcal
+    )
+    diet_after = classify.diet_flags(
+        names_after, allergens, resolution.macros_after.carbs_g, resolution.macros_after.kcal
+    )
+
+    return ProteinPreviewOut(
+        factor=round(resolution.factor, 3),
+        swapped=resolution.swapped,
+        changed=resolution.changed,
+        swap_id=resolution.target.id if resolution.target else None,
+        swap_label=resolution.target.label if resolution.target else None,
+        cook_note=resolution.cook_note if resolution.swapped else None,
+        protein_name=resolution.source.name,
+        protein_name_after=resolution.target_name if resolution.swapped else None,
+        grams_before=round(resolution.grams_before, 1),
+        grams_after=round(resolution.grams_after, 1),
+        macros_before=MacrosOut.of(resolution.macros_before),
+        macros_after=MacrosOut.of(resolution.macros_after),
+        ingredients=out_ingredients,
+        steps=[
+            StepOut(index=s.index, text=protein_mod.rewrite_text(s.instructions_text, resolution))
+            for s in sorted(recipe.steps, key=lambda s: s.index)
+        ],
+        diet=diet_after,
+        diet_changes=_diet_changes(diet_before, diet_after),
+        warnings=list(resolution.warnings),
     )
 
 
@@ -756,6 +991,7 @@ def set_personal_rating(
     recipe_id: int,
     body: PersonalRatingIn,
     session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     recipe = session.get(Recipe, recipe_id)
@@ -771,7 +1007,7 @@ def set_personal_rating(
     else:
         existing.rating = body.rating
     session.commit()
-    return get_recipe(recipe_id, session, csv_path)
+    return get_recipe(recipe_id, session, factory, csv_path)
 
 
 @router.put("/recipes/{recipe_id}/wishlist", response_model=RecipeDetail)
@@ -779,6 +1015,7 @@ def set_wishlist(
     recipe_id: int,
     body: WishlistIn,
     session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     recipe = session.get(Recipe, recipe_id)
@@ -791,7 +1028,7 @@ def set_wishlist(
     elif not body.wishlisted and existing is not None:
         session.delete(existing)
     session.commit()
-    return get_recipe(recipe_id, session, csv_path)
+    return get_recipe(recipe_id, session, factory, csv_path)
 
 
 @router.post("/recipes/{recipe_id}/hide")
@@ -840,6 +1077,7 @@ def get_audit_job(job_id: str) -> AuditJobOut:
 def revert_recipe_edits(
     recipe_id: int,
     session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
 ) -> RecipeDetail:
     """Put the source's original numbers back and mark the edits reverted."""
@@ -849,7 +1087,7 @@ def revert_recipe_edits(
         audit_mod.revert_recipe(session, recipe_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return get_recipe(recipe_id, session, csv_path)
+    return get_recipe(recipe_id, session, factory, csv_path)
 
 
 @router.get("/facets", response_model=FacetsOut)

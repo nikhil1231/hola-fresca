@@ -1,0 +1,456 @@
+Delivered-To: otp-mailbox+main@example.com
+Received: by 2002:a05:6a11:6614:b0:73b:ab5:d54d with SMTP id wi20csp2514336pxb;
+        Sun, 2 Aug 2026 03:28:38 -0700 (PDT)
+X-Received: by 2002:a05:690c:6892:b0:81e:8985:402b with SMTP id 00721157ae682-81fd4c11c0bmr91231837b3.33.1785666518202;
+        Sun, 02 Aug 2026 03:28:38 -0700 (PDT)
+ARC-Seal: i=2; a=rsa-sha256; t=1785666518; cv=pass;
+        d=google.com; s=arc-20260327;
+        b=qUhfY9NJ1VqeSBh4pySLJsAXN6us6iRcCzOiEdfKeun8g2uneMqDTcfcXZ044dRl/v
+         UkQHx+zfPrTdp+QO5+tqH8nRuAkFJvPAQmnGVS3AARj5i+QZXAarJD3H+S9slfF8qf0c
+         jdv6i0dT2xhF6NYrsqED+mXXcLdxljUYy3KRnZ7OKB7sj7x3o7TvjcdoZZ7LXMoIHa3+
+         bua7lR/kumevMRjgFeXDV1Xh+FI5YAqZW7Z6pweFTR/hl+LGSex35jjHoCB5d/1Wkfc7
+         lIcqb0yVmchN3PvMls28Rj5MfTjfHu9FGWEoBOhmmZCKotY8HrtDnQcnMyFFcwYSuAjW
+         R4oQ==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20260327;
+        h=mime-version:msip_labels:content-language:accept-language
+         :in-reply-to:references:message-id:date:thread-index:thread-topic
+         :subject:to:from:dkim-signature;
+        bh=HdykF5LXQ0XTSr4hM/dsrH1vzuvsl8Uj4iRnhHSwS9U=;
+        fh=87TK+huTTXWeQR7vF7Rjvwuh4C0QI1AA1QEeahqiW+M=;
+        b=Z3rVk+58QUbsNmnYhbSvmXuTKg7TGy4vovvMxnn5iRMj/vHsirkL2/Dk8H5/CzJKqz
+         ZHSdzfzudiB7SxhWoc33NH+HN2h/MmueHszk1nujUPOSM0ZgYRqnIkMGjmXMxzjgISoO
+         SJA1q/iuy442ez5dgOjWYljeSRfTois8UWVbcgvpB5MoxI0yGTBigubGiXsZu7AztfKU
+         ngJvoiQle4fDdZHMA6bIlhdsLRYBatn30TbcJFNmyNVnhFJykvweE0X+p8Yj8LnRUEkb
+         qcSDjGW1Rmw7jGe4BRzCkURij1f5oyckTzrCsrgJuZWWuBgaqoLLGbq2RGIk12tJKFUu
+         fVrw==;
+        dara=google.com
+ARC-Authentication-Results: i=2; mx.google.com;
+       dkim=pass header.i=@HOTMAIL.CO.UK header.s=selector1 header.b="MqHtAjL/";
+       arc=pass (i=1);
+       spf=pass (google.com: domain of shopper@example.com designates 2a01:111:f403:d207::1 as permitted sender) smtp.mailfrom=shopper@example.com;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hotmail.co.uk
+Return-Path: <shopper@example.com>
+Received: from MRWPR03CU001.outbound.protection.outlook.com (mail-francesouthazolkn190110001.outbound.protection.outlook.com. [2a01:111:f403:d207::1])
+        by mx.google.com with ESMTPS id 00721157ae682-81fcd1d5f03si96639657b3.216.2026.08.02.03.28.37
+        for <otp-mailbox+main@example.com>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Sun, 02 Aug 2026 03:28:38 -0700 (PDT)
+Received-SPF: pass (google.com: domain of shopper@example.com designates 2a01:111:f403:d207::1 as permitted sender) client-ip=2a01:111:f403:d207::1;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@HOTMAIL.CO.UK header.s=selector1 header.b="MqHtAjL/";
+       arc=pass (i=1);
+       spf=pass (google.com: domain of shopper@example.com designates 2a01:111:f403:d207::1 as permitted sender) smtp.mailfrom=shopper@example.com;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=hotmail.co.uk
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector10001; d=microsoft.com; cv=none;
+ b=GV7KDnGdBS4PmOU4BrS6MEQN3vFCCyOtCQuGU1O8XbE08K31A4f9tI+5XV+nFYaEZGYGPb4DkHRb7MPD8MBOLOIljzTMbJR5iotDEQZ0Lj+qimSGou4rJ1LUDFRldWiEirnvozHEeCy4BKmd9CiDr2Md3QbLr/N8+OtmyslCqtdO019EQoCndShb4rZXs/4Q5KaqEjwGplAFzeVIzud1v2yuZsuz07H8ABJ+Ey4y87fJNoadajQ7OyuypodfRs0EK98mG4yMurGZHyzBVKO6zcIJZd7Th7tjUGVnEom7xrr3vQgrPpMG2la83vynoLLEnf1ErU9PxLpyMTdKw8SpIg==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector10001;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=HdykF5LXQ0XTSr4hM/dsrH1vzuvsl8Uj4iRnhHSwS9U=;
+ b=KEOQvzzmDdn6qPAc+zLZo6/bouLeDGzqMmn2MlCXDnSlbLM7A6mbUIfQIexEIDQoHDBcOC7we+4hjBhd6PyykT5/3EeC2RrIIUA7dU9SfhnwvBBW0+7iQ20PWtfSN00TlnQImi00M6QxLarwms13jDaMT1l9G20zfe4tliBSanfWZ5dePoHM/AhAdYzewo/8UHx161lxgFZxFvz5kfc5fNZRn6J1BNAV+2gVQtkuhHZFySvJ6u7ChL5UzyNq9UktfOmRBAiHQml2WbyggK+5l6wc1E8tM9OcHLBX4sUQfsikPCMX+s1PCXgEr6IXaSNzjOOPwIQxRUFAStC5vay4IQ==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=none; dmarc=none;
+ dkim=none; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=HOTMAIL.CO.UK;
+ s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=HdykF5LXQ0XTSr4hM/dsrH1vzuvsl8Uj4iRnhHSwS9U=;
+ b=MqHtAjL/0dWqjw9/tS8YzmCwJEbSD3KeHIzi6kcjkFGMJTqrhesGXJrIrSbQlZnGG9wACSjzi67gogzi6H8mnTAC5v855imOjqAhACDNkqEsxyDnwS/md4cx2MKfcs2tiRcVyziatWs4AdIZeL1fUSQGHEPE1K1JwW+yU9p24vMZz1HbZFYC62vuNwdmgIyHyA31vL3HXjS7WDpHIio597L65DCxCGe6OSVlZvl8EoDkjgDypANJtSV1VlAaChuoWSJfrrgbfmv7o7vJkDW+9YwMQ91h93xA9kFMBy7oXbWxV4FjJb6RJknoowdZnPjh41ypBZT8K4gYtKEcStVrgA==
+Received: from PAWPR10MB7245.EURPRD10.PROD.OUTLOOK.COM (2603:10a6:102:2e4::19)
+ by GV2PR10MB6406.EURPRD10.PROD.OUTLOOK.COM (2603:10a6:150:c0::10) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.21.270.17; Sun, 2 Aug
+ 2026 10:28:35 +0000
+Received: from PAWPR10MB7245.EURPRD10.PROD.OUTLOOK.COM
+ ([fe80::7d27:872d:7dc0:7155]) by PAWPR10MB7245.EURPRD10.PROD.OUTLOOK.COM
+ ([fe80::7d27:872d:7dc0:7155%6]) with mapi id 15.21.0270.016; Sun, 2 Aug 2026
+ 10:28:35 +0000
+From: Test Shopper <shopper@example.com>
+To: "otp-mailbox+main@example.com" <otp-mailbox+main@example.com>
+Subject: Fw: Your one-time Ocado code
+Thread-Topic: Your one-time Ocado code
+Thread-Index: AQHdH//4mVnFibd/9USGu2Blv78CBbaKk0Mb
+Date: Sun, 2 Aug 2026 10:28:35 +0000
+Message-ID:
+ <PAWPR10MB72458BB212265980239BCB0B92D62@PAWPR10MB7245.EURPRD10.PROD.OUTLOOK.COM>
+References:
+ <XPVlS000000000000000000000000000000000000000000000TIZCE200Ko_LleQDSbWogDxTkm2-SA@sfdc.net>
+In-Reply-To:
+ <XPVlS000000000000000000000000000000000000000000000TIZCE200Ko_LleQDSbWogDxTkm2-SA@sfdc.net>
+Accept-Language: en-GB, en-US
+Content-Language: en-GB
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+msip_labels:
+x-ms-exchange-messagesentrepresentingtype: 1
+x-ms-publictraffictype: Email
+x-ms-traffictypediagnostic: PAWPR10MB7245:EE_|GV2PR10MB6406:EE_
+x-ms-office365-filtering-correlation-id: d2cd6800-f84d-4291-886a-08def080cefb
+x-microsoft-antispam:
+ BCL:0;ARA:14566002|39105399006|41001999006|31061999003|8062599012|9000799056|7071999006|1680799066|20031999006|8060799015|19110799012|24071999003|25031999004|5139299004|12121999013|15080799012|15030799006|55001999006|24021099003|9400799043|4140399003|25010399006|10035399007|40105399003|1602099012|2607281247196008|56899033|102099032|4302099013|3412199025|440099028|2423199048;
+x-microsoft-antispam-message-info:
+ =?windows-1250?Q?pRVM/Kale6/HZA1P8AZNA4xglg2gJ/Y87KtmpKIjAKwP+f6udPUcJlTF?=
+ =?windows-1250?Q?QVPuEnxiVqDH5DGDboo8DbWGXH2stT7c95KZzc0K63hR4v1b7hRuAiff?=
+ =?windows-1250?Q?C1LfRP6n2nyk5sCqFJ07YGXI3gkxF4mjDJrLVVCWBrHlbojIbUVXvZ/h?=
+ =?windows-1250?Q?IDVSSv2CxJ5IO6XFVoBKGq/2EWD2W/SFSNlFkejiXGjpg6HkQDp86ETE?=
+ =?windows-1250?Q?tZQK+9x6ipCodfVV1MNHowiTaE0qm2LBu7YSGdQDu2qb6WW6OgvZcIBE?=
+ =?windows-1250?Q?8WpkgE9iTDRkrauG9c7DYLM21U7VbZhy5usovP2zIN4eC/Q66pVd79LK?=
+ =?windows-1250?Q?43fHTfFOAJY9JzoL4Fw/aKrHVOFyDWHPtXZ/F+nlge9IdIS0dg3BNo2p?=
+ =?windows-1250?Q?nX/RC4nI+vyiDKC2d9n1mHdH11PciILGkl9K+olXtQDZYgmXFcm+0zGc?=
+ =?windows-1250?Q?/IyJ19aWl8DDo4vVcoP/tzxrYFssxXhxPtrgjq14hitqX8/AwfZ6rgGw?=
+ =?windows-1250?Q?fOTQzEWgDSNu89aneMvJ6UMPZYddoCh+g7lvjhm+4EIww1kPSSI0CD0l?=
+ =?windows-1250?Q?AAQPeSfyFH+UKrsEjS8Yce4iK38CTYWnqp8H4NacFIkDCTbEPnNbyXrM?=
+ =?windows-1250?Q?wtEeOldnBpxsYDt3Y35ng3sNac/KcVpTrUzrzAj+DkCfFwecDi8L6RFK?=
+ =?windows-1250?Q?7Iw5CnSfy6UpdA6OCe7PfswnLSzjT9PKzRRPuGT9LSQd9Kl99bSFIakk?=
+ =?windows-1250?Q?q6rOeCW69wNGQlp6gEPPqT1Pk0Q0gG39OmQb8DMD9d2OMCqU77k9DqKI?=
+ =?windows-1250?Q?3/h8c2+lgm2NAaQK/RXAXoO6MG/mfHbXHOYYnoWdlYOn0bC8R5zk5HUp?=
+ =?windows-1250?Q?pVMDKFrx3yzCqU/T5/LpwbKz7vI8H+8j5G6gPY0NNRtiVSWUQdIoeHWZ?=
+ =?windows-1250?Q?9gDqVZ1pmDFkj6xi6+pqTweXqFUOAosymCkAiVeJXQawKpeuYHwpB2XV?=
+ =?windows-1250?Q?bFv2Qf/pZir02bAPPnEfZ54Gn2jiuGqEo1OlwfBxVBhBhKy2C3vCOARq?=
+ =?windows-1250?Q?+BbxjtMhF+2UDNiLhEKoNdDI1BdGkzVFrJGoNEliCitf4s3BfEBxkSL7?=
+ =?windows-1250?Q?DCLQQT01OGqkdpLNn2Dx13fdADFp9EH7Tocxh4abxJzYmhuhU7G4mNey?=
+ =?windows-1250?Q?LuHDuK5T9p95gOgzX+Oy2gCDhGlL6IvTiyr0a3tnuUmnw2XNFYTq/646?=
+ =?windows-1250?Q?6R03zGy9wHFl04l0z5NotM1k/kRj4oYw82WBJk+jgVnOwME0MYxpOFvE?=
+ =?windows-1250?Q?E2KTJV2u+pvLtjT6bwkdLiOIcZH+Zp5whfjN13FQ6/OVgt6b46LmZPDL?=
+ =?windows-1250?Q?ohKEhDejqknrYJrNv94N1PA0LPkVW80MLHWhcGwPpa5NDulpcCvUeqGf?=
+x-ms-exchange-antispam-messagedata-chunkcount: 1
+x-ms-exchange-antispam-messagedata-0:
+ =?windows-1250?Q?+on8ySfkLLRYe0kWSqEV5Xx1gccoUTsJknNMf43t02zQs8f6l/DsWsVk?=
+ =?windows-1250?Q?zT58p7FI6wusQkpwB10XNa4iAbtg/z+0oZ5+PgpLEdwjSu28QhT0iCVS?=
+ =?windows-1250?Q?0+tHBsjY9ETl2scVCOtdOpRJVRnMtM8ZSnYtGCVGRy5JvpJX+vow19e7?=
+ =?windows-1250?Q?IpdbpAjXXutTOa3+0KVc7D+83lGkcyZQffMbhFP9GImLzgWRNGEQjtvA?=
+ =?windows-1250?Q?waC9L0BSZiuqnmwQFhRddLBZLcJuYd+tSnGFikD4tWfot2Jx5hXA7VRZ?=
+ =?windows-1250?Q?D70uHWSI56n7ZxyCcVgbyWsjgQfFaM7Y1cVBG2jklQ6nw/eJr54QeqMc?=
+ =?windows-1250?Q?1ix94cz/DiJeq2CK09hjdRmXc1cH2HhIoPHXgu2MaVl58VrHGVR2xhN+?=
+ =?windows-1250?Q?ShFCSNqSgGF72lUY9j8BJytXB80NnjPI9Pej8fZlEk4phsOpUmBu7nl3?=
+ =?windows-1250?Q?XQBzR66rpM07Chs/r+UgW2GNZhzL2ZcbVMMyG4pGHxVSyxkYUMA5xDtZ?=
+ =?windows-1250?Q?Ci+iyyNVFMABUjHVbJ+U6DZU0Ik+bidS9qBRLX8pvBMXRHCouHMEjlig?=
+ =?windows-1250?Q?DIge1thnqodQL/erU9Q8PPE7g4hCpOObB66nI/YC4taZG+Mdo+aN+jxN?=
+ =?windows-1250?Q?su8Staq/m0xGlnvuzSRKDy1S7RRwHCDRnCAp7sGsWD5xpIG/fKiTKRXM?=
+ =?windows-1250?Q?RjO167/YtAi3bnjE3s1i6BSZHWwxRWTPlCkA5nN6lgP6FvON1pu1kd60?=
+ =?windows-1250?Q?2R+XvfF6X3wfbBBlws+x1oPQtBE7Hooo/h4AUWuLE+Sy3RrNXWDegvZK?=
+ =?windows-1250?Q?uFnX3hLQY1ecOZWLU+I2o2gE6BBWN+gepx7LXM8F6awPHHOuQ1nkjrhz?=
+ =?windows-1250?Q?sJxS5sm1Aq7HlzLSD3sYdkhqz4gQKS0EMqPW36V3VV5HG0xv/grhROyL?=
+ =?windows-1250?Q?6yP0n57rU7v0LYF0RhqutTKKteetQyrmfEXRE6hkwsvVRtp9YUZB0zqB?=
+ =?windows-1250?Q?fRSkotpFN8bC221i/Ym7oagiuFKzYC5Mh0daPKCRhoqbGRfqnbzb//ee?=
+ =?windows-1250?Q?N/omnyj3zZQ+O605yJrlBdeFfPDydvoWHlJATBJJS0c/TNaG+pu579IE?=
+ =?windows-1250?Q?d3EAmfg90RUFas67VDCeBZGcImPBnuDIzpaGkvXFNtrb7aEUPZfin5kL?=
+ =?windows-1250?Q?lhsEcyqg4kD6hVXMw/cJI77Rd+FtFPGC6ur0IOj0dZVhHwWqme4CiWHO?=
+ =?windows-1250?Q?OEppZtcRxiLhhjVvxzaZWme5Vs8wObWSZ30qm9qdGTeNXA5UTWcxDpKG?=
+ =?windows-1250?Q?4x+gfrM1ePKRIqCqIirWOWzkWgjZegTkQKiybVkK7slnE4aUxcUg//hE?=
+ =?windows-1250?Q?/2vFVFlllR+/bRTZD45iSb7UiOkTnFttoGShCQXZVfj4OEoLXYlOZS6z?=
+ =?windows-1250?Q?GlbhVX00d16VCDNbGyI2Nk5fBgY8wd58dYYT9X6MCsAt9UwWpHsld9N4?=
+ =?windows-1250?Q?0RslerwI?=
+Content-Type: multipart/alternative;
+	boundary="_000_PAWPR10MB72458BB212265980239BCB0B92D62PAWPR10MB7245EURP_"
+MIME-Version: 1.0
+X-OriginatorOrg: sct-15-20-9412-4-msonline-outlook-d3deb.templateTenant
+X-MS-Exchange-CrossTenant-AuthAs: Internal
+X-MS-Exchange-CrossTenant-AuthSource: PAWPR10MB7245.EURPRD10.PROD.OUTLOOK.COM
+X-MS-Exchange-CrossTenant-RMS-PersistedConsumerOrg: 00000000-0000-0000-0000-000000000000
+X-MS-Exchange-CrossTenant-Network-Message-Id: d2cd6800-f84d-4291-886a-08def080cefb
+X-MS-Exchange-CrossTenant-originalarrivaltime: 02 Aug 2026 10:28:35.2122
+ (UTC)
+X-MS-Exchange-CrossTenant-fromentityheader: Hosted
+X-MS-Exchange-CrossTenant-id: 84df9e7f-e9f6-40af-b435-aaaaaaaaaaaa
+X-MS-Exchange-CrossTenant-rms-persistedconsumerorg: 00000000-0000-0000-0000-000000000000
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: GV2PR10MB6406
+
+--_000_PAWPR10MB72458BB212265980239BCB0B92D62PAWPR10MB7245EURP_
+Content-Type: text/plain; charset="windows-1250"
+Content-Transfer-Encoding: quoted-printable
+
+
+________________________________
+From: Ocado <ocado@ocado.com>
+Sent: 30 July 2026 09:46
+To: shopper@example.com <shopper@example.com>
+Subject: Your one-time Ocado code
+
+[Ocado] <https://www.ocado.com/webshop/startWebshop.do>
+Hello Shopper,
+
+Here=92s your one-time code to log in to your Ocado account.
+
+380059
+
+This code is valid for 10 minutes.
+
+Why we=92ve sent it
+
+This code allows you to securely confirm your identity but won=92t replace =
+your Ocado password.
+
+This is part of our continued efforts to protect our customers and keep the=
+m safe online.
+
+Didn=92t request a code?
+
+Don=92t worry, your account is still secure but we would recommend updating=
+ your password and ensuring it meets our security criteria.
+
+Ocado Customer Service team.
+Get in touch
+Send us a query.<https://www.ocado.com/content/get-in-touch>
+
+Got a question?
+Our Help Centre has the answers.<https://www.ocado.com/content/help-centre>
+We're a social bunch
+[Instagram] <https://www.instagram.com/ocadouk/>        [TikTok]  <https://=
+www.tiktok.com/@ocado?lang=3Den>       [YouTube]  <https://www.youtube.com/=
+@Ocado>     [Facebook]  <http://www.facebook.com/ocado>
+
+You=92ve received this message as it contains important information about y=
+our ocado.com<https://www.ocado.com> account.
+Privacy Policy<https://www.ocado.com/content/privacy-policy>
+@2025 Ocado Retail Limited. Registered address:  Apollo Court, 2 Bishop Squ=
+are, Hatfield Business Park, Hatfield, Herts, AL10 9EX. Registered in Engla=
+nd =96 company number: 03875000.
+[https://sso.ocado.com/servlet/servlet.ImageServer?oid=3D00DN2000002Mq6r&es=
+id=3D018N200000hIzPR&from=3Dext]
+
+--_000_PAWPR10MB72458BB212265980239BCB0B92D62PAWPR10MB7245EURP_
+Content-Type: text/html; charset="windows-1250"
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dwindows-1=
+250">
+<style type=3D"text/css" style=3D"display:none;"> P {margin-top:0;margin-bo=
+ttom:0;} </style>
+</head>
+<body dir=3D"ltr">
+<div style=3D"font-family: Calibri, Helvetica, sans-serif; font-size: 12pt;=
+ color: rgb(0, 0, 0);">
+<br>
+</div>
+<div id=3D"appendonsend"></div>
+<hr style=3D"display:inline-block;width:98%" tabindex=3D"-1">
+<div id=3D"divRplyFwdMsg" dir=3D"ltr"><font face=3D"Calibri, sans-serif" st=
+yle=3D"font-size:11pt" color=3D"#000000"><b>From:</b> Ocado &lt;ocado@ocado=
+.com&gt;<br>
+<b>Sent:</b> 30 July 2026 09:46<br>
+<b>To:</b> shopper@example.com &lt;shopper@example.com&gt;<br>
+<b>Subject:</b> Your one-time Ocado code</font>
+<div>&nbsp;</div>
+</div>
+<style type=3D"text/css">
+<!--
+html, div
+	{margin:0 auto!important;
+	padding:0!important;
+	height:100%!important;
+	width:100%!important}
+*
+	{}
+.x_ExternalClass
+	{width:100%}
+.x_ExternalClass *
+	{line-height:22px!important}
+table, td
+	{}
+table
+	{border-spacing:0!important;
+	border-collapse:collapse!important;
+	table-layout:fixed!important;
+	margin:0 auto!important}
+table table table
+	{table-layout:auto}
+img
+	{}
+.x_yshortcuts a
+	{border-bottom:none!important}
+.x_mobile-link--footer a, a[x-apple-data-detectors]
+	{color:inherit!important;
+	text-decoration:none!important}
+-->
+</style>
+<div width=3D"100%" style=3D"background-color:#e1e6eb; margin:0">
+<table role=3D"presentation" cellpadding=3D"0" cellspacing=3D"0" border=3D"=
+0" width=3D"100%" bgcolor=3D"#e1e6eb">
+<tbody>
+<tr>
+<td valign=3D"top">
+<center style=3D"width:100%">
+<div style=3D"display:none; font-size:1px; line-height:1px; max-height:0px;=
+ max-width:0px; opacity:0; overflow:hidden; font-family:'Poppins',Tahoma,sa=
+ns-serif">
+</div>
+<div style=3D"max-width:680px">
+<table bgcolor=3D"#FFFFFF" cellspacing=3D"0" cellpadding=3D"0" border=3D"0"=
+ align=3D"center" width=3D"100%" style=3D"max-width:680px; border-bottom:so=
+lid 3px #4d216d">
+<tbody>
+<tr>
+<td bgcolor=3D"#e1e6eb" class=3D"x_hideTDbelow480px" style=3D"text-align:ri=
+ght; width:100%; font-size:10px; font-family:'Muli',Arial,sans-serif; line-=
+height:120%; padding:10px 0">
+</td>
+</tr>
+<tr>
+<td align=3D"center" valign=3D"middle" bgcolor=3D"#FFFFFF" style=3D"padding=
+:0; text-align:center; font-family:'Muli',Arial,sans-serif; font-size:0; li=
+ne-height:0">
+<a href=3D"https://www.ocado.com/webshop/startWebshop.do" style=3D"color:#B=
+CC811; text-decoration:none; display:block"><img width=3D"187" height=3D"65=
+" alt=3D"Ocado" border=3D"0" style=3D"color:#54585A; font-size:20px; max-he=
+ight:65px; line-height:20px" src=3D"https://assets.ocado.com/is/image/ocado=
+/2020_OcadoLogo_w?hei=3D130&amp;wid=3D373&amp;fmt=3Dpng-alpha">
+</a></td>
+</tr>
+</tbody>
+</table>
+<table role=3D"presentation" cellspacing=3D"0" cellpadding=3D"0" border=3D"=
+0" align=3D"center" bgcolor=3D"#ffffff" width=3D"100%" style=3D"max-width:6=
+80px">
+<tbody>
+<tr>
+<td style=3D"padding:30px 20px 10px 20px; text-align:left; font-family:'Pop=
+pins',Tahoma,Helvetica,sans-serif; font-size:16px; color:#2D333A; line-heig=
+ht:26px; font-weight:normal">
+Hello <strong>Shopper</strong>,<br>
+<br>
+Here=92s your one-time code to log in to your Ocado account.
+<p><font size=3D"48px">380059</font></p>
+This code is valid for 10 minutes.<br>
+<br>
+<strong>Why we=92ve sent it</strong><br>
+<br>
+This code allows you to securely confirm your identity but won=92t replace =
+your Ocado password.<br>
+<br>
+This is part of our continued efforts to protect our customers and keep the=
+m safe online.<br>
+<br>
+<strong>Didn=92t request a code?</strong><br>
+<br>
+Don=92t worry, your account is still secure but we would recommend updating=
+ your password and ensuring it meets our security criteria.<br>
+<br>
+<strong>Ocado Customer Service team.</strong> </td>
+</tr>
+</tbody>
+</table>
+<table role=3D"presentation" cellspacing=3D"0" cellpadding=3D"0" border=3D"=
+0" align=3D"center" bgcolor=3D"#2D333A" width=3D"100%" class=3D"x_email-con=
+tainer" style=3D"max-width:680px">
+<tbody>
+<tr>
+<td align=3D"center">
+<table bgcolor=3D"#2D333A" cellspacing=3D"0" cellpadding=3D"0" border=3D"0"=
+ align=3D"center" width=3D"90%" style=3D"max-width:500px">
+<tbody>
+<tr>
+<td style=3D"padding:20px 0 20px 0; width:100%; font-size:16px; font-family=
+:'Poppins',Tahoma,Helvetica,sans-serif; line-height:115%; text-align:center=
+; border-bottom:1px solid #ffffff">
+<span style=3D"color:#ffffff; font-weight:bold; font-size:16px">Get in touc=
+h</span>
+<br>
+<span style=3D"color:#FFFFFF; font-size:14px"><a href=3D"https://www.ocado.=
+com/content/get-in-touch" style=3D"color:#FFFFFF; text-decoration:underline=
+">Send us a query.</a></span>
+<br>
+<br>
+<span style=3D"color:#ffffff; font-weight:bold; font-size:16px; line-height=
+:115%">Got a question?
+</span><br>
+<a href=3D"https://www.ocado.com/content/help-centre" style=3D"color:#FFFFF=
+F; text-decoration:underline; font-size:14px">Our Help Centre has the answe=
+rs.</a>
+</td>
+</tr>
+</tbody>
+</table>
+<table cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"center" wi=
+dth=3D"100%" style=3D"max-width:500px">
+<tbody>
+<tr>
+<td align=3D"center" height=3D"100%" valign=3D"top" width=3D"100%" style=3D=
+"padding:20px 0; font-family:'Poppins',Tahoma,Helvetica,sans-serif; font-we=
+ight:normal; font-size:16px; color:#ffffff">
+We're a social bunch</td>
+</tr>
+</tbody>
+</table>
+<table cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"center" st=
+yle=3D"padding:0 0 20px 0">
+<tbody>
+<tr>
+<td align=3D"center" valign=3D"top" style=3D"padding:0 16px 0 0"><a target=
+=3D"_blank" href=3D"https://www.instagram.com/ocadouk/"><img title=3D"Insta=
+gram" alt=3D"Instagram" width=3D"40" src=3D"https://assets.ocado.com/is/ima=
+ge/ocado/Footer_icon_insta?fmt=3Dpng-alpha">
+</a></td>
+<td align=3D"center" valign=3D"top" style=3D"padding:0 16px 0 0"><a target=
+=3D"_blank" href=3D"https://www.tiktok.com/@ocado?lang=3Den"><img title=3D"=
+TikTok" alt=3D"TikTok" width=3D"40" src=3D"https://assets.ocado.com/is/imag=
+e/ocado/footer_i_TT?hei=3D116&amp;wid=3D116&amp;fmt=3Dpng-alpha">
+</a></td>
+<td align=3D"center" valign=3D"top" style=3D"padding:0 16px 0 0"><a target=
+=3D"_blank" href=3D"https://www.youtube.com/@Ocado"><img title=3D"YouTube" =
+alt=3D"YouTube" width=3D"40" src=3D"https://assets.ocado.com/is/image/ocado=
+/Footer_icon_youtube?fmt=3Dpng-alpha">
+</a></td>
+<td align=3D"center" valign=3D"top" style=3D"padding:0"><a target=3D"_blank=
+" href=3D"http://www.facebook.com/ocado"><img title=3D"Facebook" alt=3D"Fac=
+ebook" width=3D"40" src=3D"https://assets.ocado.com/is/image/ocado/Footer_i=
+con_FB?fmt=3Dpng-alpha">
+</a></td>
+</tr>
+</tbody>
+</table>
+<br>
+<table bgcolor=3D"#2D333A" cellspacing=3D"0" cellpadding=3D"0" border=3D"0"=
+ align=3D"center" width=3D"90%" style=3D"max-width:500px">
+<tbody>
+<tr>
+<td bgcolor=3D"#2D333A" style=3D"padding:30px 0 0 0; width:100%; font-size:=
+12px; font-family:'Poppins',Tahoma,Helvetica,sans-serif; line-height:16px; =
+text-align:center; color:#FFFFFF; border-top:1px solid #ffffff">
+You=92ve received this message as it contains important information about y=
+our <a href=3D"https://www.ocado.com" style=3D"text-decoration:none; color:=
+#FFFFFF">
+ocado.com</a>&nbsp;account.</td>
+</tr>
+</tbody>
+</table>
+<table bgcolor=3D"#2D333A" cellspacing=3D"0" cellpadding=3D"0" border=3D"0"=
+ align=3D"center" width=3D"90%" style=3D"max-width:500px">
+<tbody>
+<tr>
+<td bgcolor=3D"#2D333A" style=3D"padding:15px 0 30px 0; width:100%; font-si=
+ze:12px; font-family:'Poppins',Tahoma,Helvetica,sans-serif; line-height:16p=
+x; text-align:center">
+<a href=3D"https://www.ocado.com/content/privacy-policy" style=3D"color:#FF=
+FFFF; text-decoration:underline">Privacy Policy</a>&nbsp;&nbsp;
+</td>
+</tr>
+<tr>
+<td bgcolor=3D"#2D333A" style=3D"padding:5px 0 30px 0; width:100%; font-siz=
+e:12px; font-family:'Poppins',Tahoma,Helvetica,sans-serif; line-height:16px=
+; text-align:center; color:#ffffff">
+@2025 Ocado Retail Limited. Registered address: &nbsp;<span class=3D"x_mobi=
+le-link--footer">Apollo Court, 2 Bishop Square, Hatfield Business Park, Hat=
+field, Herts, AL10&nbsp;9EX.</span>&nbsp;Registered in England =96 company =
+number:&nbsp;<span class=3D"x_mobile-link--footer">03875000.</span></td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</center>
+</td>
+</tr>
+</tbody>
+</table>
+<img alt=3D"" src=3D"https://sso.ocado.com/servlet/servlet.ImageServer?oid=
+=3D00DN2000002Mq6r&amp;esid=3D018N200000hIzPR&amp;from=3Dext">
+</div>
+</body>
+</html>
+
+--_000_PAWPR10MB72458BB212265980239BCB0B92D62PAWPR10MB7245EURP_--

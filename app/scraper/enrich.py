@@ -84,7 +84,6 @@ def enrich(session_factory: sessionmaker[Session]) -> EnrichReport:
         )
         for r in recipes:
             report.recipes += 1
-            _apply_recipe(r)
             for ing in r.ingredients:
                 report.ingredients_total += 1
                 grams, unit = to_grams(ing.name, ing.amount, ing.unit)
@@ -92,6 +91,9 @@ def enrich(session_factory: sessionmaker[Session]) -> EnrichReport:
                 ing.canonical_unit = unit
                 if grams is not None:
                     report.ingredients_gram_resolved += 1
+            # After the grams, not before: the course depends on how much base
+            # and protein a serving carries.
+            _apply_recipe(r)
         session.commit()
 
     return report
@@ -101,7 +103,13 @@ def _apply_recipe(r: Recipe) -> None:
     """Set the derived per-recipe fields on a Recipe row (shared with normalize)."""
     names = [i.name for i in r.ingredients]
     allergens = [a.name for a in r.allergens]
-    r.course = course([t.type for t in r.tags], len(r.ingredients))
+    r.course = course(
+        [t.type for t in r.tags],
+        [(i.name, i.amount_g) for i in r.ingredients],
+        name=r.name,
+        headline=r.headline,
+        servings=r.base_yield,
+    )
     flags = diet_flags(names, allergens, r.carbs_g, r.energy_kcal)
     r.is_vegetarian = int(flags["is_vegetarian"])
     r.is_pescatarian = int(flags["is_pescatarian"])

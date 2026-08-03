@@ -471,7 +471,13 @@ def _upsert_recipe(session: Session, recipe: NormalizedRecipe) -> Recipe:
         or macros_implausible_for_veg(flags["is_vegetarian"], recipe.protein_g)
     )
     row.protein_energy_ratio = protein_energy_ratio(recipe.protein_g, recipe.energy_kcal)
-    row.course = course([t.type for t in recipe.tags], len(recipe.ingredients))
+    row.course = course(
+        [t.type for t in recipe.tags],
+        [(i.name, i.amount_g) for i in row.ingredients],
+        name=recipe.name,
+        headline=recipe.headline,
+        servings=recipe.base_yield,
+    )
 
     session.add(row)
     return row

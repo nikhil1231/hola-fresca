@@ -37,7 +37,27 @@ export function toPlannerSelections(entries) {
   return entries.map((entry) => ({
     recipe_id: entry.recipe.id,
     portions: entry.portions,
+    ...(entry.protein ? { protein: entry.protein } : {}),
   }))
+}
+
+// A protein swap/scale belongs to the week, not the recipe: the library keeps
+// publishing the dish as written, and this rides along with the plan entry the
+// same way portions do, so it expires when the week does.
+const PROTEIN_MODES = ['protein_g', 'energy_kcal']
+
+export function normalizeProtein(value) {
+  if (!value || typeof value !== 'object') return null
+  const protein = {}
+  if (typeof value.swap_to === 'string' && value.swap_to) protein.swap_to = value.swap_to
+  const scale = Number(value.scale)
+  if (Number.isFinite(scale) && scale > 0) protein.scale = Math.min(4, Math.max(0.25, scale))
+  const targetValue = Number(value.target_value)
+  if (PROTEIN_MODES.includes(value.target_mode) && Number.isFinite(targetValue) && targetValue > 0) {
+    protein.target_mode = value.target_mode
+    protein.target_value = targetValue
+  }
+  return Object.keys(protein).length > 0 ? protein : null
 }
 
 function recipeSnapshot(recipe) {
@@ -76,6 +96,7 @@ function normalizePlan(value) {
         .map((entry) => ({
           recipe: recipeSnapshot(entry.recipe),
           portions: clampPortions(entry.portions),
+          protein: normalizeProtein(entry.protein),
           addedAt: entry.addedAt ?? new Date().toISOString(),
         })),
     }
@@ -129,7 +150,7 @@ export function useWeeklyPlan() {
   )
 
   const addRecipeToWeek = useCallback(
-    (recipe, weekStart = upcomingWeekStart) => {
+    (recipe, weekStart = upcomingWeekStart, protein = null) => {
       let added = false
       updatePlan((current) => {
         const week = current.weeks[weekStart] ?? { recipes: [] }
@@ -146,6 +167,7 @@ export function useWeeklyPlan() {
                 {
                   recipe: recipeSnapshot(recipe),
                   portions: DEFAULT_PORTIONS,
+                  protein: normalizeProtein(protein),
                   addedAt: new Date().toISOString(),
                 },
               ],
@@ -199,6 +221,29 @@ export function useWeeklyPlan() {
     [updatePlan],
   )
 
+  const setRecipeProtein = useCallback(
+    (weekStart, recipeId, protein) => {
+      updatePlan((current) => {
+        const week = current.weeks[weekStart]
+        if (!week) return current
+        return {
+          ...current,
+          weeks: {
+            ...current.weeks,
+            [weekStart]: {
+              recipes: week.recipes.map((entry) =>
+                entry.recipe.id === recipeId
+                  ? { ...entry, protein: normalizeProtein(protein) }
+                  : entry,
+              ),
+            },
+          },
+        }
+      })
+    },
+    [updatePlan],
+  )
+
   const weekStarts = useMemo(() => {
     const starts = Object.entries(plan.weeks)
       .filter(([weekStart, week]) => weekStart >= upcomingWeekStart && week.recipes.length > 0)
@@ -216,5 +261,6 @@ export function useWeeklyPlan() {
     addRecipeToWeek,
     removeRecipeFromWeek,
     setRecipePortions,
+    setRecipeProtein,
   }
 }

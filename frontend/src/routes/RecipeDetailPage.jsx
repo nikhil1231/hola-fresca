@@ -12,8 +12,10 @@ import {
   Image,
   Loader,
   Menu,
+  NumberInput,
   Paper,
   SegmentedControl,
+  Select,
   SimpleGrid,
   Skeleton,
   Table,
@@ -50,6 +52,7 @@ import {
   useHideRecipe,
   usePlannerBasket,
   usePersonalRecipeRating,
+  useProteinPreview,
   useRecipe,
   useRecipeWishlist,
   useRevertRecipeEdits,
@@ -59,6 +62,7 @@ import {
   MAX_PORTIONS,
   MAX_RECIPES_PER_WEEK,
   MIN_PORTIONS,
+  normalizeProtein,
   toPlannerSelections,
   useWeeklyPlan,
 } from '../hooks/useWeeklyPlan.js'
@@ -599,6 +603,147 @@ function MacroNotes({ audit, edits }) {
   )
 }
 
+// Scale presets, plus the mode where you name the number you want a portion to
+// hit and the weight is solved backwards from it.
+const PROTEIN_SCALES = [
+  { value: '1', label: 'As written' },
+  { value: '1.5', label: '1.5x' },
+  { value: '2', label: '2x' },
+  { value: 'target', label: 'Target' },
+]
+const DEFAULT_TARGETS = { protein_g: 50, energy_kcal: 700 }
+
+function proteinScaleMode(modifier) {
+  if (modifier?.target_mode) return 'target'
+  if (modifier?.scale) return String(modifier.scale)
+  return '1'
+}
+
+function ProteinControls({ profile, modifier, preview, baseYield, onChange }) {
+  const scaleMode = proteinScaleMode(modifier)
+  const targetMode = modifier?.target_mode ?? 'protein_g'
+  const targetValue = modifier?.target_value ?? DEFAULT_TARGETS[targetMode]
+
+  const setScale = (value) => {
+    const { scale: _scale, target_mode: _mode, target_value: _value, ...rest } = modifier ?? {}
+    if (value === 'target') {
+      onChange({ ...rest, target_mode: targetMode, target_value: targetValue })
+    } else if (value === '1') {
+      onChange(rest)
+    } else {
+      onChange({ ...rest, scale: Number(value) })
+    }
+  }
+
+  const setTarget = (mode, value) => {
+    const { scale: _scale, ...rest } = modifier ?? {}
+    onChange({ ...rest, target_mode: mode, target_value: value })
+  }
+
+  const changed = preview?.changed
+  const macrosBefore = preview?.macros_before
+  const macrosAfter = preview?.macros_after
+
+  return (
+    <Stack gap={8}>
+      <Group gap={6} justify="space-between" align="baseline">
+        <Text size="sm" fw={600}>
+          Protein
+        </Text>
+        {changed && (
+          <Anchor component="button" type="button" size="xs" c="dimmed" onClick={() => onChange(null)}>
+            Reset
+          </Anchor>
+        )}
+      </Group>
+      <Select
+        size="xs"
+        allowDeselect={false}
+        value={modifier?.swap_to ?? ''}
+        onChange={(value) => {
+          const { swap_to: _swap, ...rest } = modifier ?? {}
+          onChange(value ? { ...rest, swap_to: value } : rest)
+        }}
+        data={[
+          { value: '', label: `${profile.name} (as written)` },
+          ...profile.targets.map((target) => ({
+            value: target.id,
+            label: target.available ? target.label : `${target.label} (out of stock)`,
+          })),
+        ]}
+      />
+      <SegmentedControl
+        size="xs"
+        color="fresh"
+        fullWidth
+        value={scaleMode}
+        onChange={setScale}
+        data={PROTEIN_SCALES}
+      />
+      {scaleMode === 'target' && (
+        <Group gap={6} wrap="nowrap">
+          <NumberInput
+            size="xs"
+            min={1}
+            max={2000}
+            step={5}
+            value={targetValue}
+            onChange={(value) => setTarget(targetMode, Number(value) || targetValue)}
+            style={{ flex: '0 0 84px' }}
+          />
+          <Select
+            size="xs"
+            allowDeselect={false}
+            value={targetMode}
+            onChange={(mode) => setTarget(mode, DEFAULT_TARGETS[mode])}
+            data={[
+              { value: 'protein_g', label: 'g protein a serving' },
+              { value: 'energy_kcal', label: 'kcal a serving' },
+            ]}
+            style={{ flex: 1 }}
+          />
+        </Group>
+      )}
+      {/* Everything here is stated a serving, so it reads against the macros
+          above rather than against the ingredient list, which is sized to
+          whatever the servings control says. */}
+      {changed && macrosAfter && (
+        <Text size="xs" c="dimmed">
+          {Math.round(preview.grams_before / baseYield)}g →{' '}
+          <b>{Math.round(preview.grams_after / baseYield)}g</b> of{' '}
+          {preview.protein_name_after ?? preview.protein_name} a serving ·{' '}
+          {macrosBefore.protein_g}g → <b>{macrosAfter.protein_g}g</b> protein and {macrosBefore.kcal}{' '}
+          → <b>{macrosAfter.kcal}</b> kcal
+        </Text>
+      )}
+      {preview?.diet_changes?.length > 0 && (
+        <Group gap={4}>
+          {preview.diet_changes.map((label) => (
+            <Badge key={label} size="sm" radius="sm" variant="light" color="fresh">
+              {label}
+            </Badge>
+          ))}
+        </Group>
+      )}
+      {preview?.cook_note && (
+        <Text size="xs" c="dimmed" fs="italic">
+          {preview.cook_note}
+        </Text>
+      )}
+      {(preview?.warnings ?? []).map((warning) => (
+        <Text key={warning} size="xs" c="orange">
+          {warning}
+        </Text>
+      ))}
+      {changed && (
+        <Text size="xs" c="dimmed">
+          Macros are estimated from reference figures for each protein, not measured.
+        </Text>
+      )}
+    </Stack>
+  )
+}
+
 export default function RecipeDetailPage() {
   const { id } = useParams()
   const recipeId = Number(id)
@@ -612,7 +757,11 @@ export default function RecipeDetailPage() {
     addRecipeToWeek,
     removeRecipeFromWeek,
     setRecipePortions,
+    setRecipeProtein,
   } = useWeeklyPlan()
+  // `undefined` means "not touched on this page", which is what lets a planned
+  // recipe open showing the swap the week already holds.
+  const [proteinOverride, setProteinOverride] = useState(undefined)
   const upcomingRecipes = useMemo(
     () => getWeekRecipes(upcomingWeekStart),
     [getWeekRecipes, upcomingWeekStart],
@@ -625,6 +774,7 @@ export default function RecipeDetailPage() {
   // four-portion ingredient list, with nothing on screen to say why they
   // disagreed.
   const selectedServings = servingsOverride ?? plannerEntry?.portions ?? DEFAULT_PORTIONS
+  const protein = proteinOverride !== undefined ? proteinOverride : plannerEntry?.protein ?? null
   const currentSelections = useMemo(() => toPlannerSelections(upcomingRecipes), [upcomingRecipes])
   const withoutRecipeSelections = useMemo(
     () => currentSelections.filter((selection) => selection.recipe_id !== recipeId),
@@ -636,19 +786,26 @@ export default function RecipeDetailPage() {
   // no longer be computed at different sizes.
   const withRecipeSelections = useMemo(() => {
     if (!recipe) return currentSelections
+    const modifier = protein ? { protein } : {}
     if (plannerEntry) {
       return currentSelections.map((selection) =>
         selection.recipe_id === recipe.id
-          ? { ...selection, portions: selectedServings }
+          ? { recipe_id: selection.recipe_id, portions: selectedServings, ...modifier }
           : selection,
       )
     }
-    return [...currentSelections, { recipe_id: recipe.id, portions: selectedServings }]
-  }, [currentSelections, plannerEntry, recipe, selectedServings])
+    return [
+      ...currentSelections,
+      { recipe_id: recipe.id, portions: selectedServings, ...modifier },
+    ]
+  }, [currentSelections, plannerEntry, protein, recipe, selectedServings])
   const { data: withoutRecipeBasket } = usePlannerBasket(withoutRecipeSelections)
   const { data: withRecipeBasket } = usePlannerBasket(withRecipeSelections)
   // Keyed on the route param, so these sit above the loading/error returns below
   // and are never called conditionally.
+  const { data: proteinPreview } = useProteinPreview(id, protein, {
+    enabled: Boolean(recipe?.protein),
+  })
   const audit = useAuditRecipe(id)
   const revert = useRevertRecipeEdits(id)
   const personalRating = usePersonalRecipeRating(id)
@@ -682,6 +839,27 @@ export default function RecipeDetailPage() {
   const baseYield = recipe.base_yield || 2
   const servings = selectedServings
   const factor = servings / baseYield
+  // The modified recipe stands in for the stored one everywhere the page shows
+  // the dish itself — quantities, method, macros. Everything else (ratings, the
+  // audit trail, the library's own flags) still describes the recipe as
+  // published, because that is what it is a record of.
+  const modified = proteinPreview?.changed ? proteinPreview : null
+  const view = modified
+    ? {
+        ...recipe,
+        ingredients: modified.ingredients,
+        steps: modified.steps,
+        energy_kcal: modified.macros_after.kcal,
+        protein_g: modified.macros_after.protein_g,
+        carbs_g: modified.macros_after.carbs_g,
+        fat_g: modified.macros_after.fat_g,
+      }
+    : recipe
+  const applyProtein = (next) => {
+    const value = normalizeProtein(next)
+    setProteinOverride(value)
+    if (plannerEntry) setRecipeProtein(upcomingWeekStart, recipe.id, value)
+  }
   const ingredientCosts = ingredientCostByKey(withRecipeBasket, recipe.id)
   // Two different questions, and the page shows both because neither alone is
   // the answer. `usedTotal` is what the recipe consumes, priced pro-rata across
@@ -755,7 +933,7 @@ export default function RecipeDetailPage() {
               <PlannerControls
                 entry={plannerEntry}
                 disabled={!plannerEntry && upcomingWeekFull}
-                onAdd={() => addRecipeToWeek(recipe, upcomingWeekStart)}
+                onAdd={() => addRecipeToWeek(recipe, upcomingWeekStart, protein)}
                 onRemove={() => removeRecipeFromWeek(upcomingWeekStart, recipe.id)}
                 onPortionsChange={(portions) =>
                   setRecipePortions(upcomingWeekStart, recipe.id, portions)
@@ -816,28 +994,41 @@ export default function RecipeDetailPage() {
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
         <MacroStat
           label="Energy"
-          value={recipe.energy_kcal}
+          value={view.energy_kcal}
           unit=" kcal"
-          corrected={originalMacros.energy_kcal}
+          corrected={modified ? null : originalMacros.energy_kcal}
         />
         <MacroStat
           label="Protein"
-          value={recipe.protein_g}
+          value={view.protein_g}
           unit="g"
-          corrected={originalMacros.protein_g}
+          corrected={modified ? null : originalMacros.protein_g}
         />
-        <MacroStat label="Carbs" value={recipe.carbs_g} unit="g" corrected={originalMacros.carbs_g} />
-        <MacroStat label="Fat" value={recipe.fat_g} unit="g" corrected={originalMacros.fat_g} />
+        <MacroStat
+          label="Carbs"
+          value={view.carbs_g}
+          unit="g"
+          corrected={modified ? null : originalMacros.carbs_g}
+        />
+        <MacroStat
+          label="Fat"
+          value={view.fat_g}
+          unit="g"
+          corrected={modified ? null : originalMacros.fat_g}
+        />
       </SimpleGrid>
       <Group justify="space-between" align="center" wrap="nowrap" mt={-12}>
         <Group gap={6} wrap="nowrap">
           <Text size="xs" c="dimmed">
-            Per serving{recipe.serving_size_g ? ` · ~${Math.round(recipe.serving_size_g)}g` : ''}
-            {recipe.protein_energy_ratio != null
+            {modified ? 'Per serving, as modified' : 'Per serving'}
+            {!modified && recipe.serving_size_g
+              ? ` · ~${Math.round(recipe.serving_size_g)}g`
+              : ''}
+            {!modified && recipe.protein_energy_ratio != null
               ? ` · ${recipe.protein_energy_ratio}g protein / 100 kcal`
               : ''}
           </Text>
-          {recipe.macros_suspect && (
+          {!modified && recipe.macros_suspect && (
             <Tooltip
               label="These four numbers don't add up against each other"
               withArrow
@@ -892,6 +1083,15 @@ export default function RecipeDetailPage() {
                 data={SERVINGS.map((n) => ({ label: SERVINGS_LABELS[n], value: String(n) }))}
               />
             </div>
+            {recipe.protein && (
+              <ProteinControls
+                profile={recipe.protein}
+                modifier={protein}
+                preview={proteinPreview}
+                baseYield={baseYield}
+                onChange={applyProtein}
+              />
+            )}
             <Table.ScrollContainer minWidth={320}>
               <Table verticalSpacing="xs" className={classes.ingredientsTable}>
                 <Table.Thead>
@@ -903,7 +1103,7 @@ export default function RecipeDetailPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {recipe.ingredients.filter(hasDisplayQuantity).map((ing, i) => {
+                  {view.ingredients.filter(hasDisplayQuantity).map((ing, i) => {
                     const { quantity, estimate } = splitQuantityLabel(scaledQuantity(ing, factor))
                     const cost = ing.ingredient_key ? ingredientCosts.get(ing.ingredient_key) : null
                     const canOpenMapping = Boolean(ing.ingredient_key)
@@ -1055,7 +1255,7 @@ export default function RecipeDetailPage() {
           <Stack gap="md">
             <Title order={3}>Method</Title>
             <Stack gap="lg">
-              {recipe.steps.map((step) => (
+              {view.steps.map((step) => (
                 <Group key={step.index} gap="md" align="flex-start" wrap="nowrap">
                   <ThemeIcon color="fresh" radius="xl" size={30} variant="filled">
                     {step.index}

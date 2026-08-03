@@ -118,9 +118,7 @@ ocado,name:baby plum tomatoes,b3b7be7c-f3ca-4009-835d-872e8ac55257,3,exact,1,San
 ocado,name:baby plum tomatoes,18b013d4-36e7-4e79-98aa-f90acc3896fe,4,exact,1,"Directly labelled mixed Baby Plum Tomatoes; good pack size and excellent rating, but premium-priced and organic.",human
 ocado,name:baby plum tomatoes,10727b28-7915-4900-86dd-79dcda3507d3,5,exact,1,"Datterini are small plum tomatoes and a reasonable variety-level match, but this premium 200g pack is much more expensive.",human
 ocado,name:baby plum tomatoes,5d6ec1e3-2305-40fe-b6da-ad4035e13a1c,6,exact,1,"Tiger plum tomatoes are a small plum-tomato alternative, but the premium price makes them a weaker default.",human
-ocado,name:baby spinach,b64c8bd7-b0de-430f-9dea-2af049440e20,1,exact,1,"Baby spinach in a convenient 80g pack, well suited to the common 40–100g recipe amounts and highly rated.",human
-ocado,name:baby spinach,d5847366-09e5-4c06-973d-2b7f57898382,2,exact,1,"Ocado own-brand washed baby spinach; a good-value 220g pack for recipes using spinach regularly, though its rating is lower.",human
-ocado,name:baby spinach,b26ea105-f7b4-490c-815a-72d5752f94da,3,form_differs,1,"Young spinach is a close fresh-leaf alternative to baby spinach, but it is a larger 320g pack and not specifically labelled baby spinach.",human
+ocado,name:baby spinach,f91e1c96-7fbb-4fe8-86dc-400dc55704c1,1,exact,1,,human
 ocado,name:baby watercress,efd43baa-b651-49b4-82bc-fbbd922d7984,1,substitute,1,"Closest available match: contains watercress with baby leaves, but is a mixed salad rather than pure baby watercress.",human
 ocado,name:bacon,0a3f0ba3-6a62-4121-bbf3-6b1d6bc84188,1,form_differs,1,"Ocado own-brand unsmoked bacon lardons are a good-value, recipe-ready form, especially suitable for the small quantity typically used.",human
 ocado,name:bacon,1e39da6d-095c-4109-aa58-a269135a29ee,2,exact,1,Good-value Ocado own-brand unsmoked bacon; a neutral default for recipes calling simply for bacon.,human
@@ -552,11 +550,12 @@ ocado,name:button mushrooms,565e9dde-9a88-4859-b5fc-6c77cbcd7057,3,exact,1,White
 ocado,name:button mushrooms,ab7f0f3a-7b6f-4f29-bdbd-29298d710afd,4,exact,1,"White mushrooms are a suitable standard button mushroom product and offer good value, though the 300g pack is larger.",human
 ocado,name:button mushrooms,33c1910b-8602-4371-989f-a6fdeac1f025,5,form_differs,1,"White button-style mushrooms, but supplied sliced rather than whole.",human
 ocado,name:button mushrooms,325331d7-6df4-40e2-8228-53eb7c7b4cbf,6,exact,1,"Closed-cup button-style mushrooms and good value, but the 625g family pack is unnecessarily large and has a weaker rating.",human
-ocado,name:cajun blackening,e57a86da-3677-43d0-adff-675f99107ee5,1,exact,1,Direct Cajun seasoning blend suitable for blackening; relatively good-value 65g pack for typical 8g usage.,human
-ocado,name:cajun blackening,2980b337-47b6-45fd-82f1-b9b98872ff3d,2,exact,1,"Direct Cajun seasoning blend and a suitably sized 45g pack, though less economical than M&S.",human
-ocado,name:cajun blackening,7a9fc74a-0f70-49f2-85e5-3e31bfd4a32f,3,exact,1,Direct Louisiana Cajun seasoning blend in a useful larger pack; ranked lower because it is a premium-priced option.,human
-ocado,name:cajun blackening,bdd832ea-738c-4727-8b0f-97314c4fd9b1,4,exact,1,"Cajun spice blend that can be used for blackening, but it is expensive for the pack size and has a low rating.",human
-ocado,name:cajun blackening,31d08ebb-9749-4a7a-ae3e-17a61b6c78c7,5,form_differs,1,"Cajun seasoning intended for fries; usable as a Cajun seasoning substitute, but less directly suited to blackening recipes.",human
+ocado,name:cajun blackening,sp:4646,1,exact,1,Generic cajun seasoning was standing in for the blackening blend.,human
+ocado,name:cajun blackening,e57a86da-3677-43d0-adff-675f99107ee5,2,substitute,1,Direct Cajun seasoning blend suitable for blackening; relatively good-value 65g pack for typical 8g usage.,human
+ocado,name:cajun blackening,2980b337-47b6-45fd-82f1-b9b98872ff3d,3,substitute,1,"Direct Cajun seasoning blend and a suitably sized 45g pack, though less economical than M&S.",human
+ocado,name:cajun blackening,7a9fc74a-0f70-49f2-85e5-3e31bfd4a32f,4,substitute,1,Direct Louisiana Cajun seasoning blend in a useful larger pack; ranked lower because it is a premium-priced option.,human
+ocado,name:cajun blackening,bdd832ea-738c-4727-8b0f-97314c4fd9b1,5,substitute,1,"Cajun spice blend that can be used for blackening, but it is expensive for the pack size and has a low rating.",human
+ocado,name:cajun blackening,31d08ebb-9749-4a7a-ae3e-17a61b6c78c7,6,form_differs,1,"Cajun seasoning intended for fries; usable as a Cajun seasoning substitute, but less directly suited to blackening recipes.",human
 ocado,name:cajun spice mix,9e5e9399-c02b-4fff-8e98-0ce71718f310,1,exact,1,Direct Cajun seasoning with the lowest unit price among the standard options; 110g pack is useful for repeat cooking.,human
 ocado,name:cajun spice mix,900e02ee-cd26-48af-9dc1-50a9dda95bd8,2,exact,1,"Standard Cajun seasoning in a convenient 44g jar; good ratings, though less economical per gram.",human
 ocado,name:cajun spice mix,2980b337-47b6-45fd-82f1-b9b98872ff3d,3,form_differs,1,"Cajun seasoning with a smoky flavour profile, so it may alter the recipe compared with a standard Cajun mix.",human
@@ -670,14 +669,15 @@ ocado,name:celery stick,72973d6d-1356-4c24-952a-03ceae07f63e,1,exact,1,Ocado own
 ocado,name:celery stick,af91d9a6-b2c0-4c9a-9922-aacff023d9d1,2,exact,1,Directly matches celery sticks in a suitable 350g pack; slightly more expensive than Ocado own-brand.,human
 ocado,name:celery stick,4227971b-3f72-439b-9061-876b59872e05,3,exact,1,"Organic celery sticks and therefore a direct match, though less value-focused than the own-brand option.",human
 ocado,name:celery stick,6a5a8d4b-a136-4136-bca6-188bc1f24ffc,4,form_differs,1,"Whole celery is the same ingredient and can be cut into sticks, but requires preparation and is sold by the bunch.",human
-ocado,name:central american style spice mix,8c18dced-905c-479c-ba6e-f72002f86066,1,exact,1,"Mexican taco seasoning is a close direct match for a Central American-style spice mix, and the 28g pack provides several typical 8g recipe portions at a reasonable price.",human
-ocado,name:central american style spice mix,9ec157cf-9efe-4373-b275-d57e9effe879,2,exact,1,Mexican fajita seasoning with cumin and chipotle is a suitable Central American spice blend; good-value 28g pack and stronger rating than several alternatives.,human
-ocado,name:central american style spice mix,08953dcf-7855-4954-80f3-bd290c7e6c71,3,exact,1,Medium fajita seasoning is a broadly usable Mexican-style spice mix in the appropriate small pack size.,human
-ocado,name:central american style spice mix,50bcbaef-4963-4697-8c20-5969eb3bcf75,4,exact,1,"A taco seasoning mix is directly suitable, with a slightly larger 39g pack and good value per gram.",human
-ocado,name:central american style spice mix,4245eee9-a7f7-4bd7-83b7-5f2724a1f503,5,exact,1,"Medium jalapeno and cumin fajita/taco seasoning is a good flavor match, though it is less good value than the Capsicana options.",human
-ocado,name:central american style spice mix,421c3cfe-fd98-4328-935e-78b53e35b737,6,exact,1,Mild Mexican fajita seasoning is suitable where a less spicy blend is wanted; the 28g pack fits the typical sachet-style usage.,human
-ocado,name:central american style spice mix,68d0e1b6-2582-4923-9e04-f7f4bf0d6d70,7,exact,1,"Taco seasoning is a reasonable direct match, but its low rating makes it a weaker default than the alternatives.",human
-ocado,name:central american style spice mix,d43db67d-bece-4753-bd12-28fd71d391ce,8,exact,1,"Smoky BBQ fajita seasoning can work as a Central American-style blend, but the BBQ profile is less neutral for general use.",human
+ocado,name:central american style spice mix,sp:91597,1,exact,1,"Fajita and taco seasonings were standing in for this blend; they are a substitute, not the thing.",human
+ocado,name:central american style spice mix,8c18dced-905c-479c-ba6e-f72002f86066,2,substitute,1,"Mexican taco seasoning is a close direct match for a Central American-style spice mix, and the 28g pack provides several typical 8g recipe portions at a reasonable price.",human
+ocado,name:central american style spice mix,9ec157cf-9efe-4373-b275-d57e9effe879,3,substitute,1,Mexican fajita seasoning with cumin and chipotle is a suitable Central American spice blend; good-value 28g pack and stronger rating than several alternatives.,human
+ocado,name:central american style spice mix,08953dcf-7855-4954-80f3-bd290c7e6c71,4,substitute,1,Medium fajita seasoning is a broadly usable Mexican-style spice mix in the appropriate small pack size.,human
+ocado,name:central american style spice mix,50bcbaef-4963-4697-8c20-5969eb3bcf75,5,substitute,1,"A taco seasoning mix is directly suitable, with a slightly larger 39g pack and good value per gram.",human
+ocado,name:central american style spice mix,4245eee9-a7f7-4bd7-83b7-5f2724a1f503,6,substitute,1,"Medium jalapeno and cumin fajita/taco seasoning is a good flavor match, though it is less good value than the Capsicana options.",human
+ocado,name:central american style spice mix,421c3cfe-fd98-4328-935e-78b53e35b737,7,substitute,1,Mild Mexican fajita seasoning is suitable where a less spicy blend is wanted; the 28g pack fits the typical sachet-style usage.,human
+ocado,name:central american style spice mix,68d0e1b6-2582-4923-9e04-f7f4bf0d6d70,8,substitute,1,"Taco seasoning is a reasonable direct match, but its low rating makes it a weaker default than the alternatives.",human
+ocado,name:central american style spice mix,d43db67d-bece-4753-bd12-28fd71d391ce,9,substitute,1,"Smoky BBQ fajita seasoning can work as a Central American-style blend, but the BBQ profile is less neutral for general use.",human
 ocado,name:chantenay carrots,5a75fbee-99d2-4e24-af3a-bdc2504b270e,1,exact,1,"Direct match for Chantenay carrots, with a 400g pack close to the typical 150–250g recipe usage and good value.",human
 ocado,name:chantenay carrots,faf0bfca-6e4c-4340-b9f1-8e71c4a14141,2,form_differs,1,"Chantenay carrots in the correct variety, but frozen rather than fresh; the 500g pack is suitable for repeated use.",human
 ocado,name:char siu paste,b4bcdfd7-5a77-4e56-bc4a-938b90713051,1,exact,1,Char siu sauce is the standard ready-made equivalent used in recipes calling for char siu paste; suitable for the typical 75–125g quantity.,human
@@ -695,7 +695,8 @@ ocado,name:cheese sauce,83f71cc4-f6aa-4076-89c4-5d30e3742d78,9,form_differs,1,"C
 ocado,name:cheese sauce,604de237-e72c-4a31-9d1a-04a6a9c046c0,10,form_differs,1,White lasagne/bechamel sauce that may work as a sauce base but is not clearly a cheese sauce.,human
 ocado,name:cheese sauce,27181cf7-ba2e-4604-b1a9-168380fb810a,11,form_differs,1,"White lasagne pasta sauce that can substitute for cheese sauce in some dishes, but is primarily béchamel-style sauce.",human
 ocado,name:cheese sauce,3878e83e-5aee-472b-af76-541fb1e7ba1a,12,form_differs,1,Bechamel sauce suitable only as a broad substitute; it is not specifically a cheese sauce.,human
-ocado,name:chermoula spice mix,48eba2dc-068a-4744-8cd6-1cdc21d44ebc,1,exact,1,Charmoula is an alternative spelling of chermoula; this is the correct spice blend despite being a premium option.,human
+ocado,name:chermoula spice mix,sp:4996,1,exact,1,"Seasoned Pioneers sell the blend itself, at a fifth of Zest & Zing's price per kg.",human
+ocado,name:chermoula spice mix,48eba2dc-068a-4744-8cd6-1cdc21d44ebc,2,exact,1,Charmoula is an alternative spelling of chermoula; this is the correct spice blend despite being a premium option.,human
 ocado,name:cherry plum tomatoes,e99e016a-325c-4e5d-9b55-a504364bac28,1,exact,1,"Ocado baby plum tomatoes are the closest direct match to cherry plum tomatoes, with good value and a practical pack size.",human
 ocado,name:cherry plum tomatoes,e9328150-3eca-4ef3-85bf-a77560fb3c13,2,exact,1,"Direct baby plum tomato match and close to the typical 200g usage, though sold on the vine and at a higher price.",human
 ocado,name:cherry plum tomatoes,b3b7be7c-f3ca-4009-835d-872e8ac55257,3,exact,1,"Direct baby plum tomato match from M&S; suitable quantity, but less good value than the Ocado options.",human
@@ -1061,9 +1062,9 @@ ocado,name:diced butternut squash,ddc55597-e779-452e-be69-4b41303a8504,4,exact,1
 ocado,name:diced chicken breast,00999a6b-1cb8-4acb-beab-049cc2a2e98d,1,exact,1,Ocado own-brand raw chicken breast chunks are a suitable diced-breast equivalent and offer the best value; 450g is practical for recipes using around 260g.,llm
 ocado,name:diced chicken breast,1eb3632f-10be-4cc1-a228-b78c0663207d,2,exact,1,"Raw diced chicken breast in a convenient 350g pack, close to typical recipe usage.",llm
 ocado,name:diced chicken breast,c12cf4d3-8a20-4c03-bb58-5a33c9bbb5f7,3,form_differs,1,Chicken breast is already diced but the product is frozen and sold in a larger 1kg pack; useful for batch cooking but less suitable as a default.,llm
-ocado,name:diced chicken thigh,89c6826d-d96d-4dd8-80da-3c58660e7c9a,1,exact,1,,human
-ocado,name:diced chicken thigh,50c019e5-23b4-4b2d-a2cf-9dd0938db1ca,2,exact,1,,human
-ocado,name:diced chicken thigh,05f4dc37-c6ed-4189-8fc3-4b9ecf5ea0b0,3,exact,1,,human
+ocado,name:diced chicken thigh,05f4dc37-c6ed-4189-8fc3-4b9ecf5ea0b0,1,exact,1,,human
+ocado,name:diced chicken thigh,89c6826d-d96d-4dd8-80da-3c58660e7c9a,2,exact,1,,human
+ocado,name:diced chicken thigh,50c019e5-23b4-4b2d-a2cf-9dd0938db1ca,3,exact,1,,human
 ocado,name:diced chorizo,9d70943e-0d1f-4529-9a71-51133e015260,1,exact,1,"Explicitly diced Spanish chorizo, with a convenient 130g total pack close to the common 60–90g recipe usage.",human
 ocado,name:diced chorizo,bc0f5578-5959-4503-8331-712e2925a588,2,form_differs,1,"Spanish cooking chorizo sausages; a good-value match that can be diced before cooking, with 180g suitable for multiple recipes.",human
 ocado,name:diced chorizo,5e7197f2-a244-42b6-a94e-eede8af4a46c,3,form_differs,1,"Spanish smoked cooking chorizo in sausage form; can be sliced or diced, though less convenient than the pre-diced option.",human
@@ -1071,6 +1072,7 @@ ocado,name:diced chorizo,51b982e5-195f-4297-994c-c586dbddd015,4,form_differs,1,"
 ocado,name:diced chorizo,20133fed-eb87-4d95-b937-244b16e058ea,5,form_differs,1,"Spanish chorizo slices can be chopped into dice, but this is cured slicing chorizo rather than cooking chorizo.",human
 ocado,name:diced chorizo,bc2bca40-df90-4571-a041-d09364b981d2,6,form_differs,1,"Freshly sliced spicy chorizo can be diced and cooked, but it is a premium-priced sliced product rather than ready-diced chorizo.",human
 ocado,name:diced chorizo,2ef3cafb-d4a7-481b-86fa-9eeebeb25189,7,form_differs,1,"Chorizo bites are a usable cooked-dish alternative, but the small pack and bite-sized form are less suitable for typical 60–90g recipe quantities.",human
+ocado,name:diced pork,6fe11582-94dd-4f55-b6f1-4732dfa02dcb,1,exact,1,,human
 ocado,name:diced sweet potato,d508f14d-d90b-4870-9340-cf8f372661b3,1,exact,1,"Ocado own-brand diced sweet potato, directly matching the ingredient and offering a suitable 350g pack for typical 200–300g usage.",human
 ocado,name:diced sweet potato,7cc77653-924b-4ebc-a2b9-eb74f698b6cd,2,exact,1,"Directly matches diced sweet potato and has a suitable 400g pack, though it is less good value than the Ocado option.",human
 ocado,name:diced sweet potato,10a4df28-64dc-4ec8-afce-04683c7b182f,3,form_differs,1,"Sweet potato is the correct ingredient, but the frozen format and unspecified cut differ from diced fresh sweet potato; good value and a useful 600g pack.",human
@@ -1336,9 +1338,9 @@ ocado,name:fresh pesto,6518a1a5-0b55-4225-8afd-4f3aa2d8ec03,5,form_differs,1,"Go
 ocado,name:fresh pesto,d06d8913-1d6f-4dc9-a52b-a1d3be73727f,6,form_differs,1,Classic basil pesto in a 190g jar; a reasonable substitute when fresh pesto is unavailable.,human
 ocado,name:fresh pesto,5cd1dc38-f72e-41b5-93e7-d1b6464919c6,7,form_differs,1,"Classic basil pesto with a convenient 45g single pot, close to the common 32–50g recipe quantity, but jarred.",human
 ocado,name:fresh pesto,55798751-70da-4fd4-bc96-84dc1485cd44,8,form_differs,1,"M&S green pesto is a low-cost basil-style pesto, though it is jarred and has a weaker rating.",human
-ocado,name:fresh tagliatelle,4323e2a8-e0f2-497d-82a7-915866dabe83,1,exact,1,Fresh tagliatelle from a specialist fresh-pasta brand; the 400g pack is reasonably close to the typical 200–250g recipe quantity.,human
+ocado,name:fresh tagliatelle,71f22b3a-66d8-470b-b686-3ede511edfb5,1,form_differs,1,Correct tagliatelle shape but dried rather than fresh; good-value fallback.,human
 ocado,name:fresh tagliatelle,c31897b7-8c22-41df-aafc-de76c66d60eb,2,exact,1,"Explicitly labelled fresh tagliatelle and good value, though the 500g pack is larger than typical usage.",human
-ocado,name:fresh tagliatelle,71f22b3a-66d8-470b-b686-3ede511edfb5,3,form_differs,1,Correct tagliatelle shape but dried rather than fresh; good-value fallback.,human
+ocado,name:fresh tagliatelle,4323e2a8-e0f2-497d-82a7-915866dabe83,3,exact,1,Fresh tagliatelle from a specialist fresh-pasta brand; the 400g pack is reasonably close to the typical 200–250g recipe quantity.,human
 ocado,name:fresh tagliatelle,8eb764cd-cd8a-4a28-939d-aa1ff212491e,4,form_differs,1,Correct tagliatelle shape but dried rather than fresh; acceptable value fallback.,human
 ocado,name:fresh tagliatelle,eece98f9-5747-405c-b9c0-f0614802adb7,5,form_differs,1,Correct tagliatelle shape but dried rather than fresh; included as a standard fallback.,human
 ocado,name:fruit bag,7e163372-b518-400a-b19a-d4fd9a7d01a7,1,exact,1,,human
@@ -1454,6 +1456,7 @@ ocado,name:gnocchi,3232922b-465e-47fd-9122-c271cb843d00,7,form_differs,1,"Plain 
 ocado,name:gnocchi,d9fcc146-864b-4aab-b71e-ef5adc3c249e,8,form_differs,1,Plain potato gnocchi with a gluten-free formulation; suitable if gluten-free is acceptable.,human
 ocado,name:gnocchi,db8acf6e-0881-41a7-8bb4-3e5b5e409540,9,form_differs,1,Plain gluten-free gnocchi in a useful 350g pack; suitable if gluten-free is acceptable.,human
 ocado,name:gnocchi,73598357-7996-4584-9564-c888eb3eaeef,10,form_differs,1,Gluten-free potato gnocchi in a 400g pack; suitable for a gluten-free version of the recipe.,human
+ocado,name:goan xacuti spice,sp:4893,1,exact,1,Previously unmappable — nothing on Ocado.,human
 ocado,name:goat s cheese,7661e25d-1374-4caf-b585-d9df007890a7,1,exact,1,"Plain natural goat's cheese in a 150g pack; good-value, well-rated and suitable for the common 75–150g recipe quantities.",human
 ocado,name:goat s cheese,452a7fbe-0db5-4449-9daf-b8b0ec4ed0d3,2,exact,1,"Plain soft goat's cheese in a 125g pack, closely matching the median recipe quantity.",human
 ocado,name:goat s cheese,52666eb9-8947-4586-bcfb-b23c180419e3,3,exact,1,"Plain pure goat's cheese log in a 150g pack; a versatile default for salads, tarts and pasta dishes.",human
@@ -1581,15 +1584,10 @@ ocado,name:green lentils,97002ec1-dee6-4b6c-8e4d-7ad85cc267e6,8,exact,1,"A 250g 
 ocado,name:green lentils,8b7ee450-a537-4ef3-a231-3678da8f599e,9,form_differs,1,"Green lentils prepared in water. They are the right ingredient but cooked/ready-to-use rather than dried, so recipe liquid and cooking times may need adjustment.",human
 ocado,name:green lentils,6153497e-f326-45cb-b925-0e9f12c88734,10,form_differs,1,"Green lentils in water and therefore a usable cooked substitute, but not the dried form normally intended by a gram-based recipe.",human
 ocado,name:green lentils,d9d331ef-5287-4c53-986f-b89f3c472f1c,11,form_differs,1,Bijoux verts are green lentils in a prepared form; suitable as a cooked substitute but not equivalent to dried lentils by weight.,human
-ocado,name:green olives,ba754649-e4b0-4bd7-bb55-51fe22a38b09,1,exact,1,"Plain whole green olives, excellent rating and very good value; suitable as a versatile default.",human
-ocado,name:green olives,c977fcb1-20b5-4e1e-b8a3-3008b5b7fea9,2,exact,1,"Plain pitted green olives at an exceptionally good price, with a useful 340g pack.",human
-ocado,name:green olives,126605e0-96ae-49df-ac60-70a6ca853e7c,3,exact,1,Plain stoneless green olives in a good-value 235g pack; convenient for recipes.,human
-ocado,name:green olives,1e6f8fcd-1b05-4017-86ca-a0afd04340f5,4,exact,1,Plain pitted green olives in a practical 440g pack and good-value price.,human
-ocado,name:green olives,c93382e9-f304-402f-a2c3-09b03567895b,5,exact,1,Plain whole Nocellara green olives with a strong rating; suitable where whole olives are preferred.,human
-ocado,name:green olives,006f7b37-889f-40d3-8c9e-093a31b53417,6,exact,1,"Plain pitted green olives in a recipe-friendly 290g pack, though somewhat more expensive.",human
-ocado,name:green olives,c16dcdfd-d4ca-44dd-aa9d-08dd32a83998,7,exact,1,Plain organic pitted green olives; a valid choice but a premium-priced option.,human
-ocado,name:green olives,fbb0aec8-cd13-42e8-b906-deae821803de,8,exact,1,"Plain organic pitted green olives in a suitable pack, but relatively expensive and lower-rated.",human
-ocado,name:green olives,51361b0a-08a4-49f5-a80d-1d287de83f87,9,form_differs,1,Green olives are the correct ingredient but supplied sliced rather than whole or pitted.,human
+ocado,name:green olives,c977fcb1-20b5-4e1e-b8a3-3008b5b7fea9,1,exact,1,"Plain pitted green olives at an exceptionally good price, with a useful 340g pack.",human
+ocado,name:green olives,126605e0-96ae-49df-ac60-70a6ca853e7c,2,exact,1,Plain stoneless green olives in a good-value 235g pack; convenient for recipes.,human
+ocado,name:green olives,1e6f8fcd-1b05-4017-86ca-a0afd04340f5,3,exact,1,Plain pitted green olives in a practical 440g pack and good-value price.,human
+ocado,name:green olives,006f7b37-889f-40d3-8c9e-093a31b53417,4,exact,1,"Plain pitted green olives in a recipe-friendly 290g pack, though somewhat more expensive.",human
 ocado,name:green pepper,69ebcc77-3a51-434b-87db-8040b69b2e92,1,exact,1,Specifically sold as green peppers; suitable for the typical recipe quantity of about one pepper (160g).,human
 ocado,name:green pesto,dba2f00c-06be-44b4-b9ac-313257611359,1,exact,1,Ocado own-brand classic green pesto; best-value 190g pack and a good fit for recipes typically using around 45g.,llm
 ocado,name:green pesto,5ef4b00b-23ac-45ee-8164-bae00ebe42c9,2,exact,1,Standard green pesto in a good-value 190g pack; suitable for the typical recipe quantity.,llm
@@ -1735,7 +1733,7 @@ ocado,name:icing sugar,50ff7841-e019-44bd-be3f-ec2cecdf5129,2,exact,1,"The same 
 ocado,name:icing sugar,9a776384-b952-49fa-8094-d1390d3f52e9,3,exact,1,"Standard icing sugar in a suitable 500g pack, with the strongest customer rating, though slightly more expensive.",human
 ocado,name:icing sugar,bdd92287-7177-4724-b5f7-973e4c1a8150,4,exact,1,"Cornflour-free icing sugar is still suitable as icing sugar, but the 2kg premium pack is excessive for typical usage.",human
 ocado,name:indian snack selection,3cc7af1f-021e-4b66-b216-e482caec13a6,1,exact,1,Indian starter selection is a direct match for an Indian snack selection and the 300g pack is close to the typical 250g usage.,human
-ocado,name:indonesian style spice mix,manual:hellofresh-indonesian-style-spice-mix,1,exact,1,,human
+ocado,name:indonesian style spice mix,sp:4699,1,exact,1,Real supplier product replaces the hand-entered HelloFresh price estimate.,human
 ocado,name:indonesian style spice mix,17b96d10-8faf-4e6f-9744-f3d88c4a6c87,2,substitute,1,"Closest Indonesian-flavoured stand-in; nasi goreng paste can provide the aromatic spice profile, though it is a wet paste rather than a dry mix.",human
 ocado,name:indonesian style spice mix,0b76d572-1b81-409e-a3e5-8cb7c1a8e91a,3,substitute,1,"Indonesian rendang seasoning base with a suitable spice profile, but supplied as a curry sauce kit rather than an 8g dry sachet.",human
 ocado,name:indonesian style spice mix,f4c5df6a-6eab-4295-80e9-d445d7a9df46,4,substitute,1,"Rendang paste is an appropriate Indonesian spice-flavour substitute, although it is wetter, richer and more specific than a general spice mix.",human
@@ -1751,7 +1749,8 @@ ocado,name:italian style herbs,c1dd355d-e0c5-484e-bc9f-fbe81e266ccd,2,exact,1,Di
 ocado,name:jackfruit,192d89e6-a40d-46d7-8592-8636ccc5775e,1,exact,1,"Canned jackfruit in brine, suitable for the typical one-tin savoury recipe usage and the best-value option.",human
 ocado,name:jackfruit,7c630f9a-77c1-482b-a3bb-4f0dae95efbc,2,exact,1,"Organic young jackfruit in a 400g tin, a good size for recipes using around 220g drained jackfruit.",human
 ocado,name:jackfruit,62db5853-86b3-4255-9950-e36f7d2a7203,3,exact,1,"Organic young jackfruit chunks in a 500g pack; suitable, though slightly larger and less good value than the higher-ranked options.",human
-ocado,name:jalfrezi spice mix,0b42ee02-c731-43ca-81ba-50d5944a6691,1,form_differs,1,Jalfrezi seasoning in paste form rather than the requested dry spice mix; the closest direct match available.,human
+ocado,name:jalfrezi spice mix,sp:4964,1,exact,1,"Ocado had only a jalfrezi paste, which is a different form.",human
+ocado,name:jalfrezi spice mix,0b42ee02-c731-43ca-81ba-50d5944a6691,2,form_differs,1,Jalfrezi seasoning in paste form rather than the requested dry spice mix; the closest direct match available.,human
 ocado,name:jasmine rice,c1f205d3-4e10-42c6-bcab-9d5bdd1ee295,1,exact,1,Plain Thai Hom Mali jasmine rice in a 2kg pack; suitable but less economical than the best large-pack option.,human
 ocado,name:jasmine rice,5f6ce4fd-5e70-4f6b-a92a-70216f53a3b5,2,exact,1,"Good-value plain jasmine rice in a 2kg pack, suitable where larger quantities are useful.",human
 ocado,name:jasmine rice,8d74fcc2-a8f8-4de2-83de-b466ed9c17b5,3,exact,1,Plain fragrant jasmine rice in a 1kg pack; suitable but slightly less good value than Ocado own-brand.,human
@@ -2216,10 +2215,11 @@ ocado,name:new potatoes,74cd83a1-62ad-4173-a2e9-13498e128dab,5,exact,1,"Baby pot
 ocado,name:new potatoes,f7262761-d8b8-479c-9de8-83d69cfb6cb9,6,exact,1,Organic British baby potatoes are a suitable new-potato style and have a good rating; included below standard options because they are organic.,human
 ocado,name:nigella seeds,6b5ccc30-55f3-4ee5-bdd9-16f793720b4a,1,exact,1,Nigella seeds in a practical 53g pack and the better-value option for typical recipe usage.,human
 ocado,name:nigella seeds,7491a985-077d-46ac-b1cc-370c1651778e,2,exact,1,"Genuine nigella seeds, with a suitable 45g pack size, but more expensive per gram.",human
-ocado,name:north indian style spice mix,cc20e16c-d18a-4add-a574-f4cad5298677,1,substitute,1,Affordable North Indian spice blend; garam masala is the closest broadly applicable stand-in for a generic North Indian-style spice mix.,human
-ocado,name:north indian style spice mix,77d0fec1-d041-4396-a881-1b94bfa7e218,2,substitute,1,"A reasonably priced North Indian curry spice mix, though specifically formulated for butter chicken and therefore less versatile.",human
-ocado,name:north indian style spice mix,e8d15566-94b6-4cb4-adf5-4d6d62d3fec1,3,substitute,1,"North Indian-style spice mix suitable for tikka-based recipes, but dish-specific rather than a generic blend.",human
-ocado,name:north indian style spice mix,d0a5424c-ffb0-4f45-a68f-ab668c9b54ae,4,substitute,1,"Tikka masala seasoning can work as a North Indian curry-spice substitute, although its flavour profile is more specific.",human
+ocado,name:north indian style spice mix,sp:91585,1,exact,1,Same blend under the same name; Ocado had only garam masala and tikka substitutes.,human
+ocado,name:north indian style spice mix,cc20e16c-d18a-4add-a574-f4cad5298677,2,substitute,1,Affordable North Indian spice blend; garam masala is the closest broadly applicable stand-in for a generic North Indian-style spice mix.,human
+ocado,name:north indian style spice mix,77d0fec1-d041-4396-a881-1b94bfa7e218,3,substitute,1,"A reasonably priced North Indian curry spice mix, though specifically formulated for butter chicken and therefore less versatile.",human
+ocado,name:north indian style spice mix,e8d15566-94b6-4cb4-adf5-4d6d62d3fec1,4,substitute,1,"North Indian-style spice mix suitable for tikka-based recipes, but dish-specific rather than a generic blend.",human
+ocado,name:north indian style spice mix,d0a5424c-ffb0-4f45-a68f-ab668c9b54ae,5,substitute,1,"Tikka masala seasoning can work as a North Indian curry-spice substitute, although its flavour profile is more specific.",human
 ocado,name:northern dough co pizza dough,40a7c0b4-c664-430b-a1cb-62a28d07ac25,1,exact,1,Standard Northern Dough Co original pizza dough; exact match and the best-value default.,human
 ocado,name:northern dough co pizza dough,5d97a161-bd02-40d8-b199-cefe3e6a3a80,2,form_differs,1,"Same brand and product type, but a protein-enriched dough rather than the standard dough.",human
 ocado,name:northern dough co pizza dough,f4f21104-0b5d-4d3b-9ba1-6757e91eeec4,3,form_differs,1,"Same brand and product type, but wholemeal rather than standard pizza dough.",human
@@ -2359,6 +2359,7 @@ ocado,name:paprika,cf23cb36-286a-4fe4-9858-d804b3a73451,5,exact,1,Plain ground p
 ocado,name:paprika,9dcc3855-c281-468b-ab7b-286c25bbb9aa,6,exact,1,"Sweet paprika, an appropriate plain paprika variant, in a useful 42g pack.",llm
 ocado,name:paprika,ca6bcedc-90a3-439d-865b-4f61c4c6e1bd,7,exact,1,Plain paprika in a large 400g pack; genuinely suitable but oversized for occasional recipe use.,llm
 ocado,name:paprika,9468136a-4c2e-4348-bd48-4db5e887a0f2,8,exact,1,Sweet paprika in a 400g value pack; suitable for frequent use but unnecessarily large for most households.,llm
+ocado,name:parisienne style herbs,sp:4753,1,exact,1,Previously unmappable — nothing on Ocado.,human
 ocado,name:parma ham parmigiano reggiano filled pasta,88f2fcbc-f591-4f2b-98f6-3459d99d76ec,1,exact,1,,human
 ocado,name:parma ham parmigiano reggiano filled pasta,2186c5a9-7c06-43fd-bd83-2e1b1e9ae610,2,exact,1,,human
 ocado,name:parma ham parmigiano reggiano filled pasta,f03f41a5-7520-4876-87f9-e6569d2773c8,3,exact,1,,human
@@ -2377,9 +2378,10 @@ ocado,name:parmigiano reggiano,b62c60a0-3a01-4480-b4ba-df1ae58ccc3b,6,form_diffe
 ocado,name:parmigiano reggiano,611d6fd4-2e31-48d3-bcbc-b24bbf450825,7,form_differs,1,Genuine Parmigiano Reggiano supplied as shavings; useful where a shaved rather than grated form is acceptable.,llm
 ocado,name:parsnip,8cc9f4b9-0096-4257-baf9-02e26f985971,1,exact,1,"Plain British parsnips in a 500g pack, closely suited to the typical 240g recipe usage and the best-value suitable option.",human
 ocado,name:parsnip,3c72ffe9-cf5a-45fe-878f-4c9a970e5b8e,2,form_differs,1,Plain British baby parsnips; the correct ingredient but smaller and substantially more expensive per kilogram than the standard pack.,human
-ocado,name:pasanda style seasoning,6577e94a-f442-4090-9207-7b368677b61c,1,substitute,1,"Closest dry spice-mix substitute for the mild, creamy Indian curry profile of pasanda; practical pack size for recipes using around 8–12g.",human
-ocado,name:pasanda style seasoning,aeb7cde0-6d9d-41c9-9331-5e3d538141af,2,substitute,1,"Korma has a similar mild, creamy and aromatic profile to pasanda, though this is a wet paste rather than a dry seasoning and will alter the recipe's liquid content.",human
-ocado,name:pasanda style seasoning,77d0fec1-d041-4396-a881-1b94bfa7e218,3,substitute,1,"Similar mild Indian curry spice mix and good-value option, but butter chicken seasoning is less specifically aligned with pasanda than the options above.",human
+ocado,name:pasanda style seasoning,sp:4968,1,exact,1,Ocado had only butter chicken and korma substitutes.,human
+ocado,name:pasanda style seasoning,6577e94a-f442-4090-9207-7b368677b61c,2,substitute,1,"Closest dry spice-mix substitute for the mild, creamy Indian curry profile of pasanda; practical pack size for recipes using around 8–12g.",human
+ocado,name:pasanda style seasoning,aeb7cde0-6d9d-41c9-9331-5e3d538141af,3,substitute,1,"Korma has a similar mild, creamy and aromatic profile to pasanda, though this is a wet paste rather than a dry seasoning and will alter the recipe's liquid content.",human
+ocado,name:pasanda style seasoning,77d0fec1-d041-4396-a881-1b94bfa7e218,4,substitute,1,"Similar mild Indian curry spice mix and good-value option, but butter chicken seasoning is less specifically aligned with pasanda than the options above.",human
 ocado,name:passata di pomodoro,c37ab2e0-6ac0-41e9-b581-b8c2eed0c210,1,exact,1,"Ocado own-brand plain Italian passata, excellent value, and the 680g pack is close to the typical 390g recipe amount while leaving some spare.",human
 ocado,name:passata di pomodoro,4141ed5c-b324-4531-8850-cbefb6425727,2,exact,1,"Plain sieved passata in a convenient 500g pack, closely matching the typical usage and offering good value with a strong rating.",human
 ocado,name:passata di pomodoro,3d045ed4-b3c2-4c91-8596-c42028a1d58b,3,exact,1,"Good-value plain passata in a 500g pack, suitable for recipes calling for around 390g.",human
@@ -2668,6 +2670,7 @@ ocado,name:potatoes,74cd83a1-62ad-4173-a2e9-13498e128dab,10,exact,1,"Ocado Briti
 ocado,name:potatoes,8c5a86ef-cf6e-4829-98c4-66fbe903aa4d,11,exact,1,"Ocado salad potatoes are a valid potato option, particularly for boiling, salads and lighter dishes.",human
 ocado,name:potatoes,6afae90a-97d3-4d10-a20c-18928fb6c6bc,12,exact,1,M&S British baby new potatoes in a useful 750g pack; valid potatoes but more specialised than a standard white potato.,human
 ocado,name:potatoes,7052ea98-8bf5-4808-b8ba-a62ec8cfef79,13,exact,1,Ocado Cornish new potatoes; valid fresh potatoes but relatively expensive and more specialised.,human
+ocado,name:poudre de colombo,sp:4738,1,exact,1,Previously unmappable — nothing on Ocado.,human
 ocado,name:premium tomato mix,18b013d4-36e7-4e79-98aa-f90acc3896fe,1,exact,1,,human
 ocado,name:premium tomato mix,d590b582-0bda-4833-b4df-4c72979976bf,2,exact,1,,human
 ocado,name:premium tomato mix,ea871a80-5390-44f0-bd09-50b426462de3,3,exact,1,,human
@@ -2807,8 +2810,6 @@ ocado,name:red split lentils,85044edd-9567-4051-8a77-6a008f6c03ec,7,exact,1,Ocad
 ocado,name:red thai style paste,82d4b65c-da57-4f5a-a086-48607dede588,1,exact,1,Genuine Thai red curry paste with the best unit price among the larger packs and a strong rating.,human
 ocado,name:red thai style paste,5f499296-3d0f-463e-b9e2-08752f32434e,2,exact,1,Established Thai red curry paste in a good-value 170g pack; suitable for repeated 50g uses.,human
 ocado,name:red thai style paste,cea133ac-7389-4ba5-8c26-7f1452dd0553,3,exact,1,M&S own-brand Thai red curry paste; good-value 190g pack suited to recipes commonly using 50g.,human
-ocado,name:red thai style paste,289b4fe6-be8a-4bc6-9bbd-e0938fe0d0e1,4,exact,1,"Convenient 50g pack that closely matches the typical recipe quantity, though comparatively expensive per gram.",human
-ocado,name:red thai style paste,e0a776e0-c8d0-4651-97a7-f26f201e14ae,5,form_differs,1,"Genuine M&S Thai red curry paste portioned into 45g shots; convenient for recipes needing about 50g, but the portioned format differs.",human
 ocado,name:red wine jus paste,331fd2d7-a4d3-4528-826b-f4ccaf84790e,1,substitute,1,Concentrated red wine stock gel/paste; the closest practical stand-in for red wine jus paste and suitable for the typical 15–22g recipe quantity.,human
 ocado,name:red wine jus paste,773a870f-cc1e-44c8-8737-a3b696454d16,2,substitute,1,"Red wine cooking sauce with the right flavour profile, but it is a thinner ready-made sauce rather than a concentrated jus paste and may require adjustment.",human
 ocado,name:red wine stock paste,331fd2d7-a4d3-4528-826b-f4ccaf84790e,1,exact,1,"Red wine stock pot/paste, and the 104g pack is a good-value option close to the typical 28g recipe amount.",human
@@ -3342,6 +3343,7 @@ ocado,name:tenderstem broccoli,f52bdbd0-d2e9-4ae6-b074-1e92c82b98e6,7,exact,1,"F
 ocado,name:tenderstem broccoli,9c6d3495-76e4-4df8-93ee-f7676d74f0d6,8,exact,1,Purple Tenderstem is the same vegetable type in a different cultivar/colour; suitable where colour is not important.,human
 ocado,name:tenderstem broccoli,f5cbddc2-6115-45fd-b8f7-7d887c2226a3,9,form_differs,1,The correct vegetable but supplied frozen rather than fresh; suitable only if frozen broccoli is acceptable.,human
 ocado,name:tenderstem broccoli,007a41dc-8f98-40f4-a13e-86e1b946f214,10,form_differs,1,"The correct vegetable supplied as trimmed Tenderstem tips rather than standard pieces, and unusually expensive.",human
+ocado,name:teriyaki marinade paste,6ba007c5-42a8-4a75-9289-eb74dc78ff43,1,exact,1,,human
 ocado,name:teriyaki sauce,9978d138-95d7-4702-ae64-fc32aa7c9532,1,exact,1,"Good-value standard teriyaki sauce in a practical 250ml pack, with an excellent rating and suitable for the typical 75–100g recipe usage.",human
 ocado,name:teriyaki sauce,4839f877-5efe-4018-a59d-3c3d17729891,2,exact,1,Standard teriyaki sauce with a convenient 200g pack and strong rating; a good all-purpose choice.,human
 ocado,name:teriyaki sauce,6ba007c5-42a8-4a75-9289-eb74dc78ff43,3,exact,1,"Very good value and a larger 420g cooking-sauce bottle, suitable when teriyaki is used regularly.",human
@@ -3364,10 +3366,11 @@ ocado,name:thai green style paste,20be7ffa-d4b4-432d-89f2-45f8868bd3c7,3,exact,1
 ocado,name:thai green style paste,1de36457-d8e9-49c3-84af-b01768179e6e,4,exact,1,"Thai green curry paste in four 45g portions, matching the typical 45g recipe quantity closely; reasonably priced for the format.",human
 ocado,name:thai green style paste,793f1cc9-bdca-40ea-97fa-59d82607028e,5,exact,1,"Thai green curry paste in a 200g pouch; suitable ingredient, though its lower rating makes it a weaker default.",human
 ocado,name:thai green style paste,113e0aef-3442-4893-871d-974e697ffdef,6,exact,1,"Genuine Thai green curry paste, but the 90g pack is relatively expensive for the amount.",human
-ocado,name:thai style spice mix,manual:hellofresh-thai-style-spice-mix,1,exact,1,,human
-ocado,name:thai style spice mix,9786edc5-dcac-4d2d-aa8a-8cf649cc6b8b,2,substitute,1,"Dry Thai recipe spice mix in a suitably sized 30g pack; a practical match for an 8g recipe quantity, though it is specifically satay flavoured.",human
-ocado,name:thai style spice mix,831e20b7-bbc6-4ac1-b298-4b71f46c0912,3,substitute,1,Dry Thai spice recipe mix with an appropriate 30g pack size; specifically green-curry flavoured rather than a neutral Thai spice mix.,human
-ocado,name:thai style spice mix,cc19c9b0-b429-44d0-9389-c1abbfa77145,4,substitute,1,Dry Thai recipe spice mix in a convenient 30g pack; specifically chilli-and-basil stir-fry flavoured.,human
+ocado,name:thai style spice mix,sp:129521,1,exact,1,,human
+ocado,name:thai style spice mix,sp:4973,2,exact,1,Real supplier product replaces the hand-entered HelloFresh price estimate.,human
+ocado,name:thai style spice mix,9786edc5-dcac-4d2d-aa8a-8cf649cc6b8b,3,substitute,1,"Dry Thai recipe spice mix in a suitably sized 30g pack; a practical match for an 8g recipe quantity, though it is specifically satay flavoured.",human
+ocado,name:thai style spice mix,831e20b7-bbc6-4ac1-b298-4b71f46c0912,4,substitute,1,Dry Thai spice recipe mix with an appropriate 30g pack size; specifically green-curry flavoured rather than a neutral Thai spice mix.,human
+ocado,name:thai style spice mix,cc19c9b0-b429-44d0-9389-c1abbfa77145,5,substitute,1,Dry Thai recipe spice mix in a convenient 30g pack; specifically chilli-and-basil stir-fry flavoured.,human
 ocado,name:this isn t pork sausages,87dcd5f2-129f-4913-bd0f-a7ab2597af3b,1,exact,1,,human
 ocado,name:this isn t pork sausages,dc50fa80-f817-4b59-ac23-ea4bfe9efe6e,2,exact,1,,human
 ocado,name:thyme,f596010a-ae4a-4b1d-bb79-2bfc608a4f41,1,exact,1,Fresh thyme sprigs; the 25g pack closely matches the typical 25g recipe usage and is good value among the fresh options.,human
@@ -3655,10 +3658,11 @@ ocado,name:yukon gold potatoes,75715222-7e0f-4e67-bfa3-c9c1a6de72f3,1,substitute
 ocado,name:yukon gold potatoes,95c8b186-11c9-40c0-b76f-0d00828656a1,2,substitute,1,"Butter Gold potatoes are another suitable gold/yellow potato substitute and offer the best value per kg, though the 2kg pack is larger.",llm
 ocado,name:za atar,d52e7d10-f216-4d40-baa6-1f4eb8c778ad,1,exact,1,Genuine za'atar seasoning in a practical 35g pack; good value and the strongest rating among the standard options.,human
 ocado,name:za atar,409d4cc0-b54c-4632-a858-18790b1b2cca,2,exact,1,Genuine za'atar seasoning in a suitable 35g pack; slightly more expensive and lower-rated than the Schwartz option.,human
-ocado,name:zanzibar style curry powder,fd6c79dd-a3cf-451d-b7ea-4f8862e99c78,1,substitute,1,Closest style among the candidates; a Caribbean curry powder is a more suitable stand-in for Zanzibar-style curry powder than a standard Indian masala. The 78g pack is also appropriate for recipes using about 12g.,human
-ocado,name:zanzibar style curry powder,3a0a04d7-7772-49ed-9269-6cf6ceac1f5c,2,substitute,1,A straightforward medium curry powder with a suitable flavour profile and practical 90g pack size; good general-purpose substitute.,human
-ocado,name:zanzibar style curry powder,759b0568-9a58-47f1-b5f7-bbe55c601e0d,3,substitute,1,"Another suitable medium curry powder substitute, though less closely styled than the Caribbean curry powder and slightly more expensive than the best-value option.",human
-ocado,name:zanzibar style curry powder,8cab53f0-45c6-4992-937a-c2764aba85d6,4,substitute,1,"Affordable mild Madras curry powder that can substitute in a pinch, but its Indian-style blend is less representative of Zanzibar-style curry powder.",human
+ocado,name:zanzibar style curry powder,sp:4772,1,exact,1,Ocado had only generic madras and Caribbean curry powders as substitutes.,human
+ocado,name:zanzibar style curry powder,fd6c79dd-a3cf-451d-b7ea-4f8862e99c78,2,substitute,1,Closest style among the candidates; a Caribbean curry powder is a more suitable stand-in for Zanzibar-style curry powder than a standard Indian masala. The 78g pack is also appropriate for recipes using about 12g.,human
+ocado,name:zanzibar style curry powder,3a0a04d7-7772-49ed-9269-6cf6ceac1f5c,3,substitute,1,A straightforward medium curry powder with a suitable flavour profile and practical 90g pack size; good general-purpose substitute.,human
+ocado,name:zanzibar style curry powder,759b0568-9a58-47f1-b5f7-bbe55c601e0d,4,substitute,1,"Another suitable medium curry powder substitute, though less closely styled than the Caribbean curry powder and slightly more expensive than the best-value option.",human
+ocado,name:zanzibar style curry powder,8cab53f0-45c6-4992-937a-c2764aba85d6,5,substitute,1,"Affordable mild Madras curry powder that can substitute in a pinch, but its Indian-style blend is less representative of Zanzibar-style curry powder.",human
 ocado,name:zhoug style paste,fa4a58e2-c78c-4c9b-9c8d-2b0b70d638c0,1,exact,1,"Green schug is the same spicy herb paste as zhoug, and this is a good-sized pack for recipes using about 45–50g.",human
 ocado,name:zhoug style paste,cf57d65f-5337-4bb9-8201-e0303dc2a7bf,2,substitute,1,"A Middle Eastern cooking paste in the ideal 50g pack size, but the product name does not specifically confirm that it is zhoug/schug.",human
 ocado,name:zhoug style paste,a91e4140-59ea-4832-a50b-f82a3187035b,3,substitute,1,"Green harissa is a reasonably close spicy green Middle Eastern paste, though it has a different flavour profile from zhoug.",human

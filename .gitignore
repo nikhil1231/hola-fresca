@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+AGENTS.local.md
 
 # Scrape output: SQLite DB and raw payload cache (rebuildable from the source).
 # Anchored to the repo root so app/data/ (the committed gram reference) is kept.

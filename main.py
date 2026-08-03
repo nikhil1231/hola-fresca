@@ -1,5 +1,7 @@
 from pathlib import Path
+import logging
 import mimetypes
+import os
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +12,16 @@ from app.api.mapping import router as mapping_router
 from app.api.ocado import router as ocado_router
 from app.api.planner import router as planner_router
 from app.api.recipes import router as recipes_router
+
+# uvicorn installs handlers for its own loggers but leaves the root logger at
+# WARNING, so every log.info in the app was being dropped - including the auth
+# ladder's step-by-step record, which is the only account of why a login failed.
+# Set here rather than in run.py because the reloader's worker imports this
+# module, not that one. Opt in our own namespaces only, so a debug level does not
+# also turn on httpx and sqlalchemy.
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+for _namespace in ("holafresca", "app"):
+    logging.getLogger(_namespace).setLevel(os.environ.get("HOLAFRESCA_LOG_LEVEL", "INFO"))
 
 app = FastAPI(title="HolaFresca")
 

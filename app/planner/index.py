@@ -22,6 +22,8 @@ from app.db.models import (
 )
 from app.mapping.candidates import load_recipe_pct_index, load_source_id_index
 from app.planner import waste as waste_mod
+from app import protein as protein_mod
+from app.protein import ProteinLine
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +135,20 @@ class PlanRecipe:
     fat_g: float | None = None
     carbs_g: float | None = None
     untracked_lines: int = 0
+    #: Which of ``needs`` is the dish's protein, when one is recognised. Derived
+    #: here rather than per request because it is fixed by the library and a
+    #: modifier has to find it on every candidate the ranking prices.
+    protein: ProteinLine | None = None
+
+    @property
+    def macros(self) -> protein_mod.Macros:
+        """Per-portion macros, as the library states them."""
+        return protein_mod.Macros(
+            kcal=self.energy_kcal or 0.0,
+            protein_g=self.protein_g or 0.0,
+            fat_g=self.fat_g or 0.0,
+            carbs_g=self.carbs_g or 0.0,
+        )
 
 
 @dataclass
@@ -144,9 +160,93 @@ class PlanIndex:
     statuses: tuple[str, ...] = DEFAULT_STATUSES
     # (ingredient, unit, rounded demand, this-week pack override)
     cover_cache: dict[tuple[str, str, int, str | None], object] = field(default_factory=dict)
+    # (recipe, protein modifier) -> the needs that modifier produces. A pinned
+    # week's modified recipes are re-priced once per ranked candidate, so this
+    # keeps a swap from being resolved thousands of times over.
+    needs_cache: dict[tuple[int, protein_mod.ProteinModifier], tuple[Need, ...]] = field(
+        default_factory=dict
+    )
 
     def ingredient(self, key: str) -> Ingredient | None:
         return self.ingredients.get(key)
+
+
+def resolve_protein(
+    recipe: PlanRecipe, modifier: protein_mod.ProteinModifier | None
+) -> protein_mod.Resolution | None:
+    """What ``modifier`` does to ``recipe``, or None if it does nothing."""
+    if modifier is None or modifier.empty or recipe.protein is None:
+        return None
+    return protein_mod.resolve(
+        recipe.protein,
+        modifier,
+        base_yield=recipe.base_yield,
+        recipe_macros=recipe.macros,
+    )
+
+
+def modified_needs(
+    index: PlanIndex, recipe: PlanRecipe, modifier: protein_mod.ProteinModifier | None
+) -> tuple[Need, ...]:
+    """``recipe.needs`` with a protein modifier applied — the only place it lands.
+
+    Applied here, over an already-built index, rather than baked into the index
+    itself: the index is a process-wide cache shared by every request, and a
+    modifier belongs to one week held in one browser. Demands are re-accumulated
+    by key on the way out because a swap can land on an ingredient the recipe
+    already uses, and two lines for the same key would be bought twice.
+    """
+    if modifier is None or modifier.empty or recipe.protein is None:
+        return recipe.needs
+    cache_key = (recipe.id, modifier)
+    cached = index.needs_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    resolution = resolve_protein(recipe, modifier)
+    if resolution is None or not resolution.changed:
+        index.needs_cache[cache_key] = recipe.needs
+        return recipe.needs
+
+    companions = protein_mod.companion_swaps([n.key for n in recipe.needs], resolution)
+    grams: dict[str, float] = defaultdict(float)
+    units: dict[str, float] = defaultdict(float)
+    names: dict[str, str] = {}
+
+    for need in recipe.needs:
+        key, name, need_g, need_u = need.key, need.display_name, need.grams, need.units
+        if need.key == resolution.source.key:
+            need_g = need.grams * resolution.factor
+            if resolution.target_key and index.ingredient(resolution.target_key):
+                key = resolution.target_key
+                name = resolution.target_name or name
+        elif need.key in companions and index.ingredient(companions[need.key]) is not None:
+            key = companions[need.key]
+            name = protein_mod.display_name(key)
+
+        if key != need.key or need_g != need.grams:
+            ingredient = index.ingredient(key)
+            need_g, need_u = protein_mod.swapped_quantity(
+                need_g,
+                unit_kind=ingredient.unit_kind if ingredient else "mass",
+                each_to_grams=ingredient.each_to_grams if ingredient else None,
+            )
+        grams[key] += need_g
+        if need_u is not None:
+            units[key] += need_u
+        names.setdefault(key, name)
+
+    result = tuple(
+        Need(
+            key=k,
+            display_name=names.get(k, k),
+            grams=round(g, 2),
+            units=units[k] if units.get(k) else None,
+        )
+        for k, g in sorted(grams.items(), key=lambda kv: -kv[1])
+    )
+    index.needs_cache[cache_key] = result
+    return result
 
 
 def _alias_roots(rows: list[IngredientMapping]) -> dict[str, str]:
@@ -492,18 +592,22 @@ def _load_recipes(
             grams[key] += amount_g
             if amount_units is not None:
                 units[key] += amount_units
+        resolved_needs = tuple(
+            Need(
+                key=k,
+                display_name=names.get(k, k),
+                grams=round(g, 2),
+                units=units[k] if units.get(k) else None,
+            )
+            for k, g in sorted(grams.items(), key=lambda kv: -kv[1])
+        )
         recipes[recipe.id] = PlanRecipe(
             id=recipe.id,
             name=recipe.name,
             base_yield=recipe.base_yield or 2,
-            needs=tuple(
-                Need(
-                    key=k,
-                    display_name=names.get(k, k),
-                    grams=round(g, 2),
-                    units=units[k] if units.get(k) else None,
-                )
-                for k, g in sorted(grams.items(), key=lambda kv: -kv[1])
+            needs=resolved_needs,
+            protein=protein_mod.find_protein_line(
+                [(n.key, n.display_name, n.grams, n.units) for n in resolved_needs]
             ),
             total_time_min=recipe.total_time_min,
             avg_rating=(

@@ -7,6 +7,7 @@ import {
   Group,
   Loader,
   PasswordInput,
+  Select,
   Stack,
   Table,
   Tabs,
@@ -29,6 +30,7 @@ import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
 import { formatWeekLabel, toPlannerSelections, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 import {
+  useOcadoAccounts,
   useOcadoBasket,
   useOcadoLogin,
   useOcadoOtp,
@@ -42,6 +44,7 @@ import {
 import classes from './OcadoPage.module.css'
 
 const money = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' })
+const ACCOUNT_STORAGE_KEY = 'holafresca:ocado-account-id'
 
 function formatMoney(value) {
   return value == null ? '-' : money.format(value)
@@ -111,6 +114,44 @@ function statusLabel(status) {
   return 'logged out'
 }
 
+// A full login is slow enough - browser launch, reCAPTCHA, then the wait for
+// the emailed code - that a bare spinner tells you nothing about whether it is
+// progressing or stuck. These mirror AuthStage in app/ocado/auth.py.
+const STAGE_LABELS = {
+  checking_session: 'Checking your saved session…',
+  signing_in: 'Signing in…',
+  waiting_for_code: 'Waiting for the emailed code…',
+  entering_code: 'Entering the code…',
+}
+
+function stageLabel(stage, fallback) {
+  return STAGE_LABELS[stage] ?? fallback
+}
+
+// The server parks at awaiting_otp for the whole time it is fetching *and*
+// submitting the code on your behalf, so the panel has to read from the stage
+// rather than the state - otherwise it spends that minute telling you to go and
+// type a code the app has already sent. The input stays on screen throughout:
+// every one of these steps can give up and hand back to you.
+function otpPanelCopy(stage) {
+  if (stage === 'waiting_for_code') {
+    return {
+      title: 'Fetching your code',
+      body: 'Reading it from the app mailbox. Enter it yourself if this stalls.',
+    }
+  }
+  if (stage === 'entering_code') {
+    return {
+      title: 'Signing you in',
+      body: 'Submitting the code Ocado sent. This can take up to a minute.',
+    }
+  }
+  return {
+    title: 'Check your email',
+    body: 'Ocado sent a verification code. Enter it to finish signing in.',
+  }
+}
+
 function parseSlotDate(value) {
   if (!value) return null
   const date = new Date(value)
@@ -135,7 +176,7 @@ function groupSlotsByDay(slots) {
   }))
 }
 
-function SlotTabs({ days, reserve, onReserved }) {
+function SlotTabs({ accountId, days, reserve, onReserved }) {
   const [activeDay, setActiveDay] = useState(null)
 
   useEffect(() => {
@@ -176,7 +217,7 @@ function SlotTabs({ days, reserve, onReserved }) {
                 loading={reserve.isPending && reserve.variables?.slotId === slot.slot_id}
                 onClick={() =>
                   reserve.mutate(
-                    { slotId: slot.slot_id },
+                    { accountId, slotId: slot.slot_id },
                     { onSuccess: onReserved },
                   )
                 }
@@ -477,20 +518,31 @@ export default function OcadoPage() {
   const entries = getWeekRecipes(upcomingWeekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
   const planner = usePlannerBasket(selections, packOverrides)
-  const status = useOcadoStatus()
-  const login = useOcadoLogin()
-  const sessionRefresh = useOcadoSessionRefresh()
-  const reconnectAttempted = useRef(false)
-  const otp = useOcadoOtp()
-  const push = useOcadoPush()
-  const basket = useOcadoBasket({ enabled: status.data?.status === 'ready' })
+  const accounts = useOcadoAccounts()
+  const [accountId, setAccountId] = useState(() =>
+    window.localStorage.getItem(ACCOUNT_STORAGE_KEY) || null,
+  )
+  const selectedAccount = useMemo(
+    () => (accounts.data?.items ?? []).find((account) => account.id === accountId) ?? null,
+    [accounts.data?.items, accountId],
+  )
+  const login = useOcadoLogin(accountId)
+  const sessionRefresh = useOcadoSessionRefresh(accountId)
+  const status = useOcadoStatus(accountId, {
+    enabled: Boolean(selectedAccount),
+    active: login.isPending || sessionRefresh.isPending,
+  })
+  const reconnectAttempted = useRef(new Set())
+  const otp = useOcadoOtp(accountId)
+  const push = useOcadoPush(accountId)
+  const basket = useOcadoBasket(accountId, { enabled: status.data?.status === 'ready' })
   const plan = useOcadoPushPlan(
-    { selections, ownedItemKeys, packOverrides },
+    { accountId, selections, ownedItemKeys, packOverrides },
     { enabled: status.data?.status === 'ready' },
   )
   const [otpCode, setOtpCode] = useState('')
   const [reservation, setReservation] = useState(null)
-  const slots = useOcadoSlots(undefined, { enabled: status.data?.status === 'ready' })
+  const slots = useOcadoSlots({ accountId }, { enabled: status.data?.status === 'ready' })
   const reserve = useOcadoReserve()
   const countdown = useCountdown(extractExpiry(reservation?.raw))
   const cartSummary = useMemo(() => summariseCart(basket.data?.raw), [basket.data?.raw])
@@ -508,17 +560,43 @@ export default function OcadoPage() {
   const connected = status.data?.status === 'ready'
   const awaitingOtp = status.data?.status === 'awaiting_otp'
   const reconnecting = sessionRefresh.isPending
+  const stage = status.data?.stage ?? 'idle'
+  const signingIn = login.isPending || reconnecting
+  // The server reads the code out of the app mailbox and submits it itself, and
+  // is parked at awaiting_otp for both steps.
+  const handlingCode = stage === 'waiting_for_code' || stage === 'entering_code'
+  const otpCopy = otpPanelCopy(stage)
+
+  useEffect(() => {
+    const items = accounts.data?.items ?? []
+    if (!items.length) return
+    if (accountId && items.some((account) => account.id === accountId)) return
+    const next = accounts.data?.default_account_id ?? items[0].id
+    setAccountId(next)
+    window.localStorage.setItem(ACCOUNT_STORAGE_KEY, next)
+  }, [accountId, accounts.data])
+
+  useEffect(() => {
+    if (!accountId) return
+    window.localStorage.setItem(ACCOUNT_STORAGE_KEY, accountId)
+    setOtpCode('')
+    setReservation(null)
+    login.reset()
+    otp.reset()
+    push.reset()
+  }, [accountId])
 
   // A saved session usually just needs waking up, so try that on arrival rather
   // than making you press a button for it. Once per mount, and only the rungs
   // that need nothing from you - /session/refresh stops before the password
   // step, so this can never trigger an OTP email on its own.
   useEffect(() => {
+    if (!accountId) return
     if (status.data?.status !== 'logged_out') return
-    if (reconnectAttempted.current) return
-    reconnectAttempted.current = true
+    if (reconnectAttempted.current.has(accountId)) return
+    reconnectAttempted.current.add(accountId)
     sessionRefresh.mutate()
-  }, [status.data?.status, sessionRefresh])
+  }, [accountId, status.data?.status, sessionRefresh])
 
   return (
     <Stack gap="lg" className={classes.pageStack}>
@@ -532,9 +610,23 @@ export default function OcadoPage() {
             Push {entries.length} recipes for {formatWeekLabel(upcomingWeekStart)}, then reserve a slot.
           </Text>
         </div>
-        <Badge color={status.data?.status === 'ready' ? 'teal' : 'gray'} variant="light" size="lg">
-          {statusLabel(status.data?.status)}
-        </Badge>
+        <Group gap="sm" align="center">
+          <Select
+            aria-label="Ocado account"
+            value={accountId}
+            onChange={(value) => value && setAccountId(value)}
+            data={(accounts.data?.items ?? []).map((account) => ({
+              value: account.id,
+              label: account.label,
+            }))}
+            disabled={accounts.isLoading || (accounts.data?.items ?? []).length <= 1}
+            allowDeselect={false}
+            w={{ base: 180, sm: 220 }}
+          />
+          <Badge color={status.data?.status === 'ready' ? 'teal' : 'gray'} variant="light" size="lg">
+            {statusLabel(status.data?.status)}
+          </Badge>
+        </Group>
       </Group>
 
       <Box className={classes.layout}>
@@ -546,15 +638,13 @@ export default function OcadoPage() {
             <Box className={classes.panel}>
               <Stack gap="sm">
                 <Group justify="space-between">
-                  <Title order={3}>{awaitingOtp ? 'Check your email' : 'Connect to Ocado'}</Title>
-                  {(status.isLoading || reconnecting) && <Loader size="sm" />}
+                  <Title order={3}>{awaitingOtp ? otpCopy.title : 'Connect to Ocado'}</Title>
+                  {(status.isLoading || reconnecting || handlingCode) && <Loader size="sm" />}
                 </Group>
 
                 {awaitingOtp ? (
                   <>
-                    <Text size="sm" c="dimmed">
-                      Ocado sent a verification code. Enter it to finish signing in.
-                    </Text>
+                    <Text size="sm" c="dimmed">{otpCopy.body}</Text>
                     <Group align="flex-end">
                       <PasswordInput
                         label="Verification code"
@@ -566,11 +656,15 @@ export default function OcadoPage() {
                         flex={1}
                       />
                       <Button
-                        loading={otp.isPending}
-                        disabled={!otpCode.trim()}
+                        leftSection={
+                          otp.isPending ? (
+                            <Loader size={16} color="var(--mantine-color-white)" />
+                          ) : null
+                        }
+                        disabled={!otpCode.trim() || otp.isPending}
                         onClick={() => otp.mutate(otpCode)}
                       >
-                        Submit
+                        {otp.isPending ? 'Entering the code…' : 'Submit'}
                       </Button>
                     </Group>
                   </>
@@ -581,12 +675,21 @@ export default function OcadoPage() {
                         ? 'Reusing your saved session…'
                         : 'Signing in will email you a verification code.'}
                     </Text>
+                    {/* Not Mantine's `loading` prop: it fades the label out to
+                        make room for its own spinner, and the label is the
+                        whole point here. A Loader in the left slot keeps both. */}
                     <Button
-                      leftSection={<IconLogin size={16} />}
-                      loading={login.isPending || reconnecting}
+                      leftSection={
+                        signingIn ? (
+                          <Loader size={16} color="var(--mantine-color-white)" />
+                        ) : (
+                          <IconLogin size={16} />
+                        )
+                      }
+                      disabled={!accountId || signingIn}
                       onClick={() => login.mutate()}
                     >
-                      Sign in to Ocado
+                      {signingIn ? stageLabel(stage, 'Signing in…') : 'Sign in to Ocado'}
                     </Button>
                   </>
                 )}
@@ -643,6 +746,7 @@ export default function OcadoPage() {
                     loading={push.isPending}
                     onClick={() =>
                       push.mutate({
+                        accountId,
                         selections,
                         ownedItemKeys,
                         packOverrides,
@@ -765,7 +869,12 @@ export default function OcadoPage() {
                   Slot reserved. Confirm the order on Ocado before the hold expires.
                 </Alert>
               )}
-              <SlotTabs days={slotDays} reserve={reserve} onReserved={setReservation} />
+              <SlotTabs
+                accountId={accountId}
+                days={slotDays}
+                reserve={reserve}
+                onReserved={setReservation}
+              />
               {!slots.isLoading && !slots.error && (slots.data?.items ?? []).length === 0 && (
                 <Text c="dimmed">No slots loaded yet.</Text>
               )}

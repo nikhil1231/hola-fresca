@@ -25,24 +25,42 @@ async function postJSON(path, body = {}) {
   return res.json()
 }
 
-export function fetchOcadoStatus() {
-  return getJSON('/api/ocado/status')
+function accountQuery(accountId) {
+  const params = new URLSearchParams()
+  if (accountId) params.set('account_id', accountId)
+  const query = params.toString()
+  return query ? `?${query}` : ''
 }
 
-export function startOcadoLogin() {
-  return postJSON('/api/ocado/login')
+export function fetchOcadoAccounts() {
+  return getJSON('/api/ocado/accounts')
 }
 
-export function refreshOcadoSession() {
-  return postJSON('/api/ocado/session/refresh')
+export function fetchOcadoStatus(accountId) {
+  return getJSON(`/api/ocado/status${accountQuery(accountId)}`)
 }
 
-export function submitOcadoOtp(code) {
-  return postJSON('/api/ocado/otp', { code })
+export function startOcadoLogin(accountId) {
+  return postJSON('/api/ocado/login', { account_id: accountId })
 }
 
-export function pushOcadoBasket({ selections, ownedItemKeys = [], packOverrides = {}, weekStart = null }) {
+export function refreshOcadoSession(accountId) {
+  return postJSON('/api/ocado/session/refresh', { account_id: accountId })
+}
+
+export function submitOcadoOtp({ accountId, code }) {
+  return postJSON('/api/ocado/otp', { account_id: accountId, code })
+}
+
+export function pushOcadoBasket({
+  accountId,
+  selections,
+  ownedItemKeys = [],
+  packOverrides = {},
+  weekStart = null,
+}) {
   return postJSON('/api/ocado/basket/push', {
+    account_id: accountId,
     selections,
     owned_item_keys: ownedItemKeys,
     pack_overrides: packOverrides,
@@ -53,8 +71,9 @@ export function pushOcadoBasket({ selections, ownedItemKeys = [], packOverrides 
 // What a push would change, without changing it. The cart is shared with the
 // rest of your shopping and a sync can now remove things, so this is what makes
 // the button safe to press: it names what of yours gets left alone.
-export function planOcadoBasket({ selections, ownedItemKeys = [], packOverrides = {} }) {
+export function planOcadoBasket({ accountId, selections, ownedItemKeys = [], packOverrides = {} }) {
   return postJSON('/api/ocado/basket/plan', {
+    account_id: accountId,
     selections,
     owned_item_keys: ownedItemKeys,
     pack_overrides: packOverrides,
@@ -67,20 +86,22 @@ export function refreshOcadoStock({ selections, packOverrides = {} }) {
   return postJSON('/api/ocado/stock/refresh', { selections, pack_overrides: packOverrides })
 }
 
-export function fetchOcadoBasket() {
-  return getJSON('/api/ocado/basket')
+export function fetchOcadoBasket(accountId) {
+  return getJSON(`/api/ocado/basket${accountQuery(accountId)}`)
 }
 
-export function fetchOcadoSlots({ ddid, region } = {}) {
+export function fetchOcadoSlots({ accountId, ddid, region } = {}) {
   const params = new URLSearchParams()
+  if (accountId) params.set('account_id', accountId)
   if (ddid) params.set('ddid', ddid)
   if (region) params.set('region', region)
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return getJSON(`/api/ocado/slots${suffix}`)
 }
 
-export function reserveOcadoSlot({ slotId, ddid, region }) {
+export function reserveOcadoSlot({ accountId, slotId, ddid, region }) {
   return postJSON('/api/ocado/slots/reserve', {
+    account_id: accountId,
     slot_id: slotId,
     ddid: ddid || null,
     region: region || null,

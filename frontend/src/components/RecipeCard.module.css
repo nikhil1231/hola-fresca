@@ -245,6 +245,19 @@
   font-weight: 600;
 }
 
+.adjustedStat {
+  color: var(--mantine-color-grape-7);
+  font-weight: 800;
+}
+
+.adjustedStat .densityIcon {
+  color: var(--mantine-color-grape-7);
+}
+
+.adjustedStat .densitySegmentActive {
+  background: var(--mantine-color-grape-6);
+}
+
 .statSlot :global(.mantine-Text-root) {
   min-width: 0;
   overflow: hidden;
