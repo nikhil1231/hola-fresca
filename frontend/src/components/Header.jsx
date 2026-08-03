@@ -1,11 +1,13 @@
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { Box, Container, Group, TextInput, Title } from '@mantine/core'
-import { IconSearch } from '@tabler/icons-react'
+import { ActionIcon, Box, Container, Group, TextInput, Title, Tooltip } from '@mantine/core'
+import { IconSearch, IconSettings } from '@tabler/icons-react'
 
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 import classes from './Header.module.css'
 
-// Debounced search box that writes ?q= and lands on the browse page.
+// Debounced search box that writes ?q= and lands on the browse page. It carries
+// the current query string along, so searching from a week you are editing keeps
+// editing that week.
 function SearchBox() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -15,7 +17,7 @@ function SearchBox() {
     if (nextValue) next.set('q', nextValue)
     else next.delete('q')
     next.delete('page')
-    navigate({ pathname: '/', search: next.toString() })
+    navigate({ pathname: '/browse', search: next.toString() })
   })
 
   return (
@@ -44,6 +46,9 @@ export default function Header() {
             </Title>
             <Group gap="lg" visibleFrom="xs" wrap="nowrap">
               <NavLink to="/" end className={navClass}>
+                Home
+              </NavLink>
+              <NavLink to="/browse" className={navClass}>
                 Browse
               </NavLink>
               <NavLink to="/dashboard" className={navClass}>
@@ -60,7 +65,21 @@ export default function Header() {
               </NavLink>
             </Group>
           </Group>
-          {pathname === '/' && <SearchBox />}
+          <Group gap="sm" wrap="nowrap">
+            {pathname === '/browse' && <SearchBox />}
+            <Tooltip label="Settings" withArrow>
+              <ActionIcon
+                component={NavLink}
+                to="/settings"
+                variant="subtle"
+                color="gray"
+                size="lg"
+                aria-label="Settings"
+              >
+                <IconSettings size={20} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         </Group>
       </Container>
     </Box>

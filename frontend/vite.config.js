@@ -24,8 +24,25 @@ const sharedPageFiles = [
 ]
 
 const pageFiles = {
+  home: [
+    'frontend/src/routes/HomePage.jsx',
+    'frontend/src/routes/HomePage.module.css',
+    'frontend/src/hooks/useSchedule.js',
+    'frontend/src/hooks/useWeeklyPlan.js',
+    'frontend/src/api/scheduleClient.js',
+    'app/api/schedule.py',
+    'app/schedule.py',
+  ],
+  settings: [
+    'frontend/src/routes/SettingsPage.jsx',
+    'frontend/src/hooks/useSchedule.js',
+    'frontend/src/api/scheduleClient.js',
+    'app/api/schedule.py',
+    'app/schedule.py',
+  ],
   browse: [
     'frontend/src/routes/BrowsePage.jsx',
+    'frontend/src/hooks/useSchedule.js',
     'frontend/src/components/FilterPanel.jsx',
     'frontend/src/components/RangeFilter.jsx',
     'frontend/src/components/RecipeCard.jsx',

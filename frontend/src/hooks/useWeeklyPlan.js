@@ -3,7 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 export const DEFAULT_PORTIONS = 4
 export const MIN_PORTIONS = 1
 export const MAX_PORTIONS = 8
-export const MAX_RECIPES_PER_WEEK = 5
+// How many recipes a week holds is a setting now (schedule settings,
+// `recipes_per_week`), so the cap a page enforces is passed in. This is only the
+// ceiling stored state is trimmed to, well above any sane setting: lowering the
+// setting must not silently delete recipes already chosen for a week.
+export const PLAN_WEEK_STORAGE_LIMIT = 14
+export const DEFAULT_RECIPES_PER_WEEK = 5
 
 const STORAGE_KEY = 'hola-fresca.weekly-plan.v1'
 
@@ -92,7 +97,7 @@ function normalizePlan(value) {
     weeks[weekStart] = {
       recipes: recipes
         .filter((entry) => entry?.recipe?.id != null)
-        .slice(0, MAX_RECIPES_PER_WEEK)
+        .slice(0, PLAN_WEEK_STORAGE_LIMIT)
         .map((entry) => ({
           recipe: recipeSnapshot(entry.recipe),
           portions: clampPortions(entry.portions),
@@ -150,12 +155,14 @@ export function useWeeklyPlan() {
   )
 
   const addRecipeToWeek = useCallback(
-    (recipe, weekStart = upcomingWeekStart, protein = null) => {
+    (recipe, weekStart = upcomingWeekStart, { protein = null, limit = DEFAULT_RECIPES_PER_WEEK } = {}) => {
       let added = false
       updatePlan((current) => {
         const week = current.weeks[weekStart] ?? { recipes: [] }
         const existing = week.recipes.find((entry) => entry.recipe.id === recipe.id)
-        if (existing || week.recipes.length >= MAX_RECIPES_PER_WEEK) return current
+        if (existing || week.recipes.length >= Math.min(limit, PLAN_WEEK_STORAGE_LIMIT)) {
+          return current
+        }
         added = true
         return {
           ...current,

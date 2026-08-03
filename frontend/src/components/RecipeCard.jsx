@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
   Badge,
@@ -138,7 +138,10 @@ function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove })
 
   if (!entry) {
     return (
-      <Tooltip label={disabled ? 'Week already has 5 recipes' : 'Add to upcoming week'} withArrow>
+      <Tooltip
+        label={disabled ? 'This week is already full' : 'Add to the week you are planning'}
+        withArrow
+      >
         <ActionIcon
           component="button"
           type="button"
@@ -148,7 +151,7 @@ function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove })
           variant="filled"
           className={classes.addButton}
           disabled={disabled}
-          aria-label="Add to upcoming week"
+          aria-label="Add to this week"
           onClick={(event) => {
             stopCardNavigation(event)
             if (!disabled) onAdd?.()
@@ -243,6 +246,13 @@ export default function RecipeCard({
   onRemoveFromPlan,
   showStats = true,
 }) {
+  const [searchParams] = useSearchParams()
+  // Carry the week being edited through to the detail page, so adding it from
+  // there lands in the same week the browse grid was filling.
+  const editingWeek = searchParams.get('week')
+  const detailHref = editingWeek
+    ? `/recipes/${recipe.id}?week=${editingWeek}`
+    : `/recipes/${recipe.id}`
   const basketBadge =
     basketBadgeLabel ?? formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable)
   const proteinLabel = formatProteinModifier(plannerEntry?.protein)
@@ -275,7 +285,7 @@ export default function RecipeCard({
 
   return (
     <Card padding="0" radius="md" withBorder className={cardClass}>
-      <Link to={`/recipes/${recipe.id}`} className={classes.mainLink}>
+      <Link to={detailHref} className={classes.mainLink}>
         <Card.Section className={classes.imageWrap}>
           <Image
             src={recipe.image_url || RECIPE_PLACEHOLDER_IMAGE}

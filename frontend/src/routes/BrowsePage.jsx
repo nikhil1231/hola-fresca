@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
@@ -14,7 +15,13 @@ import {
   Text,
 } from '@mantine/core'
 import { useDisclosure, useIntersection, useMediaQuery } from '@mantine/hooks'
-import { IconAdjustmentsHorizontal, IconMoodEmpty, IconSparkles } from '@tabler/icons-react'
+import {
+  IconAdjustmentsHorizontal,
+  IconCalendarWeek,
+  IconCheck,
+  IconMoodEmpty,
+  IconSparkles,
+} from '@tabler/icons-react'
 
 import FilterPanel from '../components/FilterPanel.jsx'
 import { DEFAULT_FACETS } from '../data/defaultFacets.js'
@@ -27,8 +34,14 @@ import {
   useRecipeSuggestions,
 } from '../hooks/useRecipeQueries.js'
 import {
+  formatWeekRange,
+  resolveTargetWeek,
+  useSchedule,
+  useSetWeekSkipped,
+} from '../hooks/useSchedule.js'
+import {
   DEFAULT_PORTIONS,
-  MAX_RECIPES_PER_WEEK,
+  DEFAULT_RECIPES_PER_WEEK,
   toPlannerSelections,
   useWeeklyPlan,
 } from '../hooks/useWeeklyPlan.js'
@@ -62,8 +75,51 @@ function useBrowseRowSize() {
   return GRID_COLS.base
 }
 
+// Which week these picks land in: the one the "+" block was clicked for, or the
+// week currently being planned when browsing straight off the nav.
+function EditingWeekBar({ week, count, limit, skipped, onPlanAnyway, planPending }) {
+  if (!week) return null
+  return (
+    <Alert
+      color={skipped ? 'orange' : 'fresh'}
+      variant="light"
+      icon={<IconCalendarWeek size={18} />}
+      py="xs"
+    >
+      <Group justify="space-between" wrap="nowrap" gap="sm">
+        <Text size="sm">
+          Choosing for{' '}
+          <Text span fw={700}>
+            {formatWeekRange(week.week_start)}
+          </Text>
+          {' · '}
+          {count}/{limit} recipes
+          {skipped ? ' · this week is skipped' : ''}
+        </Text>
+        <Group gap="xs" wrap="nowrap">
+          {skipped && (
+            <Button size="compact-xs" color="orange" loading={planPending} onClick={onPlanAnyway}>
+              Plan it anyway
+            </Button>
+          )}
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            component={Link}
+            to="/"
+            leftSection={<IconCheck size={14} />}
+          >
+            Done
+          </Button>
+        </Group>
+      </Group>
+    </Alert>
+  )
+}
+
 export default function BrowsePage() {
   const { filters, setScalar, setArray, toggleArrayValue, clearAll } = useFilters()
+  const [searchParams] = useSearchParams()
   const rowSize = useBrowseRowSize()
   const {
     upcomingWeekStart,
@@ -73,9 +129,16 @@ export default function BrowsePage() {
     removeRecipeFromWeek,
     setRecipePortions,
   } = useWeeklyPlan()
+  const { data: schedule } = useSchedule()
+  const setSkipped = useSetWeekSkipped()
+  const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
+  // Before the schedule loads, fall back to the same week the plan has always
+  // defaulted to, so the page is never briefly editing nothing.
+  const weekStart = targetWeek?.week_start ?? upcomingWeekStart
+  const recipesPerWeek = schedule?.settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
   const { data: facets } = useFacets()
-  const upcomingRecipes = getWeekRecipes(upcomingWeekStart)
-  const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
+  const upcomingRecipes = getWeekRecipes(weekStart)
+  const upcomingWeekFull = upcomingRecipes.length >= recipesPerWeek
   const selectedRecipeIds = useMemo(
     () => upcomingRecipes.map((entry) => entry.recipe.id),
     [upcomingRecipes],
@@ -138,7 +201,7 @@ export default function BrowsePage() {
   const loadingTiles = Array.from({ length: firstPageSize })
 
   function renderRecipeCard(recipe) {
-    const plannerEntry = getRecipeEntry(recipe.id, upcomingWeekStart)
+    const plannerEntry = getRecipeEntry(recipe.id, weekStart)
     const perPortionCost =
       bestFitActive && !plannerEntry && recipe.marginal_cost != null
         ? recipe.marginal_cost / DEFAULT_PORTIONS
@@ -164,11 +227,9 @@ export default function BrowsePage() {
         basketAvailable={bestFitActive && !plannerEntry ? recipe.basket_available : true}
         plannerEntry={plannerEntry}
         plannerDisabled={!plannerEntry && upcomingWeekFull}
-        onAddToPlan={() => addRecipeToWeek(recipe, upcomingWeekStart)}
-        onRemoveFromPlan={() => removeRecipeFromWeek(upcomingWeekStart, recipe.id)}
-        onPortionsChange={(portions) =>
-          setRecipePortions(upcomingWeekStart, recipe.id, portions)
-        }
+        onAddToPlan={() => addRecipeToWeek(recipe, weekStart, { limit: recipesPerWeek })}
+        onRemoveFromPlan={() => removeRecipeFromWeek(weekStart, recipe.id)}
+        onPortionsChange={(portions) => setRecipePortions(weekStart, recipe.id, portions)}
       />
     )
   }
@@ -206,6 +267,17 @@ export default function BrowsePage() {
       </Box>
 
       <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
+        <EditingWeekBar
+          week={targetWeek}
+          count={upcomingRecipes.length}
+          limit={recipesPerWeek}
+          skipped={Boolean(targetWeek?.skipped)}
+          planPending={setSkipped.isPending}
+          onPlanAnyway={() =>
+            setSkipped.mutate({ weekStart: targetWeek.week_start, skipped: false })
+          }
+        />
+
         <Group justify="space-between" wrap="nowrap">
           <Group gap="sm">
             <Button
