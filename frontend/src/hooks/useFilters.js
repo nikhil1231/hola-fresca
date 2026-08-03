@@ -125,11 +125,14 @@ export function useFilters() {
   const clearAll = useCallback(() => {
     setSearchParams((prev) => {
       const next = new URLSearchParams()
-      // Preserve sort + search; clear only the facet filters.
+      // Preserve sort + search + the week being edited; clear only the facet
+      // filters. Dropping the week would quietly move the adds to another one.
       const q = prev.get('q')
       const sort = prev.get('sort')
+      const week = prev.get('week')
       if (q) next.set('q', q)
       if (sort) next.set('sort', sort)
+      if (week) next.set('week', week)
       return next
     })
   }, [setSearchParams])

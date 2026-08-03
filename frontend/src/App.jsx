@@ -7,6 +7,8 @@ const PAGE_LAST_UPDATED =
   typeof __PAGE_LAST_UPDATED__ === 'undefined' ? {} : __PAGE_LAST_UPDATED__
 
 function pageMetaForPath(pathname) {
+  if (pathname === '/') return PAGE_LAST_UPDATED.home
+  if (pathname === '/settings') return PAGE_LAST_UPDATED.settings
   if (pathname === '/dashboard') return PAGE_LAST_UPDATED.basket
   if (pathname === '/basket') return PAGE_LAST_UPDATED.basket
   if (pathname === '/cuisines') return PAGE_LAST_UPDATED.cuisines

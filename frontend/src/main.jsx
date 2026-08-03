@@ -12,7 +12,9 @@ import App from './App.jsx'
 import BasketPage from './routes/BasketPage.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
 import CuisinesPage from './routes/CuisinesPage.jsx'
+import HomePage from './routes/HomePage.jsx'
 import RecipeDetailPage from './routes/RecipeDetailPage.jsx'
+import SettingsPage from './routes/SettingsPage.jsx'
 import MappingAliasesPage from './routes/MappingAliasesPage.jsx'
 import MappingManualPage from './routes/MappingManualPage.jsx'
 import MappingPage from './routes/MappingPage.jsx'
@@ -32,10 +34,12 @@ createRoot(document.getElementById('root')).render(
         <BrowserRouter>
           <Routes>
             <Route element={<App />}>
-              <Route index element={<BrowsePage />} />
+              <Route index element={<HomePage />} />
+              <Route path="browse" element={<BrowsePage />} />
               <Route path="dashboard" element={<BasketPage />} />
               <Route path="basket" element={<BasketPage />} />
               <Route path="cuisines" element={<CuisinesPage />} />
+              <Route path="settings" element={<SettingsPage />} />
               <Route path="recipes/:id" element={<RecipeDetailPage />} />
               <Route path="mapping" element={<MappingPage />} />
               <Route path="mapping/aliases" element={<MappingAliasesPage />} />

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
   Alert,
@@ -29,6 +29,7 @@ import {
   IconAlertTriangle,
   IconArrowBackUp,
   IconArrowLeft,
+  IconCalendarWeek,
   IconChefHat,
   IconClock,
   IconDots,
@@ -57,10 +58,11 @@ import {
   useRecipeWishlist,
   useRevertRecipeEdits,
 } from '../hooks/useRecipeQueries.js'
+import { formatWeekRange, resolveTargetWeek, useSchedule } from '../hooks/useSchedule.js'
 import {
   DEFAULT_PORTIONS,
+  DEFAULT_RECIPES_PER_WEEK,
   MAX_PORTIONS,
-  MAX_RECIPES_PER_WEEK,
   MIN_PORTIONS,
   normalizeProtein,
   toPlannerSelections,
@@ -748,6 +750,7 @@ export default function RecipeDetailPage() {
   const { id } = useParams()
   const recipeId = Number(id)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { data: recipe, isLoading, isError } = useRecipe(id)
   const [servingsOverride, setServingsOverride] = useState(null)
   const {
@@ -762,12 +765,18 @@ export default function RecipeDetailPage() {
   // `undefined` means "not touched on this page", which is what lets a planned
   // recipe open showing the swap the week already holds.
   const [proteinOverride, setProteinOverride] = useState(undefined)
+  // Which week this page adds to: the one carried in from browse if there is
+  // one, otherwise whichever week the schedule says is being planned.
+  const { data: schedule } = useSchedule()
+  const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
+  const weekStart = targetWeek?.week_start ?? upcomingWeekStart
+  const recipesPerWeek = schedule?.settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
   const upcomingRecipes = useMemo(
-    () => getWeekRecipes(upcomingWeekStart),
-    [getWeekRecipes, upcomingWeekStart],
+    () => getWeekRecipes(weekStart),
+    [getWeekRecipes, weekStart],
   )
-  const plannerEntry = getRecipeEntry(recipeId, upcomingWeekStart)
-  const upcomingWeekFull = upcomingRecipes.length >= MAX_RECIPES_PER_WEEK
+  const plannerEntry = getRecipeEntry(recipeId, weekStart)
+  const upcomingWeekFull = upcomingRecipes.length >= recipesPerWeek
   // The servings control drives every number on the page. Seeded from the
   // planner so a recipe already in the week at six portions opens showing six —
   // it used to open at the default and price a six-portion basket beside a
@@ -829,7 +838,7 @@ export default function RecipeDetailPage() {
         <Alert color="red" title="Recipe not found">
           We couldn't find that recipe.
         </Alert>
-        <Button component={Link} to="/" variant="light" color="fresh" w="fit-content">
+        <Button component={Link} to="/browse" variant="light" color="fresh" w="fit-content">
           Back to recipes
         </Button>
       </Stack>
@@ -858,7 +867,7 @@ export default function RecipeDetailPage() {
   const applyProtein = (next) => {
     const value = normalizeProtein(next)
     setProteinOverride(value)
-    if (plannerEntry) setRecipeProtein(upcomingWeekStart, recipe.id, value)
+    if (plannerEntry) setRecipeProtein(weekStart, recipe.id, value)
   }
   const ingredientCosts = ingredientCostByKey(withRecipeBasket, recipe.id)
   // Two different questions, and the page shows both because neither alone is
@@ -933,18 +942,33 @@ export default function RecipeDetailPage() {
               <PlannerControls
                 entry={plannerEntry}
                 disabled={!plannerEntry && upcomingWeekFull}
-                onAdd={() => addRecipeToWeek(recipe, upcomingWeekStart, protein)}
-                onRemove={() => removeRecipeFromWeek(upcomingWeekStart, recipe.id)}
+                onAdd={() =>
+                  addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })
+                }
+                onRemove={() => removeRecipeFromWeek(weekStart, recipe.id)}
                 onPortionsChange={(portions) =>
-                  setRecipePortions(upcomingWeekStart, recipe.id, portions)
+                  setRecipePortions(weekStart, recipe.id, portions)
                 }
               />
+              {/* Which week the add lands in — the page is reachable from any of
+                  them, and the button alone does not say. */}
+              <Tooltip label="The week this adds to" withArrow>
+                <Badge
+                  color="gray"
+                  variant="light"
+                  radius="sm"
+                  size="lg"
+                  leftSection={<IconCalendarWeek size={13} />}
+                >
+                  {formatWeekRange(weekStart)}
+                </Badge>
+              </Tooltip>
               <RecipeOptionsMenu
                 pending={hideRecipe.isPending}
                 onHide={() => {
                   if (!window.confirm('Hide this recipe from the library?')) return
-                  removeRecipeFromWeek(upcomingWeekStart, recipe.id)
-                  hideRecipe.mutate(undefined, { onSuccess: () => navigate('/') })
+                  removeRecipeFromWeek(weekStart, recipe.id)
+                  hideRecipe.mutate(undefined, { onSuccess: () => navigate('/browse') })
                 }}
               />
               {marginalPerPortion != null && (

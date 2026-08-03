@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app import protein as protein_mod
+from app import schedule as schedule_mod
 
 
 class PersonalRatingIn(BaseModel):
@@ -804,3 +805,59 @@ class OcadoReserveIn(BaseModel):
 
 class OcadoReserveOut(BaseModel):
     raw: dict
+
+
+# --- Shopping schedule -------------------------------------------------------
+
+class ScheduleSettingsOut(BaseModel):
+    cadence_weeks: int
+    anchor_week_start: str
+    cutoff_days_before: int
+    cutoff_time: str
+    paused: bool
+    horizon_weeks: int
+    recipes_per_week: int
+    default_portions: int
+
+
+class ScheduleSettingsIn(BaseModel):
+    """A partial update: anything omitted keeps its current value."""
+
+    cadence_weeks: int | None = Field(
+        default=None, ge=schedule_mod.MIN_CADENCE_WEEKS, le=schedule_mod.MAX_CADENCE_WEEKS
+    )
+    anchor_week_start: str | None = None
+    cutoff_days_before: int | None = Field(
+        default=None, ge=0, le=schedule_mod.MAX_CUTOFF_DAYS_BEFORE
+    )
+    cutoff_time: str | None = None
+    paused: bool | None = None
+    horizon_weeks: int | None = Field(
+        default=None, ge=schedule_mod.MIN_HORIZON_WEEKS, le=schedule_mod.MAX_HORIZON_WEEKS
+    )
+    recipes_per_week: int | None = Field(default=None, ge=1, le=14)
+    default_portions: int | None = Field(default=None, ge=1, le=8)
+
+
+class ScheduleWeekOut(BaseModel):
+    week_start: str
+    # Naive local wall-clock, deliberately — see app.schedule.
+    cutoff_at: str
+    status: Literal["open", "closed", "skipped", "paused"]
+    skipped: bool
+    closed: bool
+    is_active: bool
+
+
+class ScheduleOut(BaseModel):
+    settings: ScheduleSettingsOut
+    weeks: list[ScheduleWeekOut] = Field(default_factory=list)
+    active_week_start: str | None = None
+    # Where "now" sits for the caller, so a client can count down to a cutoff
+    # against the same clock that decided which weeks are closed.
+    now: str
+
+
+class ScheduleWeekIn(BaseModel):
+    skipped: bool
+    note: str | None = None

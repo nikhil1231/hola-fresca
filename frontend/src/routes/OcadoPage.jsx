@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
@@ -28,6 +29,7 @@ import {
 import { usePlannerBasket } from '../hooks/useRecipeQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
+import { resolveTargetWeek, useSchedule } from '../hooks/useSchedule.js'
 import { formatWeekLabel, toPlannerSelections, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 import {
   useOcadoAccounts,
@@ -513,9 +515,16 @@ function PushSummary({ result }) {
 
 export default function OcadoPage() {
   const { upcomingWeekStart, getWeekRecipes } = useWeeklyPlan()
-  const { ownedItemKeys, ownedItemKeySet } = useOwnedBasketItems(upcomingWeekStart)
-  const { packOverrides } = useWeekPackChoices(upcomingWeekStart)
-  const entries = getWeekRecipes(upcomingWeekStart)
+  const [searchParams] = useSearchParams()
+  const { data: schedule } = useSchedule()
+  // The week being pushed is the one the schedule says is being planned - not
+  // simply the next one, which after a skip or a passed cutoff is not the same
+  // thing. An explicit ?week= wins, so a link from Home pushes what it says.
+  const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
+  const weekStart = targetWeek?.week_start ?? upcomingWeekStart
+  const { ownedItemKeys, ownedItemKeySet } = useOwnedBasketItems(weekStart)
+  const { packOverrides } = useWeekPackChoices(weekStart)
+  const entries = getWeekRecipes(weekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
   const planner = usePlannerBasket(selections, packOverrides)
   const accounts = useOcadoAccounts()
@@ -607,7 +616,7 @@ export default function OcadoPage() {
             <Title order={2}>Ocado</Title>
           </Group>
           <Text c="dimmed">
-            Push {entries.length} recipes for {formatWeekLabel(upcomingWeekStart)}, then reserve a slot.
+            Push {entries.length} recipes for {formatWeekLabel(weekStart)}, then reserve a slot.
           </Text>
         </div>
         <Group gap="sm" align="center">
@@ -750,7 +759,7 @@ export default function OcadoPage() {
                         selections,
                         ownedItemKeys,
                         packOverrides,
-                        weekStart: upcomingWeekStart,
+                        weekStart,
                       })
                     }
                   >

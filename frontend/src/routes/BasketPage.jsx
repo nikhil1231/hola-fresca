@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
   Alert,
@@ -44,9 +45,10 @@ import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
 import { usePackPreference, usePlannerBasket } from '../hooks/useRecipeQueries.js'
+import { resolveTargetWeek, useSchedule } from '../hooks/useSchedule.js'
 import {
+  DEFAULT_RECIPES_PER_WEEK,
   formatWeekLabel,
-  MAX_RECIPES_PER_WEEK,
   toPlannerSelections,
   useWeeklyPlan,
 } from '../hooks/useWeeklyPlan.js'
@@ -656,7 +658,29 @@ export default function BasketPage() {
     removeRecipeFromWeek,
     setRecipePortions,
   } = useWeeklyPlan()
-  const [weekStart, setWeekStart] = useState(upcomingWeekStart)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { data: schedule } = useSchedule()
+  // The week lives in the URL, so a "Basket" link from Home opens the week it
+  // was clicked for and the page stays linkable.
+  const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
+  const weekStart = targetWeek?.week_start ?? upcomingWeekStart
+  const recipesPerWeek = schedule?.settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
+  const setWeekStart = useCallback(
+    (value) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('week', value)
+        return next
+      })
+    },
+    [setSearchParams],
+  )
+  // Scheduled weeks first, then any week still holding recipes that the current
+  // cadence no longer lands on — those baskets are real and still need opening.
+  const weekOptions = useMemo(() => {
+    const scheduled = (schedule?.weeks ?? []).map((week) => week.week_start)
+    return [...new Set([...scheduled, ...weekStarts])].sort()
+  }, [schedule?.weeks, weekStarts])
   const [openLineKey, setOpenLineKey] = useState(null)
   const [activeLineKey, setActiveLineKey] = useState(null)
   const [hoverLineKey, setHoverLineKey] = useState(null)
@@ -670,10 +694,6 @@ export default function BasketPage() {
   const [packScope, setPackScope] = useState('week')
   const recipesScrollRef = useRef(null)
   const recipeRefs = useRef(new Map())
-
-  useEffect(() => {
-    if (!weekStarts.includes(weekStart)) setWeekStart(upcomingWeekStart)
-  }, [upcomingWeekStart, weekStart, weekStarts])
 
   const entries = getWeekRecipes(weekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
@@ -811,7 +831,7 @@ export default function BasketPage() {
         <Select
           value={weekStart}
           onChange={(value) => value && setWeekStart(value)}
-          data={weekStarts.map((start) => ({ value: start, label: formatWeekLabel(start) }))}
+          data={weekOptions.map((start) => ({ value: start, label: formatWeekLabel(start) }))}
           allowDeselect={false}
           radius="md"
           w={{ base: 220, sm: 300 }}
@@ -826,7 +846,7 @@ export default function BasketPage() {
               Recipes
             </Title>
             <Text size="sm" c="dimmed">
-              {entries.length}/{MAX_RECIPES_PER_WEEK}
+              {entries.length}/{recipesPerWeek}
             </Text>
           </Group>
           {entries.length === 0 ? (

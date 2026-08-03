@@ -567,6 +567,63 @@ class OcadoCartLedger(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class PlanSettings(Base):
+    """The shopping rhythm, as one row (single-user app, one household).
+
+    Only the *shape* of the schedule lives here — how often a shop happens, when
+    its recipe list has to be settled, and whether the whole thing is paused. The
+    recipes chosen for a given week stay client-side with the rest of the plan;
+    this table is what a future unattended job would need in order to know which
+    week it is buying for and when it is too late to change it.
+    """
+
+    __tablename__ = "plan_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # How many weeks between shops. 1 = every week, 2 = fortnightly.
+    cadence_weeks: Mapped[int] = mapped_column(Integer, default=1)
+    # The week the cadence counts from, so a fortnightly rhythm keeps its phase
+    # instead of re-basing on whatever week the settings were last opened in.
+    # Always a week-start date (Monday).
+    anchor_week_start: Mapped[str] = mapped_column(String(16))
+
+    # The deadline for settling a week's recipes, as an offset back from the week
+    # itself: 2 days before at 18:00 is "the Saturday evening before". Stored
+    # relative rather than absolute so it applies to every week without a row.
+    cutoff_days_before: Mapped[int] = mapped_column(Integer, default=2)
+    cutoff_time: Mapped[str] = mapped_column(String(5), default="18:00")
+
+    # Stops the whole schedule: no week is active, nothing is due.
+    paused: Mapped[bool] = mapped_column(Integer, default=0)
+
+    # How many upcoming shops the planner shows at once.
+    horizon_weeks: Mapped[int] = mapped_column(Integer, default=6)
+    # Targets for a single week, used by the UI rather than enforced here.
+    recipes_per_week: Mapped[int] = mapped_column(Integer, default=5)
+    default_portions: Mapped[int] = mapped_column(Integer, default=4)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PlanWeek(Base):
+    """A per-week departure from the rhythm — currently only "skip this one".
+
+    Absent means "as the cadence says", so an untouched schedule stores nothing.
+    """
+
+    __tablename__ = "plan_weeks"
+    __table_args__ = (UniqueConstraint("week_start", name="uq_plan_week_start"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    week_start: Mapped[str] = mapped_column(String(16), index=True)
+    skipped: Mapped[bool] = mapped_column(Integer, default=0)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class IngredientMappingProduct(Base):
     """A candidate product for an ingredient mapping, with the accept decision."""
 

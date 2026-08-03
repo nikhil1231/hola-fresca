@@ -26,7 +26,7 @@ export default function CuisinesPage() {
             <Paper
               key={cuisine.value}
               component={Link}
-              to={`/?cuisine=${encodeURIComponent(cuisine.value)}`}
+              to={`/browse?cuisine=${encodeURIComponent(cuisine.value)}`}
               radius="md"
               className={classes.tile}
               p="lg"
