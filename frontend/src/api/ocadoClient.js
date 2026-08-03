@@ -57,6 +57,7 @@ export function pushOcadoBasket({
   selections,
   ownedItemKeys = [],
   packOverrides = {},
+  snapOverrides = {},
   weekStart = null,
 }) {
   return postJSON('/api/ocado/basket/push', {
@@ -64,6 +65,7 @@ export function pushOcadoBasket({
     selections,
     owned_item_keys: ownedItemKeys,
     pack_overrides: packOverrides,
+    snap_overrides: snapOverrides,
     week_start: weekStart,
   })
 }
@@ -71,19 +73,20 @@ export function pushOcadoBasket({
 // What a push would change, without changing it. The cart is shared with the
 // rest of your shopping and a sync can now remove things, so this is what makes
 // the button safe to press: it names what of yours gets left alone.
-export function planOcadoBasket({ accountId, selections, ownedItemKeys = [], packOverrides = {} }) {
+export function planOcadoBasket({ accountId, selections, ownedItemKeys = [], packOverrides = {}, snapOverrides = {} }) {
   return postJSON('/api/ocado/basket/plan', {
     account_id: accountId,
     selections,
     owned_item_keys: ownedItemKeys,
     pack_overrides: packOverrides,
+    snap_overrides: snapOverrides,
   })
 }
 
 // Re-reads stock and price for every product this basket could be covered from.
 // Needs no Ocado login, so the basket page can offer it unconditionally.
-export function refreshOcadoStock({ selections, packOverrides = {} }) {
-  return postJSON('/api/ocado/stock/refresh', { selections, pack_overrides: packOverrides })
+export function refreshOcadoStock({ selections, packOverrides = {}, snapOverrides = {} }) {
+  return postJSON('/api/ocado/stock/refresh', { selections, pack_overrides: packOverrides, snap_overrides: snapOverrides })
 }
 
 export function fetchOcadoBasket(accountId) {

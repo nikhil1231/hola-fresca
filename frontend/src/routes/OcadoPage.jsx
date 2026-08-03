@@ -514,10 +514,10 @@ function PushSummary({ result }) {
 export default function OcadoPage() {
   const { upcomingWeekStart, getWeekRecipes } = useWeeklyPlan()
   const { ownedItemKeys, ownedItemKeySet } = useOwnedBasketItems(upcomingWeekStart)
-  const { packOverrides } = useWeekPackChoices(upcomingWeekStart)
+  const { packOverrides, snapOverrides } = useWeekPackChoices(upcomingWeekStart)
   const entries = getWeekRecipes(upcomingWeekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
-  const planner = usePlannerBasket(selections, packOverrides)
+  const planner = usePlannerBasket(selections, packOverrides, snapOverrides)
   const accounts = useOcadoAccounts()
   const [accountId, setAccountId] = useState(() =>
     window.localStorage.getItem(ACCOUNT_STORAGE_KEY) || null,
@@ -537,7 +537,7 @@ export default function OcadoPage() {
   const push = useOcadoPush(accountId)
   const basket = useOcadoBasket(accountId, { enabled: status.data?.status === 'ready' })
   const plan = useOcadoPushPlan(
-    { accountId, selections, ownedItemKeys, packOverrides },
+    { accountId, selections, ownedItemKeys, packOverrides, snapOverrides },
     { enabled: status.data?.status === 'ready' },
   )
   const [otpCode, setOtpCode] = useState('')
@@ -750,6 +750,7 @@ export default function OcadoPage() {
                         selections,
                         ownedItemKeys,
                         packOverrides,
+                        snapOverrides,
                         weekStart: upcomingWeekStart,
                       })
                     }

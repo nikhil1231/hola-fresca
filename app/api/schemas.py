@@ -338,6 +338,8 @@ class BasketIn(BaseModel):
     #: ``{ingredient_key: sku}`` chosen for this week only. Held by the client
     #: alongside the week itself, so it costs no write and expires with it.
     pack_overrides: dict[str, str] = Field(default_factory=dict)
+    #: Ingredient keys deliberately cooked a little short to avoid another pack.
+    snap_overrides: dict[str, bool] = Field(default_factory=dict)
 
 
 class BasketPackChoiceOut(BaseModel):
@@ -414,6 +416,13 @@ class BasketContributionOut(BaseModel):
     quantity_unit: str = "g"
 
 
+class BasketSnapOut(BaseModel):
+    original_need_g: float
+    snapped_need_g: float
+    reduction_pct: float
+    saving_gbp: float
+
+
 class BasketLineOut(BaseModel):
     key: str
     name: str
@@ -435,6 +444,8 @@ class BasketLineOut(BaseModel):
     options: list[BasketPackOptionOut] = Field(default_factory=list)
     choices: list[BasketPackChoiceOut] = Field(default_factory=list)
     contributions: list[BasketContributionOut] = Field(default_factory=list)
+    snap: BasketSnapOut | None = None
+    snapped: bool = False
 
 
 class BasketOut(BaseModel):

@@ -284,6 +284,29 @@
   ) !important;
 }
 
+/* An enabled snap is a state, not another direction to choose: the check makes
+   that obvious at a glance, while the idle down arrow stays deliberately quiet. */
+.packSnapEnabled {
+  --ai-color: light-dark(var(--mantine-color-green-7), var(--mantine-color-green-5)) !important;
+  --ai-hover-color: light-dark(var(--mantine-color-green-8), var(--mantine-color-green-4)) !important;
+  --ai-bg: light-dark(
+    var(--mantine-color-green-0),
+    color-mix(in srgb, var(--mantine-color-green-9) 32%, transparent)
+  ) !important;
+  --ai-hover: light-dark(
+    var(--mantine-color-green-1),
+    color-mix(in srgb, var(--mantine-color-green-9) 48%, transparent)
+  ) !important;
+}
+
+/* Available is visible enough to invite a click, but has no filled treatment:
+   the check-and-fill combination remains reserved for the selected state. */
+.packSnapAvailable {
+  --ai-color: light-dark(var(--mantine-color-fresh-7), var(--mantine-color-fresh-5)) !important;
+  --ai-hover-color: light-dark(var(--mantine-color-fresh-8), var(--mantine-color-fresh-4)) !important;
+  --ai-hover: light-dark(var(--mantine-color-fresh-0), color-mix(in srgb, var(--mantine-color-fresh-9) 22%, transparent)) !important;
+}
+
 /* Two sizes, side by side, pick one. The comparison is the interface, so the
    cards are equal width and only the figures that decide it are on them. */
 .packCard {

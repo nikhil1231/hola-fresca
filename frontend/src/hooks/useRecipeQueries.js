@@ -72,10 +72,10 @@ export function useRecipeSuggestions(
   })
 }
 
-export function usePlannerBasket(selections, packOverrides = {}) {
+export function usePlannerBasket(selections, packOverrides = {}, snapOverrides = {}) {
   return useQuery({
-    queryKey: ['planner-basket', selections, packOverrides],
-    queryFn: () => fetchPlannerBasket(selections, packOverrides),
+    queryKey: ['planner-basket', selections, packOverrides, snapOverrides],
+    queryFn: () => fetchPlannerBasket(selections, packOverrides, snapOverrides),
     // A week's pack choice re-prices the same basket, so keep the previous
     // answer on screen while the new one lands instead of blanking the table.
     placeholderData: (previous) => previous,

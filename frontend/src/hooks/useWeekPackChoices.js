@@ -7,8 +7,9 @@ const STORAGE_KEY = 'hola-fresca.week-pack-choices.v1'
 // bag once is not the same decision as always buying it, and it should cost
 // nothing and expire on its own.
 function normalize(value) {
-  if (!value || typeof value !== 'object') return { weeks: {} }
+  if (!value || typeof value !== 'object') return { weeks: {}, snaps: {} }
   const weeks = {}
+  const snaps = {}
   for (const [weekStart, choices] of Object.entries(value.weeks ?? {})) {
     if (!choices || typeof choices !== 'object') continue
     const clean = {}
@@ -17,15 +18,20 @@ function normalize(value) {
     }
     if (Object.keys(clean).length) weeks[weekStart] = clean
   }
-  return { weeks }
+  for (const [weekStart, choices] of Object.entries(value.snaps ?? {})) {
+    if (!choices || typeof choices !== 'object') continue
+    const clean = Object.fromEntries(Object.entries(choices).filter(([key, enabled]) => key && enabled === true))
+    if (Object.keys(clean).length) snaps[weekStart] = clean
+  }
+  return { weeks, snaps }
 }
 
 function read() {
-  if (typeof window === 'undefined') return { weeks: {} }
+  if (typeof window === 'undefined') return { weeks: {}, snaps: {} }
   try {
     return normalize(JSON.parse(window.localStorage.getItem(STORAGE_KEY)))
   } catch {
-    return { weeks: {} }
+    return { weeks: {}, snaps: {} }
   }
 }
 
@@ -47,6 +53,7 @@ export function useWeekPackChoices(weekStart) {
   }, [])
 
   const packOverrides = useMemo(() => state.weeks[weekStart] ?? {}, [state.weeks, weekStart])
+  const snapOverrides = useMemo(() => state.snaps[weekStart] ?? {}, [state.snaps, weekStart])
 
   const setWeekPack = useCallback(
     (ingredientKey, sku) => {
@@ -60,5 +67,14 @@ export function useWeekPackChoices(weekStart) {
     [weekStart],
   )
 
-  return { packOverrides, setWeekPack }
+  const setWeekSnap = useCallback((ingredientKey, enabled) => {
+    setState((current) => {
+      const week = { ...(current.snaps[weekStart] ?? {}) }
+      if (enabled) week[ingredientKey] = true
+      else delete week[ingredientKey]
+      return normalize({ ...current, snaps: { ...current.snaps, [weekStart]: week } })
+    })
+  }, [weekStart])
+
+  return { packOverrides, setWeekPack, snapOverrides, setWeekSnap }
 }

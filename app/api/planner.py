@@ -24,6 +24,7 @@ from app.api.schemas import (
     BasketOut,
     BasketPackChoiceOut,
     BasketPackOptionOut,
+    BasketSnapOut,
     BasketSubstitutionOut,
     PackPreferenceIn,
     PackPreferenceOut,
@@ -198,6 +199,16 @@ def _line_out(line: BasketLine) -> BasketLineOut:
             )
             for contribution in line.contributions
         ],
+        snap=(
+            BasketSnapOut(
+                original_need_g=round(line.snap.original_need_g, 1),
+                snapped_need_g=round(line.snap.snapped_need_g, 1),
+                reduction_pct=round(line.snap.reduction_pct, 1),
+                saving_gbp=_round_money(line.snap.saving_gbp),
+            )
+            if line.snap else None
+        ),
+        snapped=line.snapped,
     )
 
 
@@ -243,7 +254,9 @@ def basket(
 
     index = _load_planner_index(factory, recipe_ids, csv_path)
     selections = [_planner_selection(selection) for selection in body.selections]
-    return _basket_out(build_basket(index, selections, pack_overrides=body.pack_overrides))
+    return _basket_out(build_basket(
+        index, selections, pack_overrides=body.pack_overrides, snap_overrides=body.snap_overrides
+    ))
 
 
 @router.put("/preferences/pack", response_model=PackPreferenceOut)

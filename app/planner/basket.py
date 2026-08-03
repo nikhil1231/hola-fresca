@@ -473,6 +473,7 @@ BULK_MIN_UNIT_SAVING = 0.15  # a real difference in £/kg, not rounding
 BULK_MIN_SALVAGE = 0.65      # the remainder has to survive to be used
 BULK_MIN_RECIPE_PCT = 1.0    # and the ingredient has to come back: the top ~12%
 BULK_MAX_EXTRA_GBP = 3.00    # thrift you have to fund is not thrift
+SNAP_MAX_REDUCTION = 0.05    # enough to avoid another pack, not enough to distort a dish
 
 
 @dataclass(frozen=True, slots=True)
@@ -688,6 +689,16 @@ class BasketContribution:
 
 
 @dataclass(frozen=True, slots=True)
+class SnapOption:
+    """A small, explicit reduction which avoids buying another pack."""
+
+    original_need_g: float
+    snapped_need_g: float
+    reduction_pct: float
+    saving_gbp: float
+
+
+@dataclass(frozen=True, slots=True)
 class Demand:
     grams: float = 0.0
     units: float | None = None
@@ -705,6 +716,8 @@ class BasketLine:
     need_qty: float | None = None
     quantity_unit: str = "g"
     options: tuple[PackOption, ...] = ()
+    snap: SnapOption | None = None
+    snapped: bool = False
 
     @property
     def cost(self) -> float:
@@ -917,12 +930,53 @@ def score_basket(index: PlanIndex, selections: Iterable[Selection]) -> BasketSco
     )
 
 
+def _snap_option(
+    index: PlanIndex,
+    ingredient: Ingredient,
+    need_g: float,
+    need_units: float | None,
+    baseline: Cover | None,
+    override: str | None,
+) -> SnapOption | None:
+    """Find the nearest lower whole-pack quantity that saves a pack.
+
+    Snapping is deliberately conservative. It is for weighed ingredients only,
+    must remove at least one pack, and can trim at most five percent of the
+    week's combined demand. Counted ingredients are recipe instructions rather
+    than a quantity that can safely be shaved.
+    """
+    if ingredient.unit_kind == "count" or baseline is None or baseline.packs < 2 or need_g <= 0:
+        return None
+    candidates: list[SnapOption] = []
+    for pack in preferred_packs(ingredient, override=override):
+        for count in range(1, baseline.packs):
+            target = pack.capacity_g * count
+            if target >= need_g:
+                continue
+            reduction = (need_g - target) / need_g
+            if reduction > SNAP_MAX_REDUCTION:
+                continue
+            cover = cover_need(index, ingredient, target, need_units, override=override)
+            if cover is None or cover.packs >= baseline.packs or cover.cost >= baseline.cost:
+                continue
+            candidates.append(
+                SnapOption(
+                    original_need_g=need_g,
+                    snapped_need_g=target,
+                    reduction_pct=reduction * 100,
+                    saving_gbp=baseline.cost - cover.cost,
+                )
+            )
+    return max(candidates, key=lambda option: (option.snapped_need_g, option.saving_gbp), default=None)
+
+
 def build_basket(
     index: PlanIndex,
     selections: Iterable[Selection],
     *,
     include_staples: bool = False,
     pack_overrides: dict[str, str] | None = None,
+    snap_overrides: dict[str, bool] | None = None,
 ) -> Basket:
     """Price a week's recipes: one pack decision per canonical ingredient.
 
@@ -933,6 +987,7 @@ def build_basket(
     selections = list(selections)
     plan_size = len(selections)
     pack_overrides = pack_overrides or {}
+    snap_overrides = snap_overrides or {}
     needs, names, untracked, contributions = aggregate_needs(index, selections)
     basket = Basket(untracked_lines=untracked)
 
@@ -952,6 +1007,11 @@ def build_basket(
                 basket.unpriceable.append(label)
             continue
         override = pack_overrides.get(key)
+        baseline = cover_need(index, ingredient, demand.grams, demand.units, override=override)
+        snap = _snap_option(index, ingredient, demand.grams, demand.units, baseline, override)
+        snapped = bool(snap and snap_overrides.get(key))
+        if snapped:
+            demand = Demand(grams=snap.snapped_need_g, units=demand.units)
         cover = cover_need(index, ingredient, demand.grams, demand.units, override=override)
         line = BasketLine(
             key=key,
@@ -961,6 +1021,8 @@ def build_basket(
             unit_kind=ingredient.unit_kind,
             need_qty=round(demand.units, 3) if demand.units is not None else None,
             quantity_unit="unit" if ingredient.unit_kind == "count" else "g",
+            snap=snap,
+            snapped=snapped,
             contributions=tuple(
                 BasketContribution(
                     recipe_id=c.recipe_id,

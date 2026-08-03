@@ -28,6 +28,8 @@ import {
   IconBuildingStore,
   IconCalendarWeek,
   IconArrowRight,
+  IconArrowDown,
+  IconCircleCheck,
   IconChevronDown,
   IconChevronRight,
   IconClock,
@@ -409,6 +411,7 @@ function LineTable({
   setHoverLineKey,
   ownedItemKeySet,
   setItemOwned,
+  onToggleSnap,
 }) {
   if (!lines.length) return null
 
@@ -548,6 +551,25 @@ function LineTable({
                     <Table.Td>{formatMoney(line.cost)}</Table.Td>
                     <Table.Td>{formatMoney(line.waste_gbp)}</Table.Td>
                     <Table.Td className={classes.packSwapCell}>
+                      {line.snap && (
+                        <Tooltip label={line.snapped ? `Snapped to ${formatGrams(line.snap.snapped_need_g)} — click to undo` : `Snap to ${formatGrams(line.snap.snapped_need_g)} and save ${formatMoney(line.snap.saving_gbp)}`}>
+                          <ActionIcon
+                            variant="subtle"
+                            size="md"
+                            className={`${classes.packSwapButton} ${
+                              line.snapped ? classes.packSnapEnabled : classes.packSnapAvailable
+                            }`}
+                            aria-label={
+                              line.snapped
+                                ? `Snapping enabled for ${line.name}; click to undo`
+                                : `Snap ${line.name} to ${formatGrams(line.snap.snapped_need_g)}`
+                            }
+                            onClick={(event) => { event.stopPropagation(); onToggleSnap(line.key, !line.snapped) }}
+                          >
+                            {line.snapped ? <IconCircleCheck size={18} /> : <IconArrowDown size={17} />}
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
                       {(line.options?.length ?? 0) > 1 && (
                         <Tooltip label={upsize ? 'A bigger pack is cheaper per kilo' : 'Change pack size'}>
                           <ActionIcon
@@ -663,7 +685,7 @@ export default function BasketPage() {
   const [glowLineKey, setGlowLineKey] = useState(null)
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
   const { ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
-  const { packOverrides, setWeekPack } = useWeekPackChoices(weekStart)
+  const { packOverrides, setWeekPack, snapOverrides, setWeekSnap } = useWeekPackChoices(weekStart)
   const stockRefresh = useOcadoStockRefresh()
   const packPreference = usePackPreference()
   const [packLineKey, setPackLineKey] = useState(null)
@@ -677,7 +699,7 @@ export default function BasketPage() {
 
   const entries = getWeekRecipes(weekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
-  const { data, isLoading, isError, error } = usePlannerBasket(selections, packOverrides)
+  const { data, isLoading, isError, error } = usePlannerBasket(selections, packOverrides, snapOverrides)
   const onlineLines = useMemo(
     () => data?.lines?.filter((line) => !line.external) ?? [],
     [data?.lines],
@@ -890,7 +912,7 @@ export default function BasketPage() {
                 leftSection={<IconRefresh size={16} />}
                 loading={stockRefresh.isPending}
                 disabled={!selections.length}
-                onClick={() => stockRefresh.mutate({ selections, packOverrides })}
+                onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
               >
                 Refresh stock
               </Button>
@@ -998,6 +1020,7 @@ export default function BasketPage() {
                       setHoverLineKey={setHoverLineKey}
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
+                      onToggleSnap={setWeekSnap}
                       onOpenPacks={setPackLineKey}
                       busyPackKey={
                         packPreference.isPending ? packPreference.variables?.ingredientKey : null
@@ -1016,6 +1039,7 @@ export default function BasketPage() {
                       setHoverLineKey={setHoverLineKey}
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
+                      onToggleSnap={setWeekSnap}
                       onOpenPacks={setPackLineKey}
                       busyPackKey={
                         packPreference.isPending ? packPreference.variables?.ingredientKey : null

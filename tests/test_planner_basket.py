@@ -19,8 +19,10 @@ from app.planner import basket as B
 from app.planner import waste as W
 from app.planner.index import (
     Ingredient,
+    Need,
     Pack,
     PlanIndex,
+    PlanRecipe,
     derive_count_metadata,
     load_index,
 )
@@ -826,6 +828,32 @@ def test_a_mislabelled_gram_weight_is_not_read_as_a_count(factory, tmp_path):
         ).one()
         assert row.unit_kind == "mass"
         assert row.each_to_grams != 1.0
+
+
+def test_snap_down_avoids_a_second_pack_without_changing_the_recipe():
+    """500 g of chicken can safely become one 480 g pack, but only explicitly."""
+    key = "name:chicken"
+    index = PlanIndex(
+        ingredients={
+            key: Ingredient(
+                key=key, name="Chicken", pantry_staple=False,
+                packs=(Pack("chicken-480", "Chicken 480g", 480, 4.0, 0.0, 1, "exact"),),
+            )
+        },
+        recipes={
+            1: PlanRecipe(1, "Chicken dinner", 2, (Need(key, "Chicken", 500),)),
+        },
+    )
+
+    normal = B.build_basket(index, [B.Selection(1)])
+    snapped = B.build_basket(index, [B.Selection(1)], snap_overrides={key: True})
+
+    assert normal.lines[0].cost == 8.0
+    assert normal.lines[0].snap is not None
+    assert normal.lines[0].snap.snapped_need_g == 480
+    assert snapped.lines[0].snapped is True
+    assert snapped.lines[0].need_g == 480
+    assert snapped.lines[0].cost == 4.0
 
 
 def test_score_basket_agrees_with_build_basket(factory, tmp_path):

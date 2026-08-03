@@ -174,9 +174,10 @@ def _rebuild(
     csv_path: Path | None,
     selections: list[Selection],
     overrides: dict[str, str] | None = None,
+    snap_overrides: dict[str, bool] | None = None,
 ) -> tuple[PlanIndex, Basket]:
     index: PlanIndex = _load_planner_index(factory, recipe_ids, csv_path)
-    return index, build_basket(index, selections, pack_overrides=overrides)
+    return index, build_basket(index, selections, pack_overrides=overrides, snap_overrides=snap_overrides)
 
 
 def _refresh_basket_stock(
@@ -226,7 +227,7 @@ def stock_refresh(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)
+    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
     try:
         result = refresh_stock(factory, _candidate_skus(index, basket))
     except Exception as exc:  # noqa: BLE001
@@ -288,7 +289,7 @@ def plan(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    _, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)
+    _, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
     runtime, client = _client_for_body(body.account_id, injected_client)
     ledger = read_ledger(factory, account_id=runtime.account.id)
     try:
@@ -321,19 +322,19 @@ def push(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)
+    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
 
     # Check the shelves before filling the trolley. The write-back moves the
     # database file, which is what makes the rebuild below see the new stock and
     # cover around anything that has sold out since the last scrape.
     _refresh_basket_stock(factory, index, basket)
-    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)
+    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
 
     def recover(skus: list[str]) -> Basket | None:
         """Believe the cart over the catalogue, then cover the week again."""
         if not mark_unavailable(factory, skus):
             return None
-        return _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides)[1]
+        return _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)[1]
 
     with _PUSH_LOCK:
         runtime, client = _client_for_body(body.account_id, injected_client)
