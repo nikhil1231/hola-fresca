@@ -87,3 +87,11 @@ def test_forgetting_the_ledger_returns_to_a_first_run(factory):
 
     reset = read_ledger(factory)
     assert (reset.synced, reset.quantities) == (False, {})
+
+
+def test_ledgers_are_isolated_by_account(factory):
+    write_ledger(factory, _ledger(LedgerLine(sku="home", quantity=2)), account_id="home")
+    write_ledger(factory, _ledger(LedgerLine(sku="work", quantity=1)), account_id="work")
+
+    assert read_ledger(factory, account_id="home").quantities == {"home": 2}
+    assert read_ledger(factory, account_id="work").quantities == {"work": 1}

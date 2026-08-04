@@ -24,6 +24,7 @@ from app.api.schemas import (
     OcadoAccountOut,
     OcadoAccountsOut,
     OcadoBasketOut,
+    OcadoCheckoutItemOut,
     OcadoLoginOut,
     OcadoOtpIn,
     OcadoPushPlanOut,
@@ -36,6 +37,7 @@ from app.api.schemas import (
     OcadoSwapOut,
     PushLineOut,
 )
+from app.api.schedule import pack_shortfall_tolerance_pct
 from app.db.models import Product
 from app.ocado.availability import mark_unavailable, refresh_stock
 from app.ocado.client import OcadoClient
@@ -46,7 +48,7 @@ from app.ocado.session import (
     get_shared_session,
     list_account_runtimes,
 )
-from app.ocado.sync import PushLine, plan_push, push_basket
+from app.ocado.sync import PushLine, basket_targets, cart_quantities, plan_push, push_basket
 from app.planner.basket import Basket, Selection, build_basket
 from app.planner.index import PlanIndex
 
@@ -175,9 +177,16 @@ def _rebuild(
     selections: list[Selection],
     overrides: dict[str, str] | None = None,
     snap_overrides: dict[str, bool] | None = None,
+    shortfall_tolerance_pct: float = 10.0,
 ) -> tuple[PlanIndex, Basket]:
     index: PlanIndex = _load_planner_index(factory, recipe_ids, csv_path)
-    return index, build_basket(index, selections, pack_overrides=overrides, snap_overrides=snap_overrides)
+    return index, build_basket(
+        index,
+        selections,
+        pack_overrides=overrides,
+        snap_overrides=snap_overrides,
+        pack_shortfall_tolerance_pct=shortfall_tolerance_pct,
+    )
 
 
 def _refresh_basket_stock(
@@ -227,7 +236,11 @@ def stock_refresh(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
+    tolerance = pack_shortfall_tolerance_pct(session)
+    index, basket = _rebuild(
+        factory, recipe_ids, csv_path, selections, body.pack_overrides,
+        body.snap_overrides, tolerance,
+    )
     try:
         result = refresh_stock(factory, _candidate_skus(index, basket))
     except Exception as exc:  # noqa: BLE001
@@ -271,6 +284,162 @@ def _out_lines(
     ]
 
 
+def _cart_view_items(payload: object) -> dict[str, dict]:
+    """Index the product rows in the cart-view response by SKU."""
+    if not isinstance(payload, dict):
+        return {}
+    groups = payload.get("checkoutGroups")
+    if not isinstance(groups, dict):
+        return {}
+    indexed: dict[str, dict] = {}
+    for checkout_group in groups.get("assignedCheckoutGroups") or []:
+        if not isinstance(checkout_group, dict):
+            continue
+        for item_group in checkout_group.get("itemGroups") or []:
+            if not isinstance(item_group, dict):
+                continue
+            for item in item_group.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                sku = item.get("productId")
+                if isinstance(sku, str) and sku:
+                    indexed[sku] = item
+    return indexed
+
+
+def _amount(value: object) -> float | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return float(value.get("amount"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _live_line_cost(item: dict) -> float | None:
+    total_prices = item.get("totalPrices")
+    if isinstance(total_prices, dict):
+        total = _amount(total_prices.get("finalPrice"))
+        if total is not None:
+            return total
+
+    unit = _amount(item.get("finalPrice"))
+    if unit is None:
+        product_prices = item.get("productPrices")
+        if isinstance(product_prices, dict):
+            unit = _amount(product_prices.get("finalPrice"))
+    if unit is None:
+        return None
+    try:
+        return unit * int(item.get("quantity", 0))
+    except (TypeError, ValueError):
+        return None
+
+
+def _checkout_items(
+    factory: sessionmaker[Session],
+    basket: Basket,
+    ledger,
+    cart_payload: dict,
+    *,
+    owned_item_keys: set[str],
+) -> list[OcadoCheckoutItemOut]:
+    """Normalize the target, ledger and live cart into display-ready rows."""
+    targets, target_names, _, _ = basket_targets(
+        basket, owned_item_keys=owned_item_keys
+    )
+    ledger_quantities = ledger.quantities
+    skus = set(targets) | set(ledger_quantities)
+    if not skus:
+        return []
+
+    planned: dict[str, dict] = {}
+    for line in basket.lines:
+        if line.key in owned_item_keys or line.external or line.cover is None:
+            continue
+        for choice in line.cover.choices:
+            planned.setdefault(
+                choice.pack.sku,
+                {
+                    "name": choice.pack.product_name,
+                    "url": choice.pack.url,
+                    "pack_size_raw": choice.pack.pack_size_raw,
+                    "price": choice.pack.price,
+                },
+            )
+
+    with factory() as session:
+        products = {
+            product.sku: product
+            for product in session.execute(
+                select(Product)
+                .where(Product.retailer == "ocado")
+                .where(Product.sku.in_(skus))
+            ).scalars()
+        }
+
+    cart_items = _cart_view_items(cart_payload)
+    cart = cart_quantities(cart_payload)
+    ledger_lines = {line.sku: line for line in ledger.lines}
+    rows: list[OcadoCheckoutItemOut] = []
+    for sku in skus:
+        desired = targets.get(sku, 0)
+        synced = ledger_quantities.get(sku, 0)
+        current = cart.get(sku, 0)
+        if not ledger.synced:
+            status = "not_synced"
+        elif desired != synced:
+            status = "changed"
+        elif current < synced:
+            status = "deleted"
+        elif current > synced:
+            status = "extra"
+        else:
+            status = "synced"
+
+        product = products.get(sku)
+        plan = planned.get(sku, {})
+        ledger_line = ledger_lines.get(sku)
+        name = (
+            plan.get("name")
+            or (product.name if product else None)
+            or (ledger_line.name if ledger_line else None)
+            or target_names.get(sku)
+            or sku
+        )
+        live_cost = _live_line_cost(cart_items[sku]) if sku in cart_items else None
+        if live_cost is not None:
+            cost = live_cost
+            cost_source = "live"
+        elif current == 0 and desired == 0:
+            cost = 0.0
+            cost_source = "live"
+        else:
+            price = plan.get("price")
+            if price is None and product is not None:
+                price = product.price
+            cost = (price or 0.0) * desired
+            cost_source = "planned"
+
+        rows.append(
+            OcadoCheckoutItemOut(
+                sku=sku,
+                name=name,
+                url=plan.get("url") or (product.url if product else None),
+                pack_size_raw=plan.get("pack_size_raw")
+                or (product.pack_size_raw if product else None),
+                desired_quantity=desired,
+                synced_quantity=synced,
+                cart_quantity=current,
+                cost=_round_money(cost),
+                cost_source=cost_source,
+                status=status,
+            )
+        )
+
+    return sorted(rows, key=lambda row: (row.desired_quantity == 0, row.name.casefold(), row.sku))
+
+
 @router.post("/basket/plan", response_model=OcadoPushPlanOut)
 def plan(
     body: BasketIn,
@@ -289,12 +458,22 @@ def plan(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    _, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
+    tolerance = pack_shortfall_tolerance_pct(session)
+    _, basket = _rebuild(
+        factory, recipe_ids, csv_path, selections, body.pack_overrides,
+        body.snap_overrides, tolerance,
+    )
     runtime, client = _client_for_body(body.account_id, injected_client)
     ledger = read_ledger(factory, account_id=runtime.account.id)
+    owned_item_keys = set(body.owned_item_keys)
     try:
+        cart_payload = client.cart_view()
         result = plan_push(
-            client, basket, ledger=ledger, owned_item_keys=set(body.owned_item_keys)
+            client,
+            basket,
+            ledger=ledger,
+            owned_item_keys=owned_item_keys,
+            cart_payload=cart_payload,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado basket plan failed: {exc}") from exc
@@ -308,6 +487,13 @@ def plan(
         synced=ledger.synced,
         synced_at=ledger.synced_at,
         synced_week_start=ledger.week_start,
+        checkout_items=_checkout_items(
+            factory,
+            basket,
+            ledger,
+            cart_payload,
+            owned_item_keys=owned_item_keys,
+        ),
     )
 
 
@@ -322,19 +508,29 @@ def push(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
+    tolerance = pack_shortfall_tolerance_pct(session)
+    index, basket = _rebuild(
+        factory, recipe_ids, csv_path, selections, body.pack_overrides,
+        body.snap_overrides, tolerance,
+    )
 
     # Check the shelves before filling the trolley. The write-back moves the
     # database file, which is what makes the rebuild below see the new stock and
     # cover around anything that has sold out since the last scrape.
     _refresh_basket_stock(factory, index, basket)
-    index, basket = _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)
+    index, basket = _rebuild(
+        factory, recipe_ids, csv_path, selections, body.pack_overrides,
+        body.snap_overrides, tolerance,
+    )
 
     def recover(skus: list[str]) -> Basket | None:
         """Believe the cart over the catalogue, then cover the week again."""
         if not mark_unavailable(factory, skus):
             return None
-        return _rebuild(factory, recipe_ids, csv_path, selections, body.pack_overrides, body.snap_overrides)[1]
+        return _rebuild(
+            factory, recipe_ids, csv_path, selections, body.pack_overrides,
+            body.snap_overrides, tolerance,
+        )[1]
 
     with _PUSH_LOCK:
         runtime, client = _client_for_body(body.account_id, injected_client)

@@ -379,6 +379,12 @@ class BasketPackOptionOut(BaseModel):
     pinned: bool = False
     this_week: bool = False
     better_value: bool = False
+    match_type: str = "exact"
+    form_differs: bool = False
+    shortfall: float = 0.0
+    shortfall_pct: float = 0.0
+    recommended: bool = False
+    recommendation_reason: str | None = None
     rating: float | None = None
     ratings_count: int | None = None
     #: Estimated from how often the library cooks this, so it reads as a scale
@@ -761,6 +767,21 @@ class OcadoPushResultOut(BaseModel):
     stock_checked_at: datetime | None = None
 
 
+class OcadoCheckoutItemOut(BaseModel):
+    """One Hola Fresca-managed retailer product and its live sync state."""
+
+    sku: str
+    name: str
+    url: str | None = None
+    pack_size_raw: str | None = None
+    desired_quantity: int = 0
+    synced_quantity: int = 0
+    cart_quantity: int = 0
+    cost: float = 0.0
+    cost_source: Literal["live", "planned"] = "planned"
+    status: Literal["not_synced", "changed", "deleted", "extra", "synced"]
+
+
 class OcadoPushPlanOut(BaseModel):
     """What a push would do, without doing it."""
 
@@ -777,6 +798,7 @@ class OcadoPushPlanOut(BaseModel):
     #: to remove half the cart can be read against "that was last week's shop".
     synced_at: datetime | None = None
     synced_week_start: str | None = None
+    checkout_items: list[OcadoCheckoutItemOut] = Field(default_factory=list)
 
 
 class OcadoStockRefreshOut(BaseModel):
@@ -830,6 +852,7 @@ class ScheduleSettingsOut(BaseModel):
     horizon_weeks: int
     recipes_per_week: int
     default_portions: int
+    pack_shortfall_tolerance_pct: float
 
 
 class ScheduleSettingsIn(BaseModel):
@@ -849,6 +872,7 @@ class ScheduleSettingsIn(BaseModel):
     )
     recipes_per_week: int | None = Field(default=None, ge=1, le=14)
     default_portions: int | None = Field(default=None, ge=1, le=8)
+    pack_shortfall_tolerance_pct: float | None = Field(default=None, ge=0, le=25)
 
 
 class ScheduleWeekOut(BaseModel):

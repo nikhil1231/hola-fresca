@@ -49,7 +49,13 @@ def _settings_out(row: PlanSettings) -> ScheduleSettingsOut:
         horizon_weeks=row.horizon_weeks,
         recipes_per_week=row.recipes_per_week,
         default_portions=row.default_portions,
+        pack_shortfall_tolerance_pct=row.pack_shortfall_tolerance_pct,
     )
+
+
+def pack_shortfall_tolerance_pct(session: Session) -> float:
+    """The household's saved tolerance, creating the defaults if necessary."""
+    return float(_settings_row(session).pack_shortfall_tolerance_pct)
 
 
 def _week_out(week: sched.ScheduleWeek) -> ScheduleWeekOut:

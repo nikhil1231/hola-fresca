@@ -276,6 +276,24 @@ def test_basket_portions_scale_from_base_yield(planner_client):
     assert data["cost"] == 2.0
 
 
+def test_basket_snap_uses_the_saved_household_tolerance(planner_client):
+    client, ids = planner_client
+    request = {"selections": [{"recipe_id": ids["pinned"], "portions": 4}]}
+
+    default_line = client.post("/api/planner/basket", json=request).json()["lines"][0]
+    assert default_line["need_g"] == 600
+    assert default_line["snap"] is None, "500g is more than 10% short of 600g"
+
+    saved = client.put(
+        "/api/schedule/settings", json={"pack_shortfall_tolerance_pct": 20}
+    )
+    assert saved.status_code == 200
+    tolerant_line = client.post("/api/planner/basket", json=request).json()["lines"][0]
+
+    assert tolerant_line["snap"]["snapped_need_g"] == 500
+    assert tolerant_line["snap"]["reduction_pct"] == pytest.approx(16.7, abs=0.1)
+
+
 def test_basket_allows_empty_selection(planner_client):
     client, _ = planner_client
     data = client.post("/api/planner/basket", json={"selections": []}).json()

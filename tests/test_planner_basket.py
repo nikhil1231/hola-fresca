@@ -426,8 +426,8 @@ def test_a_pin_on_something_sold_out_is_ignored_rather_than_obeyed():
     assert [c.pack.sku for c in cover.choices] == ["500g"]
 
 
-def test_sizes_of_a_different_form_are_not_offered_as_sizes():
-    """A smaller jar is a size; lime juice instead of limes is a different thing."""
+def test_an_approved_different_form_is_offered_and_labelled():
+    """The modal may offer the approved form change, but must identify it."""
     ing = ingredient(
         pack(130, 0.75, match_type="exact", sku="limes"),
         pack(260, 1.30, match_type="exact", sku="limes-big"),
@@ -437,7 +437,76 @@ def test_sizes_of_a_different_form_are_not_offered_as_sizes():
     )
     _, options = _options(ing, need_g=130)
 
-    assert set(options) == {"limes", "limes-big"}
+    assert set(options) == {"limes", "limes-big", "juice"}
+    assert options["juice"].form_differs is True
+
+
+def test_pack_options_recommend_the_biggest_cash_saving_within_tolerance():
+    diced_350 = pack(350, 4.50, sku="diced-350")
+    diced_450 = pack(450, 4.50, sku="diced-450")
+    whole_650 = pack(650, 4.90, match_type="form_differs", sku="whole-650")
+    substitute = pack(500, 1.00, match_type="substitute", sku="substitute")
+    ing = ingredient(diced_350, diced_450, whole_650, substitute, key="name:chicken")
+    current = B._score_multiset([B.PackChoice(diced_350, 2)], 480)
+
+    options = B.pack_options(ing, current, 480, shortfall_tolerance_pct=10)
+    short = next(option for option in options if option.pack.sku == "diced-450")
+    whole = next(option for option in options if option.pack.sku == "whole-650")
+    chosen = next(option for option in options if option.chosen)
+
+    assert (chosen.pack.sku, chosen.count, chosen.cost) == ("diced-350", 2, 9.0)
+    assert (short.count, short.cost, short.shortfall) == (1, 4.5, 30)
+    assert short.shortfall_pct == pytest.approx(6.25)
+    assert short.recommended is True
+    assert short.recommendation_reason == "shortfall"
+    assert whole.count == 1 and whole.shortfall == 0
+    assert whole.form_differs is True
+    assert all(option.pack.sku != "substitute" for option in options)
+
+
+@pytest.mark.parametrize("tolerance", [0, 5])
+def test_under_quantity_option_disappears_below_its_shortfall_percentage(tolerance):
+    diced_350 = pack(350, 4.50, sku="diced-350")
+    diced_450 = pack(450, 4.50, sku="diced-450")
+    whole_650 = pack(650, 4.90, match_type="form_differs", sku="whole-650")
+    ing = ingredient(diced_350, diced_450, whole_650, key="name:chicken")
+    current = B._score_multiset([B.PackChoice(diced_350, 2)], 480)
+
+    options = B.pack_options(ing, current, 480, shortfall_tolerance_pct=tolerance)
+    diced = next(option for option in options if option.pack.sku == "diced-450")
+    whole = next(option for option in options if option.pack.sku == "whole-650")
+
+    assert diced.count == 2 and diced.shortfall == 0
+    assert whole.count == 1 and whole.shortfall == 0
+    assert whole.recommended is True, "the fully-covering form change remains eligible"
+
+
+def test_under_quantity_option_must_reduce_immediate_spend():
+    current_pack = pack(350, 4.50, sku="current")
+    expensive = pack(450, 10.00, sku="expensive")
+    ing = ingredient(current_pack, expensive, key="name:chicken")
+    current = B._score_multiset([B.PackChoice(current_pack, 2)], 480)
+
+    options = B.pack_options(ing, current, 480, shortfall_tolerance_pct=10)
+    option = next(option for option in options if option.pack.sku == "expensive")
+
+    assert option.count == 2
+    assert option.shortfall == 0
+
+
+def test_a_cheaper_form_change_is_not_recommended_for_a_quality_step_down():
+    diced = pack(350, 4.50, sku="diced", rating=4.8, ratings=100)
+    low_quality_whole = pack(
+        650, 4.00, match_type="form_differs", sku="whole", rating=2.5, ratings=100
+    )
+    ing = ingredient(diced, low_quality_whole, key="name:chicken")
+    current = B._score_multiset([B.PackChoice(diced, 2)], 480)
+
+    options = B.pack_options(ing, current, 480, shortfall_tolerance_pct=0)
+    whole = next(option for option in options if option.pack.sku == "whole")
+
+    assert whole.form_differs is True
+    assert whole.recommended is False
 
 
 def test_an_ingredient_with_nothing_in_stock_is_held_apart_from_the_unmappable():

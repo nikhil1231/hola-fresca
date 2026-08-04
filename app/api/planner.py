@@ -32,6 +32,7 @@ from app.api.schemas import (
     RecipeSuggestionCard,
     SuggestionsIn,
 )
+from app.api.schedule import pack_shortfall_tolerance_pct
 from app.db.models import IngredientMapping, Recipe
 from app.planner.basket import (
     Basket,
@@ -126,6 +127,12 @@ def _option_out(option) -> BasketPackOptionOut:
         pinned=option.pinned,
         this_week=option.this_week,
         better_value=option.better_value,
+        match_type=option.pack.match_type,
+        form_differs=option.form_differs,
+        shortfall=round(option.shortfall, 3 if option.quantity_unit == "unit" else 1),
+        shortfall_pct=round(option.shortfall_pct, 1),
+        recommended=option.recommended,
+        recommendation_reason=option.recommendation_reason,
         rating=option.pack.rating,
         ratings_count=option.pack.ratings_count,
         weeks_of_supply=(
@@ -255,7 +262,11 @@ def basket(
     index = _load_planner_index(factory, recipe_ids, csv_path)
     selections = [_planner_selection(selection) for selection in body.selections]
     return _basket_out(build_basket(
-        index, selections, pack_overrides=body.pack_overrides, snap_overrides=body.snap_overrides
+        index,
+        selections,
+        pack_overrides=body.pack_overrides,
+        snap_overrides=body.snap_overrides,
+        pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session),
     ))
 
 

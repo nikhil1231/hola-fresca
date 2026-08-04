@@ -5,6 +5,7 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app import schedule as sched
 from app.api.deps import get_session
@@ -111,6 +112,7 @@ def test_defaults_are_created_on_first_read(schedule_client):
         "horizon_weeks": 6,
         "recipes_per_week": 5,
         "default_portions": 4,
+        "pack_shortfall_tolerance_pct": 10.0,
     }
     assert len(body["weeks"]) == 6
     assert body["weeks"][0]["week_start"] == sched.format_date(_next_monday())
@@ -135,13 +137,17 @@ def test_settings_update_reshapes_the_window(schedule_client):
 
 def test_settings_update_is_partial(schedule_client):
     client, _ = schedule_client
-    client.put("/api/schedule/settings", json={"cadence_weeks": 3})
+    client.put(
+        "/api/schedule/settings",
+        json={"cadence_weeks": 3, "pack_shortfall_tolerance_pct": 7.5},
+    )
     settings = client.put(
         "/api/schedule/settings", json={"recipes_per_week": 7}
     ).json()["settings"]
 
     assert settings["cadence_weeks"] == 3
     assert settings["recipes_per_week"] == 7
+    assert settings["pack_shortfall_tolerance_pct"] == 7.5
 
 
 @pytest.mark.parametrize(
@@ -152,11 +158,33 @@ def test_settings_update_is_partial(schedule_client):
         {"horizon_weeks": 0},
         {"recipes_per_week": 0},
         {"default_portions": 12},
+        {"pack_shortfall_tolerance_pct": -0.1},
+        {"pack_shortfall_tolerance_pct": 25.1},
     ],
 )
 def test_settings_reject_values_outside_their_range(schedule_client, payload):
     client, _ = schedule_client
     assert client.put("/api/schedule/settings", json=payload).status_code == 422
+
+
+def test_runtime_schema_adds_pack_shortfall_tolerance_to_an_existing_database(tmp_path):
+    engine = make_engine(tmp_path / "old-schedule.db")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE plan_settings (id INTEGER PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO plan_settings (id) VALUES (1)"))
+
+    init_db(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1]: row for row in connection.execute(text("PRAGMA table_info(plan_settings)"))
+        }
+        value = connection.execute(
+            text("SELECT pack_shortfall_tolerance_pct FROM plan_settings")
+        ).scalar()
+    assert "pack_shortfall_tolerance_pct" in columns
+    assert columns["pack_shortfall_tolerance_pct"][4] == "10"
+    assert value == 10
 
 
 def test_settings_reject_a_malformed_cutoff_time(schedule_client):

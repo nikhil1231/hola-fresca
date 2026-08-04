@@ -13,6 +13,8 @@ from app.api import ocado as ocado_api
 from app.api.ocado import get_ocado_client
 from app.ocado.auth import AuthStage, AuthState
 from app.ocado.client import Slot, normalize_slots
+from app.ocado.sync import CartLedger, PushPlan
+from app.planner.basket import Basket
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ocado"
 
@@ -95,6 +97,46 @@ def test_basket_returns_the_raw_cart(client):
 
     assert response.status_code == 200
     assert "checkoutGroups" in response.json()["raw"]
+
+
+def test_plan_exposes_checkout_items_and_accepts_an_empty_week(client, monkeypatch):
+    monkeypatch.setattr(ocado_api, "_rebuild", lambda *args, **kwargs: (None, Basket()))
+    monkeypatch.setattr(ocado_api, "read_ledger", lambda *args, **kwargs: CartLedger())
+    monkeypatch.setattr(ocado_api, "plan_push", lambda *args, **kwargs: PushPlan())
+    monkeypatch.setattr(
+        ocado_api,
+        "_checkout_items",
+        lambda *args, **kwargs: [
+            {
+                "sku": "stale",
+                "name": "Stale product",
+                "desired_quantity": 0,
+                "synced_quantity": 1,
+                "cart_quantity": 1,
+                "cost": 2.5,
+                "cost_source": "live",
+                "status": "changed",
+            }
+        ],
+    )
+
+    response = client.post("/api/ocado/basket/plan", json={"selections": []})
+
+    assert response.status_code == 200
+    assert response.json()["checkout_items"] == [
+        {
+            "sku": "stale",
+            "name": "Stale product",
+            "url": None,
+            "pack_size_raw": None,
+            "desired_quantity": 0,
+            "synced_quantity": 1,
+            "cart_quantity": 1,
+            "cost": 2.5,
+            "cost_source": "live",
+            "status": "changed",
+        }
+    ]
 
 
 def test_reserve_passes_the_slot_through(client):

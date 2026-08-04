@@ -473,7 +473,7 @@ BULK_MIN_UNIT_SAVING = 0.15  # a real difference in £/kg, not rounding
 BULK_MIN_SALVAGE = 0.65      # the remainder has to survive to be used
 BULK_MIN_RECIPE_PCT = 1.0    # and the ingredient has to come back: the top ~12%
 BULK_MAX_EXTRA_GBP = 3.00    # thrift you have to fund is not thrift
-SNAP_MAX_REDUCTION = 0.05    # enough to avoid another pack, not enough to distort a dish
+DEFAULT_PACK_SHORTFALL_TOLERANCE_PCT = 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,6 +500,10 @@ class PackOption:
     #: Chosen for this week only, and gone by the next one.
     this_week: bool = False
     better_value: bool = False
+    recommended: bool = False
+    recommendation_reason: str | None = None
+    shortfall: float = 0.0
+    shortfall_pct: float = 0.0
     #: Roughly how long this pack lasts, allowing for how often the library
     #: actually cooks the ingredient. The one thing the gates cannot judge -
     #: whether *you* will get through it - so it is shown rather than scored.
@@ -513,19 +517,34 @@ class PackOption:
     def keeps(self) -> bool:
         return self.pack.salvage >= BULK_MIN_SALVAGE
 
+    @property
+    def form_differs(self) -> bool:
+        return self.pack.match_type == "form_differs"
 
-def _pack_option(pack: Pack, need: float, unit: str) -> PackOption | None:
+
+def _pack_option(
+    pack: Pack, need: float, unit: str, *, shortfall_tolerance_pct: float = 0.0
+) -> PackOption | None:
     capacity_each = pack.capacity_qty if unit == "unit" else pack.capacity_g
     if not capacity_each or capacity_each <= 0 or need <= 0:
         return None
     count = max(1, math.ceil(need / capacity_each - COUNT_CEIL_EPSILON))
+    if count > 1 and shortfall_tolerance_pct > 0:
+        lower_count = count - 1
+        lower_capacity = capacity_each * lower_count
+        shortfall_pct = 100 * max(0.0, need - lower_capacity) / need
+        if 0 < shortfall_pct <= shortfall_tolerance_pct:
+            count = lower_count
     capacity = capacity_each * count
+    shortfall = max(0.0, need - capacity)
     return PackOption(
         pack=pack,
         count=count,
         cost=pack.price * count,
         capacity=capacity,
         leftover=max(0.0, capacity - need),
+        shortfall=shortfall,
+        shortfall_pct=100 * shortfall / need,
         # Per single pack, not per multiple: it is the shelf price comparison,
         # and it does not move with how many you happen to need this week.
         unit_cost=pack.price / capacity_each,
@@ -585,17 +604,24 @@ def pack_options(
     recipes: int = 0,
     uses: int = 1,
     override: str | None = None,
+    shortfall_tolerance_pct: float = DEFAULT_PACK_SHORTFALL_TOLERANCE_PCT,
 ) -> tuple[PackOption, ...]:
     """Every size this ingredient could be bought in, priced against the cover.
 
-    Restricted to the form the cover is already using: a smaller jar is a size,
-    a different form is a different ingredient, and offering them in one list
-    would quietly invite the second while looking like the first.
+    Exact and explicitly-approved ``form_differs`` products are offered. True
+    substitutes remain a stock fallback, not an ordinary shopping preference.
     """
     unit = cover.quantity_unit
     if need <= 0:
         return ()
-    packs = list(_preferred_tier(ingredient)[1])
+    packs: list[Pack] = []
+    for match_type in ("exact", "form_differs"):
+        packs.extend(drop_poorly_rated(tuple(
+            pack for pack in ingredient.available_packs if pack.match_type == match_type
+        )))
+    for choice in cover.choices:
+        if choice.pack not in packs:
+            packs.append(choice.pack)
     for held in (pinned_pack(ingredient), pinned_pack(ingredient, override)):
         if held is not None and held not in packs:
             packs.append(held)
@@ -605,35 +631,83 @@ def pack_options(
     chosen_capacity = cover.capacity_qty if unit == "unit" else cover.capacity_g
     chosen_unit_cost = cover.cost / chosen_capacity if chosen_capacity else 0.0
     chosen_skus = {choice.pack.sku for choice in cover.choices}
+    chosen_count = cover.choices[0].count if len(cover.choices) == 1 else None
 
     options: list[PackOption] = []
     for pack in packs:
-        option = _pack_option(pack, need, unit)
-        if option is None:
+        full_option = _pack_option(pack, need, unit)
+        short_option = _pack_option(
+            pack, need, unit, shortfall_tolerance_pct=shortfall_tolerance_pct
+        )
+        if full_option is None or short_option is None:
             continue
-        options.append(
-            replace(
+        # Falling short is only a suggestion when it actually lowers this
+        # week's spend; otherwise retain the fully-covering version of the SKU.
+        usable_short = (
+            short_option if short_option.shortfall and short_option.cost < cover.cost else None
+        )
+        is_current_sku = len(chosen_skus) == 1 and pack.sku in chosen_skus
+        if is_current_sku:
+            # Keep the actual basket choice beside a possible cheaper count of
+            # the same SKU. The latter is an alternative, not already chosen.
+            candidates = [full_option]
+            if usable_short is not None:
+                candidates.append(usable_short)
+        else:
+            candidates = [usable_short or full_option]
+        for option in candidates:
+            options.append(replace(
                 option,
                 cost_delta=option.cost - cover.cost,
                 leftover_delta=option.leftover - (cover.leftover_qty
                                                   if unit == "unit" else cover.leftover_g),
-                chosen=len(chosen_skus) == 1 and pack.sku in chosen_skus,
+                chosen=is_current_sku and option.count == chosen_count,
                 pinned=pack.sku == ingredient.preferred_sku,
                 this_week=override is not None and pack.sku == override,
                 supply=weeks_of_supply(
                     ingredient, pack, option.capacity, need, recipes=recipes, uses=uses
                 ),
-            )
-        )
+            ))
 
     current = cover.choices[0].pack if len(chosen_skus) == 1 else None
     best = _best_value(options, ingredient, chosen_unit_cost, chosen_capacity or 0.0, current)
+    saving = _best_saving(options, current)
+    recommendation = saving or best
     options = [
-        replace(option, better_value=best is not None and option.pack.sku == best.pack.sku)
+        replace(
+            option,
+            better_value=best is not None and option == best,
+            recommended=option == recommendation,
+            recommendation_reason=(
+                "different_form_shortfall"
+                if option.form_differs and option.shortfall
+                else "different_form"
+                if option.form_differs
+                else "shortfall"
+                if option.shortfall
+                else "cash_saving"
+                if option.cost_delta < 0
+                else "better_value"
+            ) if option == recommendation else None,
+        )
         for option in options
     ]
-    options.sort(key=lambda o: o.unit_cost)
+    options.sort(key=lambda o: (not o.recommended, o.cost, o.unit_cost))
     return tuple(options)
+
+
+def _best_saving(options: Sequence[PackOption], current: Pack | None) -> PackOption | None:
+    candidates = [
+        option for option in options
+        if not option.chosen
+        and option.cost_delta < -1e-9
+        and not (current is not None and _rating_downgrade(option.pack, current))
+    ]
+    return min(
+        candidates,
+        key=lambda option: (option.cost, option.shortfall_pct, option.form_differs),
+        default=None,
+    )
 
 
 def _best_value(
@@ -656,6 +730,8 @@ def _best_value(
         option
         for option in options
         if not option.chosen
+        and option.shortfall == 0
+        and (current is None or option.pack.match_type == current.match_type)
         and option.keeps
         and option.capacity > chosen_capacity
         and option.unit_cost <= chosen_unit_cost * (1 - BULK_MIN_UNIT_SAVING)
@@ -937,12 +1013,13 @@ def _snap_option(
     need_units: float | None,
     baseline: Cover | None,
     override: str | None,
+    shortfall_tolerance_pct: float,
 ) -> SnapOption | None:
     """Find the nearest lower whole-pack quantity that saves a pack.
 
     Snapping is deliberately conservative. It is for weighed ingredients only,
-    must remove at least one pack, and can trim at most five percent of the
-    week's combined demand. Counted ingredients are recipe instructions rather
+    must remove at least one pack, and can trim no more than the household's
+    configured tolerance. Counted ingredients are recipe instructions rather
     than a quantity that can safely be shaved.
     """
     if ingredient.unit_kind == "count" or baseline is None or baseline.packs < 2 or need_g <= 0:
@@ -954,7 +1031,7 @@ def _snap_option(
             if target >= need_g:
                 continue
             reduction = (need_g - target) / need_g
-            if reduction > SNAP_MAX_REDUCTION:
+            if reduction * 100 > shortfall_tolerance_pct:
                 continue
             cover = cover_need(index, ingredient, target, need_units, override=override)
             if cover is None or cover.packs >= baseline.packs or cover.cost >= baseline.cost:
@@ -977,6 +1054,7 @@ def build_basket(
     include_staples: bool = False,
     pack_overrides: dict[str, str] | None = None,
     snap_overrides: dict[str, bool] | None = None,
+    pack_shortfall_tolerance_pct: float = DEFAULT_PACK_SHORTFALL_TOLERANCE_PCT,
 ) -> Basket:
     """Price a week's recipes: one pack decision per canonical ingredient.
 
@@ -1008,7 +1086,15 @@ def build_basket(
             continue
         override = pack_overrides.get(key)
         baseline = cover_need(index, ingredient, demand.grams, demand.units, override=override)
-        snap = _snap_option(index, ingredient, demand.grams, demand.units, baseline, override)
+        snap = _snap_option(
+            index,
+            ingredient,
+            demand.grams,
+            demand.units,
+            baseline,
+            override,
+            pack_shortfall_tolerance_pct,
+        )
         snapped = bool(snap and snap_overrides.get(key))
         if snapped:
             demand = Demand(grams=snap.snapped_need_g, units=demand.units)
@@ -1046,6 +1132,7 @@ def build_basket(
                 recipes=plan_size,
                 uses=len(line.contributions) or 1,
                 override=override,
+                shortfall_tolerance_pct=pack_shortfall_tolerance_pct,
             )
         basket.lines.append(line)
 

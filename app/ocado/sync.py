@@ -236,6 +236,7 @@ def plan_push(
     *,
     ledger: CartLedger | None = None,
     owned_item_keys: set[str] | None = None,
+    cart_payload: Any | None = None,
 ) -> PushPlan:
     """The same merge a push runs, reported instead of applied.
 
@@ -244,7 +245,7 @@ def plan_push(
     the cart and nothing else - no stock check, no writes.
     """
     ledger = ledger or CartLedger()
-    current = cart_quantities(client.cart_view())
+    current = cart_quantities(client.cart_view() if cart_payload is None else cart_payload)
     targets, names, origins, unmapped = basket_targets(
         basket, owned_item_keys=owned_item_keys
     )

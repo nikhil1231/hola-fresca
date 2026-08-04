@@ -603,6 +603,8 @@ class PlanSettings(Base):
     # Targets for a single week, used by the UI rather than enforced here.
     recipes_per_week: Mapped[int] = mapped_column(Integer, default=5)
     default_portions: Mapped[int] = mapped_column(Integer, default=4)
+    # How far a deliberately under-sized pack choice may fall below demand.
+    pack_shortfall_tolerance_pct: Mapped[float] = mapped_column(Float, default=10.0)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

@@ -32,6 +32,7 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
     "recipe_steps": {"image_path": "TEXT"},
     "ingredient_mappings": {"unit_kind": "TEXT DEFAULT 'mass'", "preferred_sku": "VARCHAR(128)"},
     "products": {"stock_checked_at": "DATETIME"},
+    "plan_settings": {"pack_shortfall_tolerance_pct": "REAL DEFAULT 10"},
     "ocado_cart_sync": {"account_id": "VARCHAR(64)"},
     "ocado_cart_ledger": {"account_id": "VARCHAR(64)"},
     "recipes": {
