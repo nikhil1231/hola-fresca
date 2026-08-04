@@ -16,3 +16,12 @@ frontend/dist/
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
+
+# Local editor and coding-agent workspaces.
+/.claude/
+/.codex/
+/.codex-remote-*/
+
+# Local data exports and development-server logs.
+/holafresca-ocado-data.*
+/*.log
