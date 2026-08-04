@@ -28,7 +28,14 @@ export function useSchedule() {
 
 export function useUpdateScheduleSettings() {
   const plant = usePlantSchedule()
-  return useMutation({ mutationFn: updateScheduleSettings, onSuccess: plant })
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: updateScheduleSettings,
+    onSuccess: (schedule) => {
+      plant(schedule)
+      queryClient.invalidateQueries({ queryKey: ['planner-basket'] })
+    },
+  })
 }
 
 export function useSetWeekSkipped() {

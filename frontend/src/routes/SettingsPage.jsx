@@ -69,6 +69,7 @@ function toDraft(settings) {
     horizon_weeks: settings.horizon_weeks,
     recipes_per_week: settings.recipes_per_week,
     default_portions: settings.default_portions,
+    pack_shortfall_tolerance_pct: settings.pack_shortfall_tolerance_pct ?? 10,
   }
 }
 
@@ -228,30 +229,52 @@ export default function SettingsPage() {
             description="No week is planned and no cutoff runs until you resume."
           />
 
-          <Group justify="flex-end" gap="sm" mt="xs">
-            <Button
-              variant="default"
-              disabled={!dirty || updateSettings.isPending}
-              onClick={() => setDraft(toDraft(settings))}
-            >
-              Reset
-            </Button>
-            <Button
-              color="fresh"
-              leftSection={<IconDeviceFloppy size={16} />}
-              loading={updateSettings.isPending}
-              disabled={!dirty}
-              onClick={() =>
-                updateSettings.mutate(draft, {
-                  onSuccess: (next) => setDraft(toDraft(next.settings)),
-                })
-              }
-            >
-              Save
-            </Button>
-          </Group>
         </Stack>
       </Paper>
+
+      <Paper withBorder radius="md" p="lg">
+        <Stack gap="md">
+          <Title order={4}>Basket choices</Title>
+          <NumberInput
+            label="Maximum pack shortfall"
+            description="How much less than the recipes need a cheaper pack may contain"
+            min={0}
+            max={25}
+            step={1}
+            decimalScale={1}
+            suffix="%"
+            value={draft.pack_shortfall_tolerance_pct}
+            onChange={(value) => set('pack_shortfall_tolerance_pct', Number(value) || 0)}
+          />
+          <Text size="xs" c="dimmed">
+            This permits buying slightly less to avoid another pack. Set it to 0% to require
+            every suggestion to cover the full quantity.
+          </Text>
+        </Stack>
+      </Paper>
+
+      <Group justify="flex-end" gap="sm">
+        <Button
+          variant="default"
+          disabled={!dirty || updateSettings.isPending}
+          onClick={() => setDraft(toDraft(settings))}
+        >
+          Reset
+        </Button>
+        <Button
+          color="fresh"
+          leftSection={<IconDeviceFloppy size={16} />}
+          loading={updateSettings.isPending}
+          disabled={!dirty}
+          onClick={() =>
+            updateSettings.mutate(draft, {
+              onSuccess: (next) => setDraft(toDraft(next.settings)),
+            })
+          }
+        >
+          Save
+        </Button>
+      </Group>
 
       <Paper withBorder radius="md" p="lg">
         <Title order={4} mb="xs">

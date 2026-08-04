@@ -73,17 +73,14 @@ export default function Header() {
               <NavLink to="/browse" className={navClass}>
                 Browse
               </NavLink>
-              <NavLink to="/dashboard" className={navClass}>
-                Week
+              <NavLink to="/basket" className={navClass}>
+                Basket
               </NavLink>
               <NavLink to="/cuisines" className={navClass}>
                 Cuisines
               </NavLink>
               <NavLink to="/mapping" className={navClass}>
                 Mapping
-              </NavLink>
-              <NavLink to="/ocado" className={navClass}>
-                Ocado
               </NavLink>
             </Group>
           </Group>

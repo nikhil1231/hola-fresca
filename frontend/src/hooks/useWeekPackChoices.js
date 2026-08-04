@@ -76,5 +76,21 @@ export function useWeekPackChoices(weekStart) {
     })
   }, [weekStart])
 
-  return { packOverrides, setWeekPack, snapOverrides, setWeekSnap }
+  const setWeekPackAndSnap = useCallback((ingredientKey, sku, snapped) => {
+    setState((current) => {
+      const packs = { ...(current.weeks[weekStart] ?? {}) }
+      const snaps = { ...(current.snaps[weekStart] ?? {}) }
+      if (sku) packs[ingredientKey] = sku
+      else delete packs[ingredientKey]
+      if (snapped) snaps[ingredientKey] = true
+      else delete snaps[ingredientKey]
+      return normalize({
+        ...current,
+        weeks: { ...current.weeks, [weekStart]: packs },
+        snaps: { ...current.snaps, [weekStart]: snaps },
+      })
+    })
+  }, [weekStart])
+
+  return { packOverrides, setWeekPack, snapOverrides, setWeekSnap, setWeekPackAndSnap }
 }

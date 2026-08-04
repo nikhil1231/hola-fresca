@@ -6,7 +6,6 @@ import {
   Badge,
   Box,
   Button,
-  Center,
   Checkbox,
   Divider,
   Group,
@@ -27,7 +26,6 @@ import {
   IconAlertTriangle,
   IconBasket,
   IconBuildingStore,
-  IconCalendarWeek,
   IconArrowRight,
   IconArrowDown,
   IconCircleCheck,
@@ -42,6 +40,7 @@ import {
   IconToolsKitchen2,
 } from '@tabler/icons-react'
 
+import CheckoutPanel from '../components/CheckoutPanel.jsx'
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
@@ -241,10 +240,37 @@ function PackCard({ option, active, cheaper, onPick, disabled }) {
           {option.pack_size_raw || formatCapacity(option.capacity / option.count, option.quantity_unit)}
         </Text>
         {active && <Badge size="xs" variant="filled" color="fresh">in basket</Badge>}
-        {!active && cheaper && <Badge size="xs" variant="light" color="green">better value</Badge>}
+        {!active && option.recommended && option.cost_delta < 0 ? (
+          <Badge size="xs" variant="light" color="green">
+            save {formatMoney(-option.cost_delta)}
+          </Badge>
+        ) : !active && cheaper ? (
+          <Badge size="xs" variant="light" color="green">better value</Badge>
+        ) : null}
       </Group>
 
-      <Text fw={800} size="xl" c={cheaper ? 'green' : undefined} className={classes.unitCost}>
+      <Text size="xs" c="dimmed" lineClamp={2} mb={6}>
+        {option.product_name}
+      </Text>
+
+      <Group gap={4} mb={6}>
+        {option.form_differs && (
+          <Badge size="xs" variant="light" color="blue">different form</Badge>
+        )}
+        {option.shortfall > 0 && (
+          <Badge size="xs" variant="light" color="orange">
+            {formatQuantity(option.shortfall, option.quantity_unit)} short · {option.shortfall_pct}%
+            {option.cost_delta < 0 ? ` · save ${formatMoney(-option.cost_delta)}` : ''}
+          </Badge>
+        )}
+      </Group>
+
+      <Text
+        fw={800}
+        size="xl"
+        c={cheaper || option.cost_delta < 0 ? 'green' : undefined}
+        className={classes.unitCost}
+      >
         {formatUnitCost(option)}
       </Text>
 
@@ -267,6 +293,7 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
   const options = line?.options ?? []
   const current = options.find((option) => option.chosen)
   const alternative =
+    options.find((option) => option.recommended && !option.chosen) ??
     options.find((option) => option.better_value && !option.chosen) ??
     options.find((option) => option !== current && option.unit_cost < (current?.unit_cost ?? 0))
   const held = options.find((option) => option.pinned || option.this_week)
@@ -277,6 +304,7 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
   }, [opened])
 
   if (!line) return null
+  const alwaysBlocksShortfall = scope === 'always'
 
   return (
     <Modal.Root opened={opened} onClose={onClose} size="lg" centered>
@@ -306,7 +334,7 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
                 active
                 cheaper={false}
                 disabled={pending}
-                onPick={() => onPick(current.sku)}
+                onPick={() => onPick(current)}
               />
             )}
             {alternative && (
@@ -324,12 +352,18 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
                   option={alternative}
                   active={false}
                   cheaper={alternative.unit_cost < (current?.unit_cost ?? Infinity)}
-                  disabled={pending}
-                  onPick={() => onPick(alternative.sku)}
+                  disabled={pending || (alwaysBlocksShortfall && alternative.shortfall > 0)}
+                  onPick={() => onPick(alternative)}
                 />
               </>
             )}
           </Group>
+
+          {alwaysBlocksShortfall && options.some((option) => option.shortfall > 0) && (
+            <Text size="xs" c="dimmed" mt="sm">
+              Packs that leave a shortfall are available for this week only.
+            </Text>
+          )}
 
           <Divider my="md" />
 
@@ -363,16 +397,29 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
             <Stack gap={4} className={classes.otherSizes}>
               {rest.map((option) => (
                 <Group
-                  key={option.sku}
+                  key={`${option.sku}:${option.count}:${option.shortfall}`}
                   justify="space-between"
                   wrap="nowrap"
                   className={classes.otherSize}
                 >
                   <Group gap="sm" wrap="nowrap">
-                    <Text size="sm" fw={700} w={72}>
-                      {option.pack_size_raw ||
-                        formatCapacity(option.capacity / option.count, option.quantity_unit)}
-                    </Text>
+                    <Stack gap={0} w={150}>
+                      <Text size="sm" fw={700}>
+                        {option.pack_size_raw ||
+                          formatCapacity(option.capacity / option.count, option.quantity_unit)}
+                      </Text>
+                      <Text size="xs" c="dimmed" lineClamp={1}>{option.product_name}</Text>
+                    </Stack>
+                    {option.form_differs && (
+                      <Badge size="xs" variant="light" color="blue">different form</Badge>
+                    )}
+                    {option.shortfall > 0 && (
+                      <Badge size="xs" variant="light" color="orange">
+                        {formatQuantity(option.shortfall, option.quantity_unit)} short ·{' '}
+                        {option.shortfall_pct}%
+                        {option.cost_delta < 0 ? ` · save ${formatMoney(-option.cost_delta)}` : ''}
+                      </Badge>
+                    )}
                     <Text size="sm" c="dimmed" w={88}>{formatUnitCost(option)}</Text>
                     <Rating option={option} />
                   </Group>
@@ -381,8 +428,8 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
                     <Button
                       size="compact-xs"
                       variant="subtle"
-                      disabled={pending}
-                      onClick={() => onPick(option.sku)}
+                      disabled={pending || (alwaysBlocksShortfall && option.shortfall > 0)}
+                      onClick={() => onPick(option)}
                     >
                       Pick
                     </Button>
@@ -458,7 +505,9 @@ function LineTable({
               const highlighted =
                 selectedLineKey === rowKey || (hoverRecipeId && lineRecipeIds.has(hoverRecipeId))
               const owned = ownedItemKeySet.has(line.key)
-              const upsize = (line.options ?? []).find((option) => option.better_value)
+              const packRecommendation = (line.options ?? []).find(
+                (option) => option.recommended && !option.chosen,
+              )
               const heldOption = (line.options ?? []).find(
                 (option) => option.pinned || option.this_week,
               )
@@ -573,12 +622,12 @@ function LineTable({
                         </Tooltip>
                       )}
                       {(line.options?.length ?? 0) > 1 && (
-                        <Tooltip label={upsize ? 'A bigger pack is cheaper per kilo' : 'Change pack size'}>
+                        <Tooltip label={packRecommendation ? 'A cheaper pack option is available' : 'Change pack size'}>
                           <ActionIcon
                             variant="subtle"
                             size="md"
                             className={`${classes.packSwapButton} ${
-                              upsize ? classes.packSwapDeal : ''
+                              packRecommendation ? classes.packSwapDeal : ''
                             }`}
                             loading={busyPackKey === line.key}
                             aria-label={`Change pack size for ${line.name}`}
@@ -686,12 +735,24 @@ export default function BasketPage() {
   // was clicked for and the page stays linkable.
   const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
   const weekStart = targetWeek?.week_start ?? upcomingWeekStart
+  const pageView = searchParams.get('view') === 'checkout' ? 'checkout' : 'basket'
   const recipesPerWeek = schedule?.settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
   const setWeekStart = useCallback(
     (value) => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
         next.set('week', value)
+        return next
+      })
+    },
+    [setSearchParams],
+  )
+  const setPageView = useCallback(
+    (value) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        if (value === 'checkout') next.set('view', 'checkout')
+        else next.delete('view')
         return next
       })
     },
@@ -708,8 +769,13 @@ export default function BasketPage() {
   const [hoverLineKey, setHoverLineKey] = useState(null)
   const [glowLineKey, setGlowLineKey] = useState(null)
   const [hoverRecipeId, setHoverRecipeId] = useState(null)
-  const { ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
-  const { packOverrides, setWeekPack, snapOverrides, setWeekSnap } = useWeekPackChoices(weekStart)
+  const { ownedItemKeys, ownedItemKeySet, setItemOwned } = useOwnedBasketItems(weekStart)
+  const {
+    packOverrides,
+    snapOverrides,
+    setWeekSnap,
+    setWeekPackAndSnap,
+  } = useWeekPackChoices(weekStart)
   const stockRefresh = useOcadoStockRefresh()
   const packPreference = usePackPreference()
   const [packLineKey, setPackLineKey] = useState(null)
@@ -755,26 +821,28 @@ export default function BasketPage() {
   // shows a pending state until the re-priced basket comes back. Either way the
   // modal closes on the click rather than sitting there looking broken.
   const pickPack = useCallback(
-    (sku) => {
+    (option) => {
       if (!packLine) return
       if (packScope === 'always') {
-        packPreference.mutate({ ingredientKey: packLine.key, sku })
+        if (option.shortfall > 0) return
+        setWeekPackAndSnap(packLine.key, null, false)
+        packPreference.mutate({ ingredientKey: packLine.key, sku: option.sku })
       } else {
-        setWeekPack(packLine.key, sku)
+        setWeekPackAndSnap(packLine.key, option.sku, option.shortfall > 0)
       }
       setPackLineKey(null)
     },
-    [packLine, packScope, packPreference, setWeekPack],
+    [packLine, packScope, packPreference, setWeekPackAndSnap],
   )
 
   const resetPack = useCallback(() => {
     if (!packLine) return
-    setWeekPack(packLine.key, null)
+    setWeekPackAndSnap(packLine.key, null, false)
     if (packLine.options?.some((option) => option.pinned)) {
       packPreference.mutate({ ingredientKey: packLine.key, sku: null })
     }
     setPackLineKey(null)
-  }, [packLine, packPreference, setWeekPack])
+  }, [packLine, packPreference, setWeekPackAndSnap])
   const basketPortionPrice = totalPortions > 0 ? orderCost / totalPortions : 0
   const selectedLineKey = hoverLineKey ?? activeLineKey
   const allLines = useMemo(
@@ -784,10 +852,6 @@ export default function BasketPage() {
     ],
     [onlineLines, externalLines],
   )
-  const selectedRecipeIds = useMemo(() => {
-    const line = allLines.find(([key]) => key === selectedLineKey)?.[1]
-    return contributionIds(line)
-  }, [allLines, selectedLineKey])
   const glowRecipeIds = useMemo(() => {
     const line = allLines.find(([key]) => key === glowLineKey)?.[1]
     return contributionIds(line)
@@ -845,8 +909,8 @@ export default function BasketPage() {
       <Group justify="space-between" align="flex-end">
         <div>
           <Group gap="xs">
-            <IconCalendarWeek size={28} className={classes.titleIcon} />
-            <Title order={2}>Week</Title>
+            <IconBasket size={28} className={classes.titleIcon} />
+            <Title order={2}>Basket</Title>
           </Group>
           <Text c="dimmed">{entries.length} recipes for {formatWeekLabel(weekStart)}</Text>
         </div>
@@ -860,6 +924,18 @@ export default function BasketPage() {
           aria-label="Week"
         />
       </Group>
+
+      <SegmentedControl
+        size="lg"
+        value={pageView}
+        onChange={setPageView}
+        data={[
+          { label: 'Basket', value: 'basket' },
+          { label: 'Checkout', value: 'checkout' },
+        ]}
+        className={classes.viewToggle}
+        aria-label="Basket view"
+      />
 
       <Box className={classes.weekLayout}>
         <Box className={classes.recipesPanel}>
@@ -911,6 +987,20 @@ export default function BasketPage() {
         </Box>
 
         <Box className={classes.basketPanel}>
+          {pageView === 'checkout' ? (
+            <CheckoutPanel
+              lines={data?.lines ?? []}
+              ownedItemKeys={ownedItemKeys}
+              ownedItemKeySet={ownedItemKeySet}
+              packOverrides={packOverrides}
+              selections={selections}
+              snapOverrides={snapOverrides}
+              unmapped={data?.unmapped ?? []}
+              soldOut={data?.sold_out ?? []}
+              weekStart={weekStart}
+            />
+          ) : (
+            <>
           <Group justify="space-between" align="center" mb="md" wrap="nowrap">
             <Group gap="xs">
               <IconBasket size={22} className={classes.titleIcon} />
@@ -1073,6 +1163,8 @@ export default function BasketPage() {
                   </>
                 )}
               </Stack>
+            </>
+          )}
             </>
           )}
         </Box>

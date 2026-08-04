@@ -88,13 +88,21 @@ export function useOcadoPush(accountId) {
 // changes nothing, and it should follow the week around as you edit it. Costs
 // one cart read, so it waits for a connection rather than failing without one.
 export function useOcadoPushPlan(
-  { accountId, selections, ownedItemKeys, packOverrides },
+  { accountId, selections, ownedItemKeys, packOverrides, snapOverrides },
   { enabled = true } = {},
 ) {
   return useQuery({
-    queryKey: ['ocado-plan', accountId, selections, ownedItemKeys, packOverrides],
-    queryFn: () => planOcadoBasket({ accountId, selections, ownedItemKeys, packOverrides }),
-    enabled: enabled && Boolean(accountId) && selections.length > 0,
+    queryKey: [
+      'ocado-plan',
+      accountId,
+      selections,
+      ownedItemKeys,
+      packOverrides,
+      snapOverrides,
+    ],
+    queryFn: () =>
+      planOcadoBasket({ accountId, selections, ownedItemKeys, packOverrides, snapOverrides }),
+    enabled: enabled && Boolean(accountId),
   })
 }
 

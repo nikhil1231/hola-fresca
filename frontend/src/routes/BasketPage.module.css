@@ -11,6 +11,12 @@
   padding-block: 8px 24px;
 }
 
+.viewToggle {
+  align-self: center;
+  width: min(100%, 360px);
+  flex: 0 0 auto;
+}
+
 .weekLayout {
   display: grid;
   grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
