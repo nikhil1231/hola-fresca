@@ -56,7 +56,7 @@
 
 .imageWrap {
   position: relative;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 3 / 2;
   overflow: hidden;
 }
 
@@ -198,11 +198,17 @@
 }
 
 .cuisine {
+  font-size: 14px;
   letter-spacing: 0.04em;
 }
 
 .title {
+  font-size: var(--mantine-font-size-md);
   line-height: 1.25;
+}
+
+.headline {
+  font-size: 14px;
 }
 
 .body {
@@ -259,6 +265,7 @@
 }
 
 .statSlot :global(.mantine-Text-root) {
+  font-size: 14px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -305,5 +312,12 @@
     opacity: 1;
     pointer-events: auto;
     transform: translateX(0);
+  }
+}
+
+@media (max-width: 36em) {
+  .headline,
+  .headlineSkeleton {
+    display: none;
   }
 }

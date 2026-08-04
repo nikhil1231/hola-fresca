@@ -2,9 +2,13 @@
   padding-bottom: var(--mantine-spacing-xl);
 }
 
+.pageHeader {
+  row-gap: var(--mantine-spacing-sm);
+}
+
 .weekRow {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
   gap: var(--mantine-spacing-lg);
   align-items: start;
   padding: var(--mantine-spacing-md);
@@ -15,8 +19,31 @@
 }
 
 @media (max-width: 48em) {
+  .pageHeader {
+    align-items: flex-start;
+  }
+
+  .scheduleSummary {
+    display: none;
+  }
+
+  .headerActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
   .weekRow {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tiles {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: var(--mantine-spacing-xs);
+    scroll-snap-type: inline proximity;
+    scrollbar-width: thin;
   }
 }
 
@@ -50,16 +77,18 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--mantine-spacing-sm);
+  min-width: 0;
 }
 
 .tile,
 .addTile {
   position: relative;
-  width: 116px;
+  width: 128px;
   aspect-ratio: 1 / 1;
   border-radius: var(--mantine-radius-md);
   overflow: hidden;
   flex: none;
+  scroll-snap-align: start;
 }
 
 .tile {
@@ -88,7 +117,7 @@
 }
 
 .tileName {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.25;
   display: -webkit-box;
@@ -98,7 +127,7 @@
 }
 
 .tilePortions {
-  font-size: 10px;
+  font-size: 12px;
   opacity: 0.85;
 }
 
@@ -141,7 +170,7 @@
 }
 
 .addTileLabel {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -151,4 +180,19 @@
   min-height: 116px;
   color: var(--mantine-color-dimmed);
   font-size: var(--mantine-font-size-sm);
+}
+
+@media (max-width: 48em) {
+  .tiles {
+    flex-wrap: nowrap;
+  }
+
+  .tile,
+  .addTile {
+    width: 152px;
+  }
+
+  .emptyHint {
+    min-height: 152px;
+  }
 }

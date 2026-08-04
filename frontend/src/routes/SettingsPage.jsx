@@ -9,6 +9,7 @@ import {
   NumberInput,
   Paper,
   Select,
+  SimpleGrid,
   Stack,
   Switch,
   Text,
@@ -142,7 +143,7 @@ export default function SettingsPage() {
         <Stack gap="md">
           <Title order={4}>Shopping rhythm</Title>
 
-          <Group grow align="flex-start">
+          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="md" verticalSpacing="sm">
             <Select
               label="Cadence"
               description="How often a shop happens"
@@ -160,7 +161,7 @@ export default function SettingsPage() {
               allowDeselect={false}
               disabled={draft.cadence_weeks === 1}
             />
-          </Group>
+          </SimpleGrid>
 
           <Divider />
 
@@ -170,7 +171,7 @@ export default function SettingsPage() {
             attention moves to the next shop.
           </Text>
 
-          <Group grow align="flex-start">
+          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="md" verticalSpacing="sm">
             <Select
               label="Recipes settled by"
               data={cutoffOptions()}
@@ -185,13 +186,13 @@ export default function SettingsPage() {
               value={draft.cutoff_time}
               onChange={(event) => set('cutoff_time', event.currentTarget.value)}
             />
-          </Group>
+          </SimpleGrid>
 
           <Divider />
 
           <Title order={4}>Defaults</Title>
 
-          <Group grow align="flex-start">
+          <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="md" verticalSpacing="sm">
             <NumberInput
               label="Weeks shown"
               description="How far ahead you can plan"
@@ -215,7 +216,7 @@ export default function SettingsPage() {
               value={draft.default_portions}
               onChange={(value) => set('default_portions', Number(value) || 1)}
             />
-          </Group>
+          </SimpleGrid>
 
           <Divider />
 

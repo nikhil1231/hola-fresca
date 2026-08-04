@@ -76,6 +76,12 @@ export function formatWeekRange(weekStart) {
   return `${dayFormat.format(start)} – ${dayFormat.format(end)}`
 }
 
+/** "Mon 10 Aug", a compact label for places where the start identifies a week. */
+export function formatWeekStart(weekStart) {
+  const start = new Date(`${weekStart}T00:00:00`)
+  return dayFormat.format(start)
+}
+
 export function formatCutoff(cutoffAt) {
   if (!cutoffAt) return null
   const date = new Date(cutoffAt)

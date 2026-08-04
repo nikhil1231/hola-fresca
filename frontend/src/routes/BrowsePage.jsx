@@ -34,7 +34,7 @@ import {
   useRecipeSuggestions,
 } from '../hooks/useRecipeQueries.js'
 import {
-  formatWeekRange,
+  formatWeekStart,
   resolveTargetWeek,
   useSchedule,
   useSetWeekSkipped,
@@ -45,6 +45,7 @@ import {
   toPlannerSelections,
   useWeeklyPlan,
 } from '../hooks/useWeeklyPlan.js'
+import classes from './BrowsePage.module.css'
 
 const GRID_COLS = { base: 1, xs: 2, sm: 2, md: 3, lg: 4 }
 const PAGE_ROWS = 6
@@ -77,7 +78,7 @@ function useBrowseRowSize() {
 
 // Which week these picks land in: the one the "+" block was clicked for, or the
 // week currently being planned when browsing straight off the nav.
-function EditingWeekBar({ week, count, limit, skipped, onPlanAnyway, planPending }) {
+function EditingWeekBar({ week, skipped, onPlanAnyway, planPending }) {
   if (!week) return null
   return (
     <Alert
@@ -86,17 +87,14 @@ function EditingWeekBar({ week, count, limit, skipped, onPlanAnyway, planPending
       icon={<IconCalendarWeek size={18} />}
       py="xs"
     >
-      <Group justify="space-between" wrap="nowrap" gap="sm">
+      <Group justify="space-between" wrap="wrap" gap="sm">
         <Text size="sm">
           Choosing for{' '}
           <Text span fw={700}>
-            {formatWeekRange(week.week_start)}
+            {formatWeekStart(week.week_start)}
           </Text>
-          {' · '}
-          {count}/{limit} recipes
-          {skipped ? ' · this week is skipped' : ''}
         </Text>
-        <Group gap="xs" wrap="nowrap">
+        <Group gap="xs" wrap="nowrap" ml="auto">
           {skipped && (
             <Button size="compact-xs" color="orange" loading={planPending} onClick={onPlanAnyway}>
               Plan it anyway
@@ -246,7 +244,7 @@ export default function BrowsePage() {
   )
 
   return (
-    <Group align="flex-start" gap="xl" wrap="nowrap">
+    <Group align="flex-start" gap="xl" wrap="nowrap" className={classes.pageLayout}>
       {/* The sidebar is taller than the viewport, so it scrolls on its own
           rather than running off the bottom of a sticky box. `contain` stops
           the recipe list from taking over once the panel hits its end. */}
@@ -269,8 +267,6 @@ export default function BrowsePage() {
       <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
         <EditingWeekBar
           week={targetWeek}
-          count={upcomingRecipes.length}
-          limit={recipesPerWeek}
           skipped={Boolean(targetWeek?.skipped)}
           planPending={setSkipped.isPending}
           onPlanAnyway={() =>
@@ -278,7 +274,7 @@ export default function BrowsePage() {
           }
         />
 
-        <Group justify="space-between" wrap="nowrap">
+        <Group justify="space-between" wrap="nowrap" visibleFrom="sm">
           <Group gap="sm">
             <Button
               hiddenFrom="md"
@@ -320,18 +316,65 @@ export default function BrowsePage() {
               allowDeselect={false}
               radius="md"
               size="sm"
-              w={{ base: 180, sm: 220 }}
+              w={220}
               aria-label="Sort recipes"
             />
           </Group>
         </Group>
+
+        <Stack gap="xs" hiddenFrom="sm">
+          <Group justify="space-between" wrap="nowrap">
+            <Button
+              variant="default"
+              size="sm"
+              leftSection={<IconAdjustmentsHorizontal size={16} />}
+              onClick={drawer.open}
+            >
+              Filters{activeCount > 0 ? ` (${activeCount})` : ''}
+            </Button>
+            <Text c="dimmed" size="sm">
+              {isLoading ? 'Loading…' : `${total.toLocaleString()} recipes`}
+            </Text>
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            <Badge
+              variant="outline"
+              color="fresh"
+              radius="sm"
+              size="lg"
+              styles={{ root: { textTransform: 'none', letterSpacing: 0 } }}
+            >
+              {basketLoading ? 'Basket ...' : `Basket ${formatMoney(basket?.cost)}`}
+            </Badge>
+            <Button
+              variant={bestFitActive ? 'filled' : 'default'}
+              color={bestFitActive ? 'fresh' : 'gray'}
+              size="xs"
+              leftSection={<IconSparkles size={14} />}
+              disabled={upcomingRecipes.length === 0}
+              onClick={() => setScalar('sort', bestFitActive ? 'popular' : 'best_fit')}
+            >
+              Best fit
+            </Button>
+          </Group>
+          <Select
+            value={sortValue}
+            onChange={(v) => setScalar('sort', v)}
+            data={sortOptions}
+            allowDeselect={false}
+            radius="md"
+            size="sm"
+            w="100%"
+            aria-label="Sort recipes"
+          />
+        </Stack>
 
         {isError ? (
           <Alert color="red" title="Couldn't load recipes">
             Please check the backend is running and try again.
           </Alert>
         ) : isLoading ? (
-          <SimpleGrid cols={GRID_COLS} spacing="lg">
+          <SimpleGrid cols={GRID_COLS} spacing={{ base: 'md', sm: 'lg' }}>
             {upcomingRecipes.map((entry) => renderRecipeCard(entry.recipe))}
             {loadingTiles.map((_, i) => (
               <RecipeCardSkeleton key={i} />
@@ -349,7 +392,7 @@ export default function BrowsePage() {
           </Center>
         ) : (
           <>
-            <SimpleGrid cols={GRID_COLS} spacing="lg">
+            <SimpleGrid cols={GRID_COLS} spacing={{ base: 'md', sm: 'lg' }}>
               {displayRecipes.map((recipe) => renderRecipeCard(recipe))}
             </SimpleGrid>
             <Box ref={sentinelRef} h={1} />

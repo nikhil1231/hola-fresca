@@ -41,7 +41,15 @@ function LastUpdatedFooter() {
   if (!updatedAt) return null
 
   return (
-    <Text component="footer" c="dimmed" size="xs" ta="center" mt="xl" pt="md">
+    <Text
+      component="footer"
+      c="dimmed"
+      size="xs"
+      ta="center"
+      mt="xl"
+      pt="md"
+      visibleFrom="sm"
+    >
       last updated at {updatedAt}
     </Text>
   )
@@ -54,7 +62,7 @@ function App() {
         <Header />
       </AppShell.Header>
       <AppShell.Main>
-        <Container size="xl" py="xl">
+        <Container size="xl" px={{ base: 24, sm: 'xl' }} py={{ base: 'lg', sm: 'xl' }}>
           <Outlet />
           <LastUpdatedFooter />
         </Container>

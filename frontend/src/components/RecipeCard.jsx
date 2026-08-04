@@ -342,15 +342,15 @@ export default function RecipeCard({
         <Stack gap={6} p="sm" className={classes.body}>
           <div className={classes.content}>
             {recipe.cuisines?.length > 0 && (
-              <Text size="xs" c="fresh.8" fw={600} tt="uppercase" className={classes.cuisine}>
+              <Text size="sm" c="fresh.8" fw={600} tt="uppercase" className={classes.cuisine}>
                 {recipe.cuisines[0]}
               </Text>
             )}
-            <Text fw={600} lineClamp={2} className={classes.title}>
+            <Text size="md" fw={600} lineClamp={2} className={classes.title}>
               {recipe.name}
             </Text>
             {recipe.headline && (
-              <Text size="xs" c="dimmed" lineClamp={1}>
+              <Text size="sm" c="dimmed" lineClamp={1} className={classes.headline}>
                 {recipe.headline}
               </Text>
             )}
@@ -389,7 +389,7 @@ export default function RecipeCard({
                   {energyKcal != null && (
                     <>
                       <IconFlame size={14} />
-                      <Text size="xs" className={energyAdjusted ? classes.adjustedStat : ''}>
+                      <Text size="sm" className={energyAdjusted ? classes.adjustedStat : ''}>
                         {round(energyKcal)} kcal
                       </Text>
                     </>
@@ -399,7 +399,7 @@ export default function RecipeCard({
                   {proteinG != null && (
                     <>
                       <IconMeat size={14} />
-                      <Text size="xs" className={proteinAdjusted ? classes.adjustedStat : ''}>
+                      <Text size="sm" className={proteinAdjusted ? classes.adjustedStat : ''}>
                         {round(proteinG)}g protein
                       </Text>
                     </>
@@ -419,7 +419,7 @@ export default function RecipeCard({
                   {recipe.total_time_min != null && (
                     <>
                       <IconClock size={14} />
-                      <Text size="xs">{recipe.total_time_min} min</Text>
+                      <Text size="sm">{recipe.total_time_min} min</Text>
                     </>
                   )}
                 </StatSlot>
@@ -444,7 +444,7 @@ export default function RecipeCard({
 
 /** A loading tile built from the card's own layout.
  *
- * The card has no fixed height: its image is a 4/3 slice of whatever the column
+ * The card has no fixed height: its image is a 3/2 slice of whatever the column
  * is wide, and the body grows with the title and stats. A plain box of a chosen
  * height therefore never lines up — and the browse grid shows placeholders
  * beside real cards while the next page loads, where a mismatch reads as a gap.
@@ -460,10 +460,10 @@ export function RecipeCardSkeleton({ showStats = true }) {
 
       <Stack gap={6} p="sm" className={classes.body}>
         <div className={classes.content}>
-          <Skeleton height={12} width="42%" radius="sm" />
-          <Skeleton height={18} radius="sm" />
-          <Skeleton height={18} width="72%" radius="sm" />
-          <Skeleton height={12} width="88%" radius="sm" />
+          <Skeleton height={14} width="42%" radius="sm" />
+          <Skeleton height={20} radius="sm" />
+          <Skeleton height={20} width="72%" radius="sm" />
+          <Skeleton height={14} width="88%" radius="sm" className={classes.headlineSkeleton} />
           <Group gap={6} mt={4}>
             <Skeleton height={20} width={62} radius="sm" />
             <Skeleton height={20} width={44} radius="sm" />

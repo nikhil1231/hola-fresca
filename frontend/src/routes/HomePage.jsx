@@ -26,9 +26,8 @@ import {
 
 import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import {
-  formatCutoff,
-  formatCutoffCountdown,
   formatWeekRange,
+  formatWeekStart,
   useSchedule,
   useSetWeekSkipped,
   useUpdateScheduleSettings,
@@ -104,7 +103,6 @@ function AddTile({ weekStart, remaining }) {
 
 function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, skipPending }) {
   const badge = STATUS_BADGE[week.status] ?? STATUS_BADGE.open
-  const countdown = week.status === 'open' ? formatCutoffCountdown(week.cutoff_at) : null
   const editable = week.status === 'open' || week.status === 'closed'
   const remaining = Math.max(recipesPerWeek - entries.length, 0)
 
@@ -121,7 +119,7 @@ function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, 
       <div className={classes.weekMeta}>
         <Group gap={6} wrap="nowrap">
           <Title order={4} className={classes.weekTitle}>
-            {formatWeekRange(week.week_start)}
+            {formatWeekStart(week.week_start)}
           </Title>
           {week.is_active && (
             <Badge size="xs" variant="filled" color="fresh" radius="sm">
@@ -138,12 +136,6 @@ function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, 
             {entries.length}/{recipesPerWeek} recipes
           </Text>
         </Group>
-
-        <Text size="xs" c={countdown === 'closed' || week.closed ? 'orange' : 'dimmed'}>
-          {week.closed ? 'Cutoff was ' : 'Cutoff '}
-          {formatCutoff(week.cutoff_at)}
-          {countdown ? ` · ${countdown}` : ''}
-        </Text>
 
         <Group gap="xs" mt={4}>
           <Button
@@ -205,14 +197,14 @@ export default function HomePage() {
 
   return (
     <Stack gap="lg" className={classes.pageStack}>
-      <Group justify="space-between" align="flex-end" wrap="nowrap">
+      <Group justify="space-between" align="flex-end" wrap="wrap" className={classes.pageHeader}>
         <div>
           <Group gap="xs">
             <IconCalendarWeek size={28} color="var(--mantine-color-fresh-7)" />
             <Title order={2}>Your shops</Title>
           </Group>
           {settings ? (
-            <Text c="dimmed" size="sm">
+            <Text c="dimmed" size="sm" className={classes.scheduleSummary}>
               {cadenceLabel(settings.cadence_weeks)} · recipes settled by{' '}
               {settings.cutoff_days_before === 0
                 ? `the start of the week, ${settings.cutoff_time}`
@@ -224,7 +216,7 @@ export default function HomePage() {
             <Skeleton height={16} width={280} mt={6} />
           )}
         </div>
-        <Group gap="xs" wrap="nowrap">
+        <Group gap="xs" wrap="nowrap" className={classes.headerActions}>
           <Button
             variant={paused ? 'filled' : 'default'}
             color={paused ? 'fresh' : 'gray'}

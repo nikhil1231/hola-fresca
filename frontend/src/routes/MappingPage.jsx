@@ -4,6 +4,7 @@ import {
   Alert,
   Anchor,
   Badge,
+  Box,
   Button,
   Group,
   Loader,
@@ -237,8 +238,24 @@ export default function MappingPage() {
       </Paper>
 
       <Group justify="space-between" align="flex-end">
-        <Stack gap="xs">
-          <SegmentedControl value={filter} onChange={setFilter} data={FILTERS} size="sm" />
+        <Stack gap="xs" style={{ minWidth: 0, maxWidth: '100%' }}>
+          <Box
+            style={{
+              maxWidth: '100%',
+              overflowX: 'auto',
+              paddingBottom: 2,
+              overscrollBehaviorInline: 'contain',
+              scrollbarWidth: 'thin',
+            }}
+          >
+            <SegmentedControl
+              value={filter}
+              onChange={setFilter}
+              data={FILTERS}
+              size="sm"
+              style={{ minWidth: 'max-content' }}
+            />
+          </Box>
           <MappingSearch value={q} onCommit={setSearch} />
         </Stack>
         {filter === 'proposed' && proposedKeys.length > 0 && (
