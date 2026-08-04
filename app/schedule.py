@@ -30,6 +30,10 @@ MAX_HORIZON_WEEKS = 12
 # A cutoff may sit up to a fortnight ahead of the week it settles, which is as
 # far back as any sane cadence needs.
 MAX_CUTOFF_DAYS_BEFORE = 14
+# How far back the schedule will look. History has no natural end — the cadence
+# extends backwards forever — so the ceiling is what the page can usefully show:
+# half a year of weekly shops, a year of fortnightly ones.
+MAX_PAST_WEEKS = 26
 
 STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
@@ -97,12 +101,46 @@ def cycle_week_starts(
     return [start + index * step for index in range(count)]
 
 
+def past_week_starts(
+    anchor: date,
+    *,
+    cadence_weeks: int,
+    count: int,
+    today: date | None = None,
+) -> list[date]:
+    """The ``count`` most recent shop weeks behind the planning window, oldest first.
+
+    "Behind" means under way or over, not merely earlier than the window: with an
+    anchor set some way ahead, the weeks between now and it are on the cadence but
+    have not happened, and belong in neither list.
+
+    The week currently being cooked lands here from Tuesday onwards, since the
+    window by then starts at next Monday. That is the point — it is the week most
+    worth glancing at, and it would otherwise be on no page at all.
+    """
+    today = today or date.today()
+    window_start = cycle_week_starts(
+        anchor, cadence_weeks=cadence_weeks, count=1, today=today
+    )[0]
+    step = timedelta(weeks=cadence_weeks)
+    # Steps back from the window to the first week that has actually begun.
+    gap_days = max((window_start - today).days, 0)
+    first_step = max(-(-gap_days // (7 * cadence_weeks)), 1)
+    return [window_start - (first_step + index) * step for index in reversed(range(count))]
+
+
+def is_complete(week_start: date, today: date | None = None) -> bool:
+    """Whether the week has finished — its last day is behind us."""
+    return week_start + timedelta(days=7) <= (today or date.today())
+
+
 @dataclass(frozen=True, slots=True)
 class ScheduleWeek:
     week_start: date
     cutoff_at: datetime
     skipped: bool
     closed: bool
+    complete: bool
     status: str
     is_active: bool
 
@@ -145,6 +183,7 @@ def build_weeks(
                 cutoff_at=cutoff,
                 skipped=is_skipped,
                 closed=closed,
+                complete=is_complete(week_start, now.date()),
                 status=status,
                 is_active=is_active,
             )

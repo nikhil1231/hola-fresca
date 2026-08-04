@@ -343,6 +343,94 @@ class BasketIn(BaseModel):
     snap_overrides: dict[str, bool] = Field(default_factory=dict)
 
 
+# --- The plan: which recipes, in which week ---------------------------------
+
+class PlanEntryOut(BaseModel):
+    """One recipe in one week, as the plan pages render it.
+
+    The recipe comes back as a full card rather than as an id: it used to be a
+    snapshot the browser kept beside the entry, which meant a renamed or
+    re-priced dish went on showing whatever it looked like the day it was added.
+    Hydrated here, a card is never older than the request.
+    """
+
+    recipe: RecipeCard
+    portions: int
+    protein: ProteinModifierIn | None = None
+    added_at: datetime | None = None
+
+
+class PlanWeekOut(BaseModel):
+    week_start: str
+    recipes: list[PlanEntryOut] = Field(default_factory=list)
+    #: Per-ingredient decisions for this week: chosen pack, snapped demand, and
+    #: what is already in the cupboard.
+    pack_overrides: dict[str, str] = Field(default_factory=dict)
+    snap_overrides: dict[str, bool] = Field(default_factory=dict)
+    owned_item_keys: list[str] = Field(default_factory=list)
+
+
+class PlanOut(BaseModel):
+    weeks: list[PlanWeekOut] = Field(default_factory=list)
+
+
+class PlanEntryIn(BaseModel):
+    recipe_id: int
+    portions: int | None = Field(default=None, ge=1, le=20)
+    protein: ProteinModifierIn | None = None
+
+
+class PlanEntryPatchIn(BaseModel):
+    """A change to one entry. Absent fields are left alone.
+
+    ``protein`` is the exception: sending it as null clears the modifier, which
+    is a real thing to want, so it is told apart from absent by
+    ``model_fields_set`` rather than by being None.
+    """
+
+    portions: int | None = Field(default=None, ge=1, le=20)
+    protein: ProteinModifierIn | None = None
+
+
+class PlanWeekItemIn(BaseModel):
+    """A per-week decision about one basket line.
+
+    All three fields are optional and independent: setting a pack says nothing
+    about whether the item is owned. Sending ``pack_sku: null`` releases this
+    week's pack choice and falls back to the standing preference, if any.
+    """
+
+    pack_sku: str | None = None
+    snapped: bool | None = None
+    owned: bool | None = None
+
+
+class PlanImportWeekIn(BaseModel):
+    week_start: str
+    recipes: list[PlanEntryIn] = Field(default_factory=list)
+    pack_overrides: dict[str, str] = Field(default_factory=dict)
+    snap_overrides: dict[str, bool] = Field(default_factory=dict)
+    owned_item_keys: list[str] = Field(default_factory=list)
+
+
+class PlanImportIn(BaseModel):
+    """A whole plan lifted out of one browser's localStorage.
+
+    Exists for the one-off migration from per-device storage, so it is additive
+    by design: it fills in weeks the account does not have and never deletes,
+    because the plan on the server may well be the better copy.
+    """
+
+    weeks: list[PlanImportWeekIn] = Field(default_factory=list)
+
+
+class PlanImportOut(BaseModel):
+    imported_weeks: int
+    imported_recipes: int
+    skipped_recipes: list[int] = Field(default_factory=list)
+    plan: PlanOut
+
+
 class BasketPackChoiceOut(BaseModel):
     sku: str
     product_name: str
@@ -858,12 +946,21 @@ class ScheduleWeekOut(BaseModel):
     status: Literal["open", "closed", "skipped", "paused"]
     skipped: bool
     closed: bool
+    # The week's last day is behind us — nothing about it can still be changed by
+    # cooking it differently. Told apart from ``closed``, which is only about the
+    # ordering deadline having passed.
+    complete: bool
     is_active: bool
 
 
 class ScheduleOut(BaseModel):
     settings: ScheduleSettingsOut
     weeks: list[ScheduleWeekOut] = Field(default_factory=list)
+    # Shops already under way or over, oldest first, as asked for by the
+    # ``past_weeks`` query parameter. Kept out of ``weeks`` so that a client
+    # showing more history does not have to re-find where "now" starts.
+    past_weeks: list[ScheduleWeekOut] = Field(default_factory=list)
+    has_more_past: bool = False
     active_week_start: str | None = None
     # Where "now" sits for the caller, so a client can count down to a cutoff
     # against the same clock that decided which weeks are closed.

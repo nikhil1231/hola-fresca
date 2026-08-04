@@ -153,10 +153,11 @@ def preferred_packs(
     ingredient. ``include_unavailable`` asks the same question of a shop with
     full shelves, which is how the substitution's price delta is measured.
 
-    A standing pack choice beats all of it - having decided you buy the kilo bag
-    of rice, the planner should stop re-deciding it every week - but only while
-    that product is in stock, and never for the hypothetical baseline, which has
-    to describe the shop rather than your preferences.
+    A chosen pack beats all of it - having decided you buy the kilo bag of rice,
+    whether just this week or always, the planner should stop re-deciding it -
+    but only while that product is in stock, and never for the hypothetical
+    baseline, which has to describe the shop rather than your preferences.
+    ``override`` is that choice, already resolved by :func:`chosen_sku`.
     """
     if not include_unavailable:
         pinned = pinned_pack(ingredient, override)
@@ -165,17 +166,28 @@ def preferred_packs(
     return _preferred_tier(ingredient, include_unavailable=include_unavailable)[1]
 
 
-def pinned_pack(ingredient: Ingredient, override: str | None = None) -> Pack | None:
+def pinned_pack(ingredient: Ingredient, sku: str | None = None) -> Pack | None:
     """The pack this ingredient is bought as, if it can be bought today.
 
-    ``override`` is this week's choice, which beats the standing one: deciding
-    to buy the big bag once is a different decision from always buying it, and
-    the first should not quietly become the second.
+    ``sku`` is the chosen pack — this week's choice if there is one, otherwise
+    the standing preference. The two are resolved into one before they get here
+    (see :func:`chosen_sku`), because from the covering's point of view they are
+    the same instruction; the difference matters only when the choice is shown
+    back to the user.
     """
-    sku = override or ingredient.preferred_sku
     if not sku:
         return None
     return next((p for p in ingredient.available_packs if p.sku == sku), None)
+
+
+def chosen_sku(week_override: str | None, standing: str | None) -> str | None:
+    """Which pack choice wins for one ingredient.
+
+    This week's beats the standing one: deciding to buy the big bag once is a
+    different decision from always buying it, and the first should not quietly
+    become the second.
+    """
+    return week_override or standing
 
 
 def _preferred_tier(
@@ -436,8 +448,11 @@ def cover_need(
 ) -> Cover | None:
     """Cover one ingredient's demand, memoised on the index.
 
-    ``override`` is a pack chosen for this week only, so it joins the cache key
-    rather than replacing the entry a plain week would use.
+    ``override`` is the pack that was chosen — this week's, or the user's
+    standing preference — so it joins the cache key rather than replacing the
+    entry a plain week would use. That is load-bearing now the index is shared
+    between users: without the sku in the key, one person's standing choice would
+    be served to the next person to ask about the same ingredient.
     """
     if not ingredient.available_packs:
         return None
@@ -585,6 +600,7 @@ def pack_options(
     recipes: int = 0,
     uses: int = 1,
     override: str | None = None,
+    standing: str | None = None,
 ) -> tuple[PackOption, ...]:
     """Every size this ingredient could be bought in, priced against the cover.
 
@@ -596,7 +612,7 @@ def pack_options(
     if need <= 0:
         return ()
     packs = list(_preferred_tier(ingredient)[1])
-    for held in (pinned_pack(ingredient), pinned_pack(ingredient, override)):
+    for held in (pinned_pack(ingredient, standing), pinned_pack(ingredient, override)):
         if held is not None and held not in packs:
             packs.append(held)
     if len(packs) < 2:
@@ -618,7 +634,7 @@ def pack_options(
                 leftover_delta=option.leftover - (cover.leftover_qty
                                                   if unit == "unit" else cover.leftover_g),
                 chosen=len(chosen_skus) == 1 and pack.sku in chosen_skus,
-                pinned=pack.sku == ingredient.preferred_sku,
+                pinned=standing is not None and pack.sku == standing,
                 this_week=override is not None and pack.sku == override,
                 supply=weeks_of_supply(
                     ingredient, pack, option.capacity, need, recipes=recipes, uses=uses
@@ -868,7 +884,12 @@ class BasketScore:
     gap_count: int
 
 
-def score_basket(index: PlanIndex, selections: Iterable[Selection]) -> BasketScore:
+def score_basket(
+    index: PlanIndex,
+    selections: Iterable[Selection],
+    *,
+    pack_preferences: dict[str, str] | None = None,
+) -> BasketScore:
     """Price a selection without building the itemised basket.
 
     :func:`build_basket` spends most of its time assembling things a ranking
@@ -876,8 +897,10 @@ def score_basket(index: PlanIndex, selections: Iterable[Selection]) -> BasketSco
     cost-ordered line list. Ranking the library calls this once per candidate and
     then some, so it walks the same decisions and keeps only the totals. It must
     agree with ``build_basket`` exactly; ``test_score_basket_agrees_with_build_basket``
-    holds the two together.
+    holds the two together — which is why ``pack_preferences`` is honoured here
+    too even though a ranking rarely varies on it.
     """
+    pack_preferences = pack_preferences or {}
     needs: dict[str, Demand] = {}
     gaps = 0
     for selection in selections:
@@ -912,7 +935,13 @@ def score_basket(index: PlanIndex, selections: Iterable[Selection]) -> BasketSco
         if not ingredient.shoppable:
             gaps += 1
             continue
-        cover = cover_need(index, ingredient, demand.grams, demand.units)
+        cover = cover_need(
+            index,
+            ingredient,
+            demand.grams,
+            demand.units,
+            override=pack_preferences.get(key),
+        )
         if cover is None:
             continue
         cost += cover.cost
@@ -977,17 +1006,27 @@ def build_basket(
     include_staples: bool = False,
     pack_overrides: dict[str, str] | None = None,
     snap_overrides: dict[str, bool] | None = None,
+    pack_preferences: dict[str, str] | None = None,
 ) -> Basket:
     """Price a week's recipes: one pack decision per canonical ingredient.
 
-    ``pack_overrides`` are this week's pack choices, ``{ingredient_key: sku}``.
-    They live with the week rather than in the database, so choosing the big bag
-    once costs nothing and is forgotten by the next shop.
+    ``pack_overrides`` are this week's pack choices, ``{ingredient_key: sku}``,
+    so choosing the big bag once is forgotten by the next shop.
+    ``pack_preferences`` is the same shape but standing — "I always buy the kilo
+    bag" — and comes from the requesting user rather than from the index, which
+    is shared. A week's choice beats a standing one.
+
+    Both end up in the same place: the covering only needs to know which pack was
+    chosen, so they are resolved into a single sku before it is asked. That also
+    keeps them out of :attr:`PlanIndex.cover_cache`'s blind spot — the cache is
+    keyed on the chosen sku, so two users with different standing packs get
+    different entries rather than each other's.
     """
     selections = list(selections)
     plan_size = len(selections)
     pack_overrides = pack_overrides or {}
     snap_overrides = snap_overrides or {}
+    pack_preferences = pack_preferences or {}
     needs, names, untracked, contributions = aggregate_needs(index, selections)
     basket = Basket(untracked_lines=untracked)
 
@@ -1006,7 +1045,9 @@ def build_basket(
             else:
                 basket.unpriceable.append(label)
             continue
-        override = pack_overrides.get(key)
+        week_choice = pack_overrides.get(key)
+        standing = pack_preferences.get(key)
+        override = chosen_sku(week_choice, standing)
         baseline = cover_need(index, ingredient, demand.grams, demand.units, override=override)
         snap = _snap_option(index, ingredient, demand.grams, demand.units, baseline, override)
         snapped = bool(snap and snap_overrides.get(key))
@@ -1045,7 +1086,11 @@ def build_basket(
                 line.need_qty if line.quantity_unit == "unit" else line.need_g,
                 recipes=plan_size,
                 uses=len(line.contributions) or 1,
-                override=override,
+                # Told apart again here: the menu labels a pack "pinned" or "this
+                # week", and collapsing them would lose the difference the two
+                # decisions are meant to have.
+                override=week_choice,
+                standing=standing,
             )
         basket.lines.append(line)
 

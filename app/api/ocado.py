@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import schedule as sched
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
 from app.api.planner import (
     _load_planner_index,
@@ -311,6 +312,28 @@ def plan(
     )
 
 
+def _refuse_past_week(week_start: str | None) -> None:
+    """Refuse to shop for a week that has already happened.
+
+    Old baskets are worth opening — they are the record of what was bought — but
+    pushing one would fill the cart with a shop that is already eaten, on top of
+    whatever is in there for the week you are actually planning. An unparseable
+    or absent week is let through: it is only a label on the ledger, and the push
+    predates it.
+    """
+    if not week_start:
+        return
+    try:
+        parsed = sched.parse_date(week_start)
+    except ValueError:
+        return
+    if parsed < sched.upcoming_week_start():
+        raise HTTPException(
+            status_code=409,
+            detail=f"The week of {week_start} has been and gone, and cannot be shopped for",
+        )
+
+
 @router.post("/basket/push", response_model=OcadoPushResultOut)
 def push(
     body: BasketIn,
@@ -319,6 +342,7 @@ def push(
     csv_path: Path | None = Depends(get_planner_csv_path),
     injected_client: OcadoClient = Depends(get_ocado_client),
 ) -> OcadoPushResultOut:
+    _refuse_past_week(body.week_start)
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]

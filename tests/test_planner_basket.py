@@ -63,14 +63,13 @@ def pack(capacity_g, price, *, salvage=0.85, match_type="exact", sku=None, avail
     )
 
 
-def ingredient(*packs, key="name:test", staple=False, recipe_pct=0.0, preferred_sku=None):
+def ingredient(*packs, key="name:test", staple=False, recipe_pct=0.0):
     return Ingredient(
         key=key,
         name="Test",
         pantry_staple=staple,
         packs=tuple(packs),
         recipe_pct=recipe_pct,
-        preferred_sku=preferred_sku,
     )
 
 
@@ -389,22 +388,31 @@ def test_supply_stops_at_the_use_by_date():
 
 
 def test_a_pinned_size_is_bought_whatever_the_week_needs():
-    cover = B.cover_need(PlanIndex(), _rice(recipe_pct=9.4, preferred_sku="1kg"), need_g=300)
+    cover = B.cover_need(PlanIndex(), _rice(recipe_pct=9.4), need_g=300, override="1kg")
 
     assert [c.pack.sku for c in cover.choices] == ["1kg"]
     assert cover.cost == pytest.approx(2.50)
 
 
 def test_a_choice_made_for_one_week_beats_the_standing_one():
-    """Buying the big bag once is a different decision from always buying it."""
-    ing = _rice(recipe_pct=9.4, preferred_sku="1kg")
-    cover = B.cover_need(PlanIndex(), ing, need_g=300, override="500g")
+    """Buying the big bag once is a different decision from always buying it.
 
-    assert [c.pack.sku for c in cover.choices] == ["500g"]
+    The two arrive separately — a week's overrides from the request, a standing
+    preference from the user — and are resolved before the covering is asked,
+    which is what this pins.
+    """
+    assert B.chosen_sku("500g", "1kg") == "500g"
+    assert B.chosen_sku(None, "1kg") == "1kg"
+    assert B.chosen_sku(None, None) is None
 
 
 def test_a_weeks_choice_gets_its_own_cache_entry():
-    """Otherwise one week's override would be served to every other week."""
+    """Otherwise one week's override would be served to every other week.
+
+    Load-bearing twice over now that a user's standing preference goes through
+    the same slot: without the sku in the cache key, one account's kilo bag would
+    be handed to the next account to ask about rice.
+    """
     index, ing = PlanIndex(), _rice(recipe_pct=9.4)
     plain = B.cover_need(index, ing, need_g=300)
     overridden = B.cover_need(index, ing, need_g=300, override="1kg")
@@ -414,14 +422,40 @@ def test_a_weeks_choice_gets_its_own_cache_entry():
     assert B.cover_need(index, ing, need_g=300).choices[0].pack.sku == "500g"
 
 
+def test_two_users_standing_packs_do_not_leak_through_the_shared_index():
+    """The index is one snapshot shared by everyone; the preference is not."""
+    index, ing = PlanIndex(), _rice(recipe_pct=9.4)
+
+    mine = B.cover_need(index, ing, need_g=300, override="1kg")
+    yours = B.cover_need(index, ing, need_g=300, override="500g")
+
+    assert mine.choices[0].pack.sku == "1kg"
+    assert yours.choices[0].pack.sku == "500g"
+
+
+def test_a_standing_pack_is_labelled_differently_from_a_weeks_pack():
+    """Both pick the pack; only one of them is a decision about every week."""
+    ing = _rice(recipe_pct=9.4)
+    cover = B.cover_need(PlanIndex(), ing, need_g=300, override="1kg")
+
+    standing = {
+        o.pack.sku: o for o in B.pack_options(ing, cover, 300, standing="1kg")
+    }
+    this_week = {
+        o.pack.sku: o for o in B.pack_options(ing, cover, 300, override="1kg")
+    }
+
+    assert (standing["1kg"].pinned, standing["1kg"].this_week) == (True, False)
+    assert (this_week["1kg"].pinned, this_week["1kg"].this_week) == (False, True)
+
+
 def test_a_pin_on_something_sold_out_is_ignored_rather_than_obeyed():
     ing = ingredient(
         pack(500, 1.50, sku="500g"),
         pack(1000, 2.50, sku="1kg", available=False),
         key="name:rice",
-        preferred_sku="1kg",
     )
-    cover = B.cover_need(PlanIndex(), ing, need_g=300)
+    cover = B.cover_need(PlanIndex(), ing, need_g=300, override="1kg")
 
     assert [c.pack.sku for c in cover.choices] == ["500g"]
 
@@ -499,6 +533,69 @@ def seeded(factory, tmp_path):
         s.commit()
         rid = recipe.id
     return factory, csv_path, rid
+
+
+def test_a_standing_pack_preference_reaches_the_basket(seeded):
+    """It is no longer on the index, so it has to arrive with the request."""
+    factory, csv_path, rid = seeded
+    with factory() as s:
+        seed_candidates(
+            s,
+            KEY_RICE,
+            "Basmati Rice",
+            [{"sku": "rice2", "name": "Basmati 1kg", "price": 1.80,
+              "pack_value": 1000, "pack_unit": "g"}],
+        )
+        service.save_decision(
+            s, gather_candidates(s, KEY_RICE),
+            service.DecisionInput(
+                status="approved",
+                accepted=[
+                    service.AcceptedInput(sku="rice1", rank=1),
+                    service.AcceptedInput(sku="rice2", rank=2),
+                ],
+            ),
+        )
+    index = load_index(factory, csv_path=csv_path)
+
+    plain = B.build_basket(index, [B.Selection(rid)])
+    preferred = B.build_basket(
+        index, [B.Selection(rid)], pack_preferences={KEY_RICE: "rice2"}
+    )
+
+    assert plain.lines[0].cover.choices[0].pack.sku == "rice1"
+    assert preferred.lines[0].cover.choices[0].pack.sku == "rice2"
+
+
+def test_scoring_agrees_with_the_basket_about_a_standing_pack(seeded):
+    """The ranking has to price a week the way the basket will, or the recipe it
+    calls cheapest is not the one that comes out cheapest."""
+    factory, csv_path, rid = seeded
+    with factory() as s:
+        seed_candidates(
+            s,
+            KEY_RICE,
+            "Basmati Rice",
+            [{"sku": "rice2", "name": "Basmati 1kg", "price": 1.80,
+              "pack_value": 1000, "pack_unit": "g"}],
+        )
+        service.save_decision(
+            s, gather_candidates(s, KEY_RICE),
+            service.DecisionInput(
+                status="approved",
+                accepted=[
+                    service.AcceptedInput(sku="rice1", rank=1),
+                    service.AcceptedInput(sku="rice2", rank=2),
+                ],
+            ),
+        )
+    index = load_index(factory, csv_path=csv_path)
+    prefs = {KEY_RICE: "rice2"}
+
+    built = B.build_basket(index, [B.Selection(rid)], pack_preferences=prefs)
+    scored = B.score_basket(index, [B.Selection(rid)], pack_preferences=prefs)
+
+    assert scored.cost == pytest.approx(built.cost)
 
 
 def test_pantry_staples_are_assumed_owned(seeded):

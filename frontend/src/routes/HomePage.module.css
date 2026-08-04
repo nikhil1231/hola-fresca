@@ -34,6 +34,43 @@
   opacity: 0.55;
 }
 
+/* History. Read-only, and styled to read as a record rather than as something
+   waiting to be filled in: flat, muted, no card of its own. */
+.weekRowPast {
+  border-style: dashed;
+  border-color: var(--mantine-color-gray-3);
+  background: transparent;
+  padding-block: var(--mantine-spacing-xs);
+}
+
+.weekRowPast .weekTitle {
+  color: var(--mantine-color-dimmed);
+  font-weight: 600;
+}
+
+.weekRowPast .tile {
+  filter: grayscale(0.55);
+  opacity: 0.8;
+  transition: filter 120ms ease, opacity 120ms ease;
+}
+
+.weekRowPast .tile:hover,
+.weekRowPast .tile:focus-within {
+  filter: none;
+  opacity: 1;
+}
+
+/* The week being cooked right now, which from Tuesday sits at the top of the
+   history rather than in the planning window. Kept out of the grey. */
+.weekRowCurrent .tile {
+  filter: none;
+  opacity: 1;
+}
+
+.historyDivider {
+  margin-top: var(--mantine-spacing-xs);
+}
+
 .weekMeta {
   display: flex;
   flex-direction: column;
@@ -100,6 +137,25 @@
 .tilePortions {
   font-size: 10px;
   opacity: 0.85;
+}
+
+/* Top-left, clear of the remove button, and clamped to one line: the badge says
+   there is a modification and roughly what, the tooltip says it in full. */
+.tileModifier {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  max-width: calc(100% - 32px);
+  padding: 2px 6px;
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-grape-6);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tileRemove {

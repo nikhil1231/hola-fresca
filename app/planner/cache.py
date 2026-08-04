@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -62,7 +62,9 @@ class StandalonePrice:
 class _Entry:
     fingerprint: tuple
     index: PlanIndex
-    standalone: dict[int, dict[int, StandalonePrice]] = field(default_factory=dict)
+    # Both keyed partly by the asking user's pack preferences — see
+    # _preferences_key. The index above is shared; these are not.
+    standalone: dict[tuple, dict[int, StandalonePrice]] = field(default_factory=dict)
     rankings: dict[tuple, list[RankedCandidate]] = field(default_factory=dict)
 
 
@@ -156,37 +158,41 @@ def get_index(
         return _entry(factory, statuses, retailer, csv_path).index
 
 
-def note_pack_preference(
-    factory: sessionmaker[Session], ingredient_key: str, sku: str | None
-) -> None:
-    """Fold a just-written pack preference into the cached index in place.
+def note_pack_preference(factory: sessionmaker[Session]) -> None:
+    """Keep the cached index after a pack preference was just written.
 
     Staleness is normally decided by stat-ing the database, which is right for
-    writes this process cannot see - but a preference it just made itself is not
+    writes this process cannot see — but a preference it just made itself is not
     one of those. Left to the stat, one click cost a full index rebuild and a
-    re-rank of the library, several seconds of staring at an unchanged page for
-    a change that touches exactly one ingredient. So the change is applied to the
-    snapshot directly and the fingerprint moved on.
+    re-rank of the library: several seconds of staring at an unchanged page for a
+    write that does not change the index at all, since preferences moved off it
+    and onto the user. So the fingerprint is moved on and the index kept.
 
-    Anything derived from the old covering is dropped rather than patched:
-    rankings and standalone prices are cheap to recompute lazily and expensive
-    to get subtly wrong.
+    What *is* dropped is everything derived under the old preferences. They are
+    keyed by the preference map, so in principle only the writer's entries are
+    now wrong — but the map is the caller's to know, not this module's, and these
+    are cheap to recompute lazily and expensive to get subtly wrong.
     """
     db = _db_path(factory)
     with _LOCK:
         for key, entry in list(_CACHE.items()):
             if key[0] != str(db):
                 continue
-            ingredient = entry.index.ingredients.get(ingredient_key)
-            if ingredient is None:
-                _CACHE.pop(key, None)
-                continue
-            entry.index.ingredients[ingredient_key] = replace(ingredient, preferred_sku=sku)
-            for cached in [k for k in entry.index.cover_cache if k[0] == ingredient_key]:
-                entry.index.cover_cache.pop(cached, None)
             entry.standalone.clear()
             entry.rankings.clear()
             entry.fingerprint = _fingerprint(db, Path(key[3]) if key[3] else None)
+
+
+def _preferences_key(pack_preferences: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """A hashable, order-independent identity for one user's standing packs.
+
+    The index is shared but everything scored from it is not: two users who buy
+    rice in different bags get different prices for the same recipe. So the
+    preference map joins the key of every derived table rather than the entries
+    being per-user, which keeps the common case — identical (usually empty)
+    preferences — sharing one entry instead of one per account.
+    """
+    return tuple(sorted((pack_preferences or {}).items()))
 
 
 def get_standalone_prices(
@@ -196,6 +202,7 @@ def get_standalone_prices(
     statuses: tuple[str, ...] = DEFAULT_STATUSES,
     retailer: str = RETAILER,
     csv_path: Path | None = None,
+    pack_preferences: dict[str, str] | None = None,
 ) -> dict[int, StandalonePrice]:
     """Every curated recipe's own price, priced once per edit.
 
@@ -204,22 +211,26 @@ def get_standalone_prices(
     one pass over a warm cover cache, the whole table is cheaper than the index
     load that precedes it.
     """
+    prefs = pack_preferences or {}
     with _LOCK:
         entry = _entry(factory, statuses, retailer, csv_path)
-        table = entry.standalone.get(servings)
+        key = (servings, _preferences_key(prefs))
+        table = entry.standalone.get(key)
         if table is None:
             index = entry.index
             table = {}
             for recipe_id in index.recipes:
                 scored = score_basket(
-                    index, [Selection(recipe_id=recipe_id, servings=servings)]
+                    index,
+                    [Selection(recipe_id=recipe_id, servings=servings)],
+                    pack_preferences=prefs,
                 )
                 table[recipe_id] = StandalonePrice(
                     score=scored.score,
                     consumed_cost=scored.consumed_cost,
                     gap_count=scored.gap_count,
                 )
-            entry.standalone[servings] = table
+            entry.standalone[key] = table
         return table
 
 
@@ -231,23 +242,30 @@ def get_ranking(
     statuses: tuple[str, ...] = DEFAULT_STATUSES,
     retailer: str = RETAILER,
     csv_path: Path | None = None,
+    pack_preferences: dict[str, str] | None = None,
 ) -> list[RankedCandidate]:
     """The whole library ranked against a pinned week, best fit first.
 
     Ranked over every curated recipe rather than over the filtered subset,
     because the ranking does not depend on the filters — so narrowing by cuisine,
-    or turning to page two, reuses this instead of recomputing it.
+    or turning to page two, reuses this instead of recomputing it. It does depend
+    on who is asking, though, hence ``pack_preferences`` in the key.
     """
+    prefs = pack_preferences or {}
     pinned_key = tuple(sorted((s.recipe_id, s.servings) for s in pinned))
     with _LOCK:
         entry = _entry(factory, statuses, retailer, csv_path)
-        key = (pinned_key, candidate_portions)
+        key = (pinned_key, candidate_portions, _preferences_key(prefs))
         ranked = entry.rankings.get(key)
         if ranked is None:
             pinned_ids = {s.recipe_id for s in pinned}
             candidate_ids = [r for r in entry.index.recipes if r not in pinned_ids]
             ranked = rank_candidates(
-                entry.index, pinned, candidate_ids, candidate_portions=candidate_portions
+                entry.index,
+                pinned,
+                candidate_ids,
+                candidate_portions=candidate_portions,
+                pack_preferences=prefs,
             )
             entry.rankings[key] = ranked
             while len(entry.rankings) > MAX_RANKINGS:

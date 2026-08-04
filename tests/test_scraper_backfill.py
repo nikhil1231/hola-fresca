@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from app import config as app_config
+from tests.conftest import user_id
 from app.db.models import PersonalRecipeRating, Recipe, RecipeEdit, RecipeStep
 from app.db.session import init_db, make_engine, make_session_factory
 from app.scraper import storage
@@ -88,7 +89,9 @@ def test_backfill_preserves_human_and_derived_state(env, source):
     source_id = _seed(env, curated=1, flagged_suspicious=1, protein_g=51.5)
     with env() as session:
         recipe = session.query(Recipe).one()
-        session.add(PersonalRecipeRating(recipe_id=recipe.id, rating=5))
+        session.add(
+            PersonalRecipeRating(user_id=user_id(session), recipe_id=recipe.id, rating=5)
+        )
         session.add(
             RecipeEdit(
                 recipe_id=recipe.id,

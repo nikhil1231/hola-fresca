@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import schedule as sched
 from app.api.deps import get_session
+from tests.conftest import user_id
 from app.db.models import PlanWeek
 from app.db.session import init_db, make_engine, make_session_factory
 from main import app
@@ -59,6 +60,34 @@ def test_cycle_starts_at_the_anchor_when_it_is_still_ahead():
         anchor, cadence_weeks=1, count=2, today=date(2026, 8, 4)
     )
     assert weeks == [date(2026, 9, 7), date(2026, 9, 14)]
+
+
+def test_past_weeks_step_back_from_the_planning_window():
+    # Monday: today's week is in the window, so history starts the week before.
+    assert sched.past_week_starts(
+        date(2026, 8, 3), cadence_weeks=1, count=3, today=date(2026, 8, 3)
+    ) == [date(2026, 7, 13), date(2026, 7, 20), date(2026, 7, 27)]
+
+    # Tuesday: the window has moved to next Monday, so the week being cooked
+    # right now is the most recent past week rather than falling off the page.
+    assert sched.past_week_starts(
+        date(2026, 8, 3), cadence_weeks=1, count=2, today=date(2026, 8, 4)
+    ) == [date(2026, 7, 27), date(2026, 8, 3)]
+
+
+def test_past_weeks_keep_the_cadence_and_skip_weeks_that_have_not_happened():
+    # Anchor five weeks out: the fortnights between now and it are on the cadence
+    # but still ahead, so they are neither planned weeks nor past ones.
+    past = sched.past_week_starts(
+        date(2026, 9, 7), cadence_weeks=2, count=2, today=date(2026, 8, 4)
+    )
+    assert past == [date(2026, 7, 13), date(2026, 7, 27)]
+    assert all(week <= date(2026, 8, 4) for week in past)
+
+
+def test_a_week_is_complete_once_its_last_day_has_passed():
+    assert not sched.is_complete(date(2026, 8, 3), date(2026, 8, 9))
+    assert sched.is_complete(date(2026, 8, 3), date(2026, 8, 10))
 
 
 def test_cutoff_is_days_before_the_week_at_the_stated_time():
@@ -227,14 +256,75 @@ def test_only_week_starts_can_be_skipped(schedule_client):
     assert client.put("/api/schedule/weeks/not-a-date", json={"skipped": True}).status_code == 400
 
 
-def test_past_week_overrides_are_pruned_on_read(schedule_client):
+def test_week_overrides_older_than_the_history_window_are_pruned(schedule_client):
     client, factory = schedule_client
-    stale = sched.format_date(_next_monday() - timedelta(days=21))
+    stale = sched.format_date(_next_monday() - timedelta(weeks=sched.MAX_PAST_WEEKS + 4))
+    recent = sched.format_date(_next_monday() - timedelta(weeks=2))
     with factory() as session:
-        session.add(PlanWeek(week_start=stale, skipped=True))
+        uid = user_id(session)
+        session.add(PlanWeek(user_id=uid, week_start=stale, skipped=True))
+        session.add(PlanWeek(user_id=uid, week_start=recent, skipped=True))
         session.commit()
 
     client.get("/api/schedule")
 
     with factory() as session:
-        assert session.query(PlanWeek).count() == 0
+        # The recent one is still displayable history, so it survives — a week
+        # that was skipped has to keep saying so once history can show it.
+        assert [row.week_start for row in session.query(PlanWeek).all()] == [recent]
+
+
+def test_history_is_only_returned_when_asked_for(schedule_client):
+    client, _ = schedule_client
+    default = client.get("/api/schedule").json()
+    assert default["past_weeks"] == []
+    assert default["has_more_past"]
+
+    body = client.get("/api/schedule", params={"past_weeks": 5}).json()
+    starts = [sched.parse_date(week["week_start"]) for week in body["past_weeks"]]
+    assert len(starts) == 5
+    # Oldest first, and all of them behind the planning window.
+    assert starts == sorted(starts)
+    assert starts[-1] < sched.parse_date(body["weeks"][0]["week_start"])
+
+
+def test_history_is_closed_complete_and_never_active(schedule_client):
+    client, _ = schedule_client
+    body = client.get("/api/schedule", params={"past_weeks": 3}).json()
+
+    assert all(week["closed"] for week in body["past_weeks"])
+    assert not any(week["is_active"] for week in body["past_weeks"])
+    # The most recent past week can still be in progress (from Tuesday onwards);
+    # everything older than it has finished.
+    assert all(week["complete"] for week in body["past_weeks"][:-1])
+
+
+def test_history_keeps_a_skipped_week_marked(schedule_client):
+    client, factory = schedule_client
+    skipped = sched.format_date(_next_monday() - timedelta(weeks=1))
+    with factory() as session:
+        session.add(PlanWeek(user_id=user_id(session), week_start=skipped, skipped=True))
+        session.commit()
+
+    body = client.get("/api/schedule", params={"past_weeks": 3}).json()
+    by_start = {week["week_start"]: week for week in body["past_weeks"]}
+    assert by_start[skipped]["status"] == "skipped"
+
+
+def test_pausing_does_not_reach_backwards_into_history(schedule_client):
+    client, _ = schedule_client
+    client.put("/api/schedule/settings", json={"paused": True})
+
+    body = client.get("/api/schedule", params={"past_weeks": 2}).json()
+    assert {week["status"] for week in body["weeks"]} == {"paused"}
+    assert not any(week["status"] == "paused" for week in body["past_weeks"])
+
+
+def test_history_is_capped(schedule_client):
+    client, _ = schedule_client
+    body = client.get("/api/schedule", params={"past_weeks": sched.MAX_PAST_WEEKS}).json()
+    assert len(body["past_weeks"]) == sched.MAX_PAST_WEEKS
+    assert not body["has_more_past"]
+
+    over = client.get("/api/schedule", params={"past_weeks": sched.MAX_PAST_WEEKS + 1})
+    assert over.status_code == 422

@@ -82,7 +82,14 @@ class Pack:
 
 @dataclass(frozen=True, slots=True)
 class Ingredient:
-    """A canonical ingredient and the pack sizes it may be bought in."""
+    """A canonical ingredient and the pack sizes it may be bought in.
+
+    Everything here is true of the ingredient for everybody, which is what makes
+    the index shareable across users. A standing "always buy the kilo bag" choice
+    used to live on this dataclass and no longer does — it is one person's
+    preference, and baking it in would put it in a snapshot every user reads. It
+    now arrives per request; see :func:`app.planner.basket.build_basket`.
+    """
 
     key: str
     name: str
@@ -91,8 +98,6 @@ class Ingredient:
     each_to_grams: float | None = None
     unit_kind: str = "mass"
     unpriceable_products: int = 0
-    #: A standing choice of pack, honoured while it is in stock.
-    preferred_sku: str | None = None
     #: Share of the curated library this ingredient appears in. The planner never
     #: prices future weeks, so this is how it knows a big bag will get eaten.
     recipe_pct: float = 0.0
@@ -528,7 +533,6 @@ def _load_ingredients(
             each_to_grams=row.each_to_grams,
             unit_kind=unit_kind,
             unpriceable_products=unpriceable,
-            preferred_sku=row.preferred_sku,
             recipe_pct=min(100.0, pct_by_root.get(row.ingredient_key, 0.0)),
         )
 

@@ -29,7 +29,11 @@ import {
 import { usePlannerBasket } from '../hooks/useRecipeQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
-import { resolveTargetWeek, useSchedule } from '../hooks/useSchedule.js'
+import {
+  isPastWeekStart,
+  resolveTargetWeek,
+  useScheduleWithHistory,
+} from '../hooks/useSchedule.js'
 import { formatWeekLabel, toPlannerSelections, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 import {
   useOcadoAccounts,
@@ -516,12 +520,16 @@ function PushSummary({ result }) {
 export default function OcadoPage() {
   const { upcomingWeekStart, getWeekRecipes } = useWeeklyPlan()
   const [searchParams] = useSearchParams()
-  const { data: schedule } = useSchedule()
+  const { data: schedule } = useScheduleWithHistory()
   // The week being pushed is the one the schedule says is being planned - not
   // simply the next one, which after a skip or a passed cutoff is not the same
   // thing. An explicit ?week= wins, so a link from Home pushes what it says.
   const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
   const weekStart = targetWeek?.week_start ?? upcomingWeekStart
+  // A shop that has been and gone cannot be shopped for again: pushing it would
+  // fill the cart with a week you have already eaten, on top of whatever is in
+  // there for the week you are actually planning. The server refuses it too.
+  const shopped = isPastWeekStart(weekStart)
   const { ownedItemKeys, ownedItemKeySet } = useOwnedBasketItems(weekStart)
   const { packOverrides, snapOverrides } = useWeekPackChoices(weekStart)
   const entries = getWeekRecipes(weekStart)
@@ -547,7 +555,9 @@ export default function OcadoPage() {
   const basket = useOcadoBasket(accountId, { enabled: status.data?.status === 'ready' })
   const plan = useOcadoPushPlan(
     { accountId, selections, ownedItemKeys, packOverrides, snapOverrides },
-    { enabled: status.data?.status === 'ready' },
+    // Not asked for a week that cannot be pushed: the preview is a diff against
+    // a cart nothing is going to be written to.
+    { enabled: status.data?.status === 'ready' && !shopped },
   )
   const [otpCode, setOtpCode] = useState('')
   const [reservation, setReservation] = useState(null)
@@ -616,7 +626,9 @@ export default function OcadoPage() {
             <Title order={2}>Ocado</Title>
           </Group>
           <Text c="dimmed">
-            Push {entries.length} recipes for {formatWeekLabel(weekStart)}, then reserve a slot.
+            {shopped
+              ? `${formatWeekLabel(weekStart)} has already been shopped for.`
+              : `Push ${entries.length} recipes for ${formatWeekLabel(weekStart)}, then reserve a slot.`}
           </Text>
         </div>
         <Group gap="sm" align="center">
@@ -739,33 +751,41 @@ export default function OcadoPage() {
                   </Box>
                   {/* What the sync will touch, before it touches it - the cart
                       holds the rest of the week's shopping too. */}
-                  {connected && !push.data && (
+                  {connected && !shopped && !push.data && (
                     <PlanSummary plan={plan.data} loading={plan.isLoading} />
                   )}
                   {/* Worth saying rather than swallowing: without the preview
                       you are pressing a button that can remove things. */}
-                  {connected && plan.error && (
+                  {connected && !shopped && plan.error && (
                     <Alert color="yellow" icon={<IconAlertCircle size={18} />}>
                       Could not preview the sync: {plan.error.message}
                     </Alert>
                   )}
-                  <Button
-                    leftSection={<IconBasketUp size={16} />}
-                    disabled={!selections.length || status.data?.status !== 'ready'}
-                    loading={push.isPending}
-                    onClick={() =>
-                      push.mutate({
-                        accountId,
-                        selections,
-                        ownedItemKeys,
-                        packOverrides,
-                        snapOverrides,
-                        weekStart,
-                      })
-                    }
-                  >
-                    Push basket to Ocado
-                  </Button>
+                  {shopped ? (
+                    <Alert color="gray" variant="light" icon={<IconAlertCircle size={18} />}>
+                      This week has been and gone — its basket is a record of what
+                      was bought, not a shop to place. Pick a week you are still
+                      planning to push one.
+                    </Alert>
+                  ) : (
+                    <Button
+                      leftSection={<IconBasketUp size={16} />}
+                      disabled={!selections.length || status.data?.status !== 'ready'}
+                      loading={push.isPending}
+                      onClick={() =>
+                        push.mutate({
+                          accountId,
+                          selections,
+                          ownedItemKeys,
+                          packOverrides,
+                          snapOverrides,
+                          weekStart,
+                        })
+                      }
+                    >
+                      Push basket to Ocado
+                    </Button>
+                  )}
                   {push.error && (
                     <Alert color="red" icon={<IconAlertCircle size={18} />}>
                       {push.error.message}

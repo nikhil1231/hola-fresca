@@ -5,12 +5,31 @@ plus the tables that record the state of the scrape pipeline. The planner,
 pantry and basket domains will add their own tables later. Where a future
 phase will need a foreign key that does not exist yet (canonical ingredient
 resolution, in particular), the column is present but nullable.
+
+The schema is in two halves, and which half a table belongs to is the question
+worth asking of any new one. The **catalogue** — recipes, products, ingredient
+mappings, scrape state — is shared by everyone and written by whoever curates it.
+Everything **personal** — what you plan to cook, how you rate it, what pack you
+always buy — hangs off :class:`User`. The line between them is not always where
+it first looks: a mapping's *identity* ("Basil Pesto is this Ocado product") is
+catalogue, while "I always buy the kilo bag" is personal, which is why
+:class:`UserPackPreference` exists apart from :class:`IngredientMapping`.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -18,6 +37,33 @@ from app.db.base import Base
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class User(Base):
+    """One person's account.
+
+    There is exactly one row today and the API resolves it without asking for
+    credentials — see :func:`app.api.deps.get_current_user`. It exists now anyway
+    so that every personal table can carry a real foreign key from the start:
+    adding the column later would mean rebuilding half the schema under SQLite,
+    while adding the login later is a change to one dependency.
+
+    ``email`` is nullable because the bootstrap user predates having one; it
+    becomes the identity Google sign-in matches on.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("email", name="uq_user_email"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Catalogue writes — mapping review, manual products, the recipe audit,
+    # curation — are admin-only, because they change what everyone else sees.
+    is_admin: Mapped[bool] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class ScrapeState(Base):
@@ -170,11 +216,14 @@ class Recipe(Base):
     allergens: Mapped[list["RecipeAllergen"]] = relationship(
         back_populates="recipe", cascade="all, delete-orphan"
     )
-    personal_rating: Mapped["PersonalRecipeRating | None"] = relationship(
-        back_populates="recipe", cascade="all, delete-orphan", uselist=False
+    # One row per user now, rather than the single row of the single-user app.
+    # The API reads these through the per-user maps in app.api.recipes, never by
+    # walking the relationship, so nothing here loads another user's opinion.
+    personal_ratings: Mapped[list["PersonalRecipeRating"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan"
     )
-    wishlist_entry: Mapped["PersonalRecipeWishlist | None"] = relationship(
-        back_populates="recipe", cascade="all, delete-orphan", uselist=False
+    wishlist_entries: Mapped[list["PersonalRecipeWishlist"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan"
     )
 
 
@@ -184,21 +233,49 @@ class PersonalRecipeRating(Base):
         CheckConstraint("rating >= 1 AND rating <= 5", name="ck_personal_rating_range"),
     )
 
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     recipe_id: Mapped[int] = mapped_column(ForeignKey("recipes.id"), primary_key=True)
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
-    recipe: Mapped[Recipe] = relationship(back_populates="personal_rating")
+    recipe: Mapped[Recipe] = relationship(back_populates="personal_ratings")
 
 
 class PersonalRecipeWishlist(Base):
     __tablename__ = "personal_recipe_wishlist"
 
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     recipe_id: Mapped[int] = mapped_column(ForeignKey("recipes.id"), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
-    recipe: Mapped[Recipe] = relationship(back_populates="wishlist_entry")
+    recipe: Mapped[Recipe] = relationship(back_populates="wishlist_entries")
+
+
+class UserRecipeHide(Base):
+    """"Stop showing me this one" — a personal filter, not a curation decision.
+
+    Distinct from :attr:`Recipe.manually_excluded`, which says the source row is
+    broken and takes the recipe out of the library for everybody. Both hide a
+    recipe from browse; only one of them is a claim about the data. Kept apart
+    because the shared planner index filters on the second at build time and
+    cannot filter on the first at all — a personal hide is applied by the API
+    over a library that still contains the recipe.
+    """
+
+    __tablename__ = "user_recipe_hides"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class RecipeIngredient(Base):
@@ -500,13 +577,10 @@ class IngredientMapping(Base):
     alias_of: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     # line_count x representative price; orders the review queue by spend impact.
     spend_score: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
-    # A standing "always buy this size" decision, e.g. the 1 kg bag of rice
-    # rather than the 500 g one. The planner minimises this week's spend, which
-    # is right for a lettuce and wrong for a cupboard staple that keeps and comes
-    # back every week — the cheaper £/kg only pays off across weeks the planner
-    # cannot see. So the trade-off is offered rather than guessed, and recorded
-    # here once made. Ignored while the product is out of stock.
-    preferred_sku: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # The standing "always buy the 1 kg bag" decision used to live here. It is
+    # one person's preference rather than a fact about the ingredient, so it now
+    # lives on :class:`UserPackPreference`; this row stays the shared answer to
+    # "which products are this ingredient".
 
     model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     llm_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -569,18 +643,22 @@ class OcadoCartLedger(Base):
 
 
 class PlanSettings(Base):
-    """The shopping rhythm, as one row (single-user app, one household).
+    """The shopping rhythm, one row per user.
 
     Only the *shape* of the schedule lives here — how often a shop happens, when
     its recipe list has to be settled, and whether the whole thing is paused. The
-    recipes chosen for a given week stay client-side with the rest of the plan;
-    this table is what a future unattended job would need in order to know which
-    week it is buying for and when it is too late to change it.
+    recipes chosen for a given week are :class:`PlanSelection`; this table is what
+    an unattended job would need in order to know which week it is buying for and
+    when it is too late to change it.
     """
 
     __tablename__ = "plan_settings"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_plan_settings_user"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
 
     # How many weeks between shops. 1 = every week, 2 = fortnightly.
     cadence_weeks: Mapped[int] = mapped_column(Integer, default=1)
@@ -614,14 +692,128 @@ class PlanWeek(Base):
     """
 
     __tablename__ = "plan_weeks"
-    __table_args__ = (UniqueConstraint("week_start", name="uq_plan_week_start"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "week_start", name="uq_plan_week_user_start"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     week_start: Mapped[str] = mapped_column(String(16), index=True)
     skipped: Mapped[bool] = mapped_column(Integer, default=0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PlanSelection(Base):
+    """One recipe chosen for one week, with how it is being cooked.
+
+    This was ``localStorage`` until now, which is why it carries the fields it
+    does: ``portions`` and ``protein`` are the two things a week says about a
+    recipe that the recipe itself does not. The browser also cached a copy of the
+    recipe's name and macros beside each entry; that is deliberately not here, so
+    a card cannot go stale against the library it came from.
+
+    ``position`` preserves the order recipes were added in, which the week's list
+    is displayed in. ``protein_json`` is the modifier blob validated by
+    :mod:`app.protein` — stored whole rather than as columns because it is the
+    planner's input shape, not something this table ever filters on.
+    """
+
+    __tablename__ = "plan_selections"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "week_start", "recipe_id", name="uq_plan_selection_user_week_recipe"
+        ),
+        Index("ix_plan_selection_user_week", "user_id", "week_start"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    week_start: Mapped[str] = mapped_column(String(16), index=True)
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), index=True
+    )
+
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    portions: Mapped[int] = mapped_column(Integer, default=4)
+    protein_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PlanWeekItem(Base):
+    """A per-week decision about one basket line, for one user.
+
+    Three things the basket page can say about an ingredient, all of which expire
+    with the week: buy it in *this* pack (``pack_sku``), shave the demand to fit a
+    pack (``snapped``), and don't buy it at all because I already have it
+    (``owned``). They share a table because they share a lifetime and a key; a
+    row exists only once one of them has been said.
+
+    ``pack_sku`` is emphatically not :class:`UserPackPreference` — buying the big
+    bag once is a different decision from always buying it, and the point of
+    keeping them apart is that the first must not quietly become the second.
+    """
+
+    __tablename__ = "plan_week_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "week_start", "ingredient_key", name="uq_plan_week_item_user_week_key"
+        ),
+        Index("ix_plan_week_item_user_week", "user_id", "week_start"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    week_start: Mapped[str] = mapped_column(String(16), index=True)
+    ingredient_key: Mapped[str] = mapped_column(String(255), index=True)
+
+    pack_sku: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    snapped: Mapped[bool] = mapped_column(Integer, default=0)
+    owned: Mapped[bool] = mapped_column(Integer, default=0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class UserPackPreference(Base):
+    """A standing "always buy this size" decision, per user.
+
+    Lived on :class:`IngredientMapping` while there was one person to have an
+    opinion. It is not a fact about the ingredient, though — the mapping says
+    which products *are* rice, this says which bag of it you buy — so it moved
+    here rather than gaining a user column on a shared row.
+
+    That move has a consequence the planner has to respect: the cached
+    :class:`~app.planner.index.PlanIndex` is shared by every user, so a
+    preference can no longer be baked into it. It is applied at basket-build
+    time instead, folded into the same override slot a week's own pack choice
+    uses — see :func:`app.planner.basket.build_basket`.
+    """
+
+    __tablename__ = "user_pack_preferences"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "retailer", "ingredient_key", name="uq_user_pack_pref_user_key"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    retailer: Mapped[str] = mapped_column(String(64), default="ocado", index=True)
+    ingredient_key: Mapped[str] = mapped_column(String(255), index=True)
+    sku: Mapped[str] = mapped_column(String(128))
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 

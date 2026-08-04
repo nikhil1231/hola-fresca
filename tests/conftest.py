@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from app.db.models import Product, ProductSearchHit
+from app.db.models import Product, ProductSearchHit, User
 from app.db.session import init_db, make_engine, make_session_factory
 
 
@@ -13,6 +13,15 @@ def factory(tmp_path):
     engine = make_engine(tmp_path / "mapping.db")
     init_db(engine)
     return make_session_factory(engine)
+
+
+def user_id(session) -> int:
+    """The bootstrap account's id, which owns everything personal in a test DB.
+
+    ``init_db`` creates it, so this is always available. Looked up rather than
+    written as ``1`` so a test does not quietly depend on the autoincrement.
+    """
+    return session.scalar(select(User.id).order_by(User.id).limit(1))
 
 
 def seed_candidates(session, ingredient_key, name, products, *, line_count=100):
