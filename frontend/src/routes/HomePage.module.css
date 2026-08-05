@@ -12,9 +12,9 @@
   gap: var(--mantine-spacing-lg);
   align-items: start;
   padding: var(--mantine-spacing-md);
-  border: 1px solid var(--mantine-color-gray-3);
-  border-radius: var(--mantine-radius-md);
-  background: var(--mantine-color-body);
+  border: 1px solid var(--hf-border);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-surface);
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
@@ -49,12 +49,12 @@
 
 /* The week being planned right now — the one the cutoff is counting down for. */
 .weekRowActive {
-  border-color: var(--mantine-color-fresh-5);
-  box-shadow: 0 0 0 1px var(--mantine-color-fresh-5) inset;
+  border-color: var(--hf-border-strong);
+  box-shadow: 0 0 0 1px var(--hf-border-strong) inset;
 }
 
 .weekRowInactive {
-  background: var(--mantine-color-gray-0);
+  background: color-mix(in srgb, var(--hf-surface) 65%, transparent);
 }
 
 .weekRowInactive .tiles {
@@ -65,7 +65,7 @@
    waiting to be filled in: flat, muted, no card of its own. */
 .weekRowPast {
   border-style: dashed;
-  border-color: var(--mantine-color-gray-3);
+  border-color: var(--hf-border);
   background: transparent;
   padding-block: var(--mantine-spacing-xs);
 }
@@ -132,8 +132,8 @@
   display: block;
   color: inherit;
   text-decoration: none;
-  background: var(--mantine-color-gray-2);
-  border: 1px solid var(--mantine-color-gray-3);
+  background: var(--hf-surface-soft);
+  border: 1px solid var(--hf-border);
 }
 
 .tileImage {
@@ -212,17 +212,17 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
-  border: 1px dashed var(--mantine-color-gray-4);
-  background: var(--mantine-color-gray-0);
+  border: 1px dashed var(--hf-border);
+  background: var(--hf-surface);
   color: var(--mantine-color-dimmed);
   text-decoration: none;
   transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
 }
 
 .addTile:hover {
-  border-color: var(--mantine-color-fresh-5);
-  color: var(--mantine-color-fresh-8);
-  background: var(--mantine-color-fresh-0);
+  border-color: var(--hf-border-strong);
+  color: var(--hf-accent-soft);
+  background: color-mix(in srgb, var(--hf-accent) 12%, var(--hf-surface));
 }
 
 .addTileLabel {

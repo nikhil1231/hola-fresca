@@ -34,6 +34,19 @@
   display: none;
 }
 
+.statusPills {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.statusPills span {
+  display: block;
+  width: 8px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--hf-text-muted);
+}
+
 .controls {
   position: absolute;
   top: clamp(38px, 4.1vw, 76px);
@@ -583,6 +596,7 @@
 
   .summaryCard {
     order: 3;
+    position: relative;
     border-radius: 22px;
   }
 
@@ -604,6 +618,12 @@
 
   .summaryMeta {
     display: block;
+    position: absolute;
+    top: 56px;
+    right: 24px;
+    width: 46%;
+    line-height: 1.45;
+    text-align: right;
     white-space: normal;
   }
 
@@ -623,6 +643,7 @@
     flex-direction: column;
     justify-content: center;
     border-right: 0;
+    padding-right: 52%;
   }
 
   .spend .statValue {
