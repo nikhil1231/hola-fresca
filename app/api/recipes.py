@@ -57,9 +57,13 @@ from app import classify, measures
 from app import protein as protein_mod
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
-from app.planner.cache import get_index, get_standalone_prices
-from app.retailers import DEFAULT_RETAILER
+from app.planner.cache import (
+    get_index,
+    get_standalone_prices,
+    preserve_after_personal_write,
+)
 from app.planner.index import RETAILER, PlanIndex, PlanRecipe, resolve_protein
+from app.retailers import DEFAULT_RETAILER
 
 
 def _ingredient_match(keywords: list[str]):
@@ -1083,17 +1087,18 @@ def set_personal_rating(
 ) -> RecipeDetail:
     _require_library_recipe(session, recipe_id)
 
-    existing = session.get(PersonalRecipeRating, (user.id, recipe_id))
-    if body.rating is None:
-        if existing is not None:
-            session.delete(existing)
-    elif existing is None:
-        session.add(
-            PersonalRecipeRating(user_id=user.id, recipe_id=recipe_id, rating=body.rating)
-        )
-    else:
-        existing.rating = body.rating
-    session.commit()
+    with preserve_after_personal_write(session):
+        existing = session.get(PersonalRecipeRating, (user.id, recipe_id))
+        if body.rating is None:
+            if existing is not None:
+                session.delete(existing)
+        elif existing is None:
+            session.add(
+                PersonalRecipeRating(user_id=user.id, recipe_id=recipe_id, rating=body.rating)
+            )
+        else:
+            existing.rating = body.rating
+        session.commit()
     return get_recipe(recipe_id, session, factory, csv_path, user, retailer)
 
 
@@ -1109,12 +1114,13 @@ def set_wishlist(
 ) -> RecipeDetail:
     _require_library_recipe(session, recipe_id)
 
-    existing = session.get(PersonalRecipeWishlist, (user.id, recipe_id))
-    if body.wishlisted and existing is None:
-        session.add(PersonalRecipeWishlist(user_id=user.id, recipe_id=recipe_id))
-    elif not body.wishlisted and existing is not None:
-        session.delete(existing)
-    session.commit()
+    with preserve_after_personal_write(session):
+        existing = session.get(PersonalRecipeWishlist, (user.id, recipe_id))
+        if body.wishlisted and existing is None:
+            session.add(PersonalRecipeWishlist(user_id=user.id, recipe_id=recipe_id))
+        elif not body.wishlisted and existing is not None:
+            session.delete(existing)
+        session.commit()
     return get_recipe(recipe_id, session, factory, csv_path, user, retailer)
 
 
