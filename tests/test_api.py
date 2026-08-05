@@ -22,6 +22,7 @@ from app.db.models import (
 from app.db.session import init_db, make_engine, make_session_factory
 from app.mapping import service
 from app.mapping.candidates import gather_candidates
+from app.planner.cache import get_index
 from main import app
 from tests.conftest import seed_candidates
 from tests.test_planner_basket import write_freq_csv
@@ -400,6 +401,28 @@ def test_personal_rating_round_trip(client):
 
     cleared = client.put(f"/api/recipes/{rid}/personal-rating", json={"rating": None}).json()
     assert cleared["personal_rating"] is None
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "body"),
+    [
+        ("personal-rating", {"rating": 4}),
+        ("wishlist", {"wishlisted": True}),
+    ],
+)
+def test_personal_recipe_metadata_write_keeps_cached_planner_index(
+    client, endpoint, body
+):
+    """Personal metadata must not look like a shared catalogue edit."""
+    rid = client.get("/api/recipes", params={"cuisine": "Italian"}).json()["items"][0]["id"]
+    factory = app.dependency_overrides[get_session_factory]()
+    csv_path = app.dependency_overrides[get_planner_csv_path]()
+    before = get_index(factory, csv_path=csv_path)
+
+    response = client.put(f"/api/recipes/{rid}/{endpoint}", json=body)
+
+    assert response.status_code == 200
+    assert get_index(factory, csv_path=csv_path) is before, "kept, not rebuilt"
 
 
 def test_personal_rating_filter_returns_only_rated(client):

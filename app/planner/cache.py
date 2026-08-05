@@ -183,6 +183,23 @@ def note_pack_preference(factory: sessionmaker[Session]) -> None:
             entry.fingerprint = _fingerprint(db, Path(key[3]) if key[3] else None)
 
 
+def note_personal_recipe_metadata(factory: sessionmaker[Session]) -> None:
+    """Keep planner caches after a rating or wishlist write.
+
+    Ratings and wishlist membership live in the same SQLite file as the shared
+    catalogue, so committing either moves the file's mtime. Neither value is an
+    input to the planner index, standalone prices or suggestion rankings,
+    though, and treating that mtime change as a catalogue edit makes the detail
+    response rebuild the whole index for no reason.
+    """
+    db = _db_path(factory)
+    with _LOCK:
+        for key, entry in list(_CACHE.items()):
+            if key[0] != str(db):
+                continue
+            entry.fingerprint = _fingerprint(db, Path(key[3]) if key[3] else None)
+
+
 def _preferences_key(pack_preferences: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
     """A hashable, order-independent identity for one user's standing packs.
 

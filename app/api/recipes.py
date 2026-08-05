@@ -56,7 +56,11 @@ from app import classify, measures
 from app import protein as protein_mod
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
-from app.planner.cache import get_index, get_standalone_prices
+from app.planner.cache import (
+    get_index,
+    get_standalone_prices,
+    note_personal_recipe_metadata,
+)
 from app.planner.index import RETAILER, PlanIndex, PlanRecipe, resolve_protein
 
 
@@ -1063,6 +1067,7 @@ def set_personal_rating(
     else:
         existing.rating = body.rating
     session.commit()
+    note_personal_recipe_metadata(factory)
     return get_recipe(recipe_id, session, factory, csv_path, user)
 
 
@@ -1083,6 +1088,7 @@ def set_wishlist(
     elif not body.wishlisted and existing is not None:
         session.delete(existing)
     session.commit()
+    note_personal_recipe_metadata(factory)
     return get_recipe(recipe_id, session, factory, csv_path, user)
 
 
