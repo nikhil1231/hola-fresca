@@ -281,7 +281,7 @@ def basket(
         pack_overrides=body.pack_overrides,
         snap_overrides=body.snap_overrides,
         pack_preferences=pack_preferences(session, user.id),
-        pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session),
+        pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session, user.id),
     ))
 
 

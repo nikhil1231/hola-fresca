@@ -1,141 +1,588 @@
+
+.detailPage {
+  min-height: 100dvh;
+  background: var(--hf-bg);
+  color: var(--hf-text);
+}
+
+.mobileStatusBar {
+  display: none;
+}
+
+.heroShell {
+  position: relative;
+  min-height: min(58vw, 560px);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(33, 43, 29, 0.92), rgba(8, 12, 10, 0.98)),
+    var(--hf-surface-soft);
+}
+
 .hero {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  max-height: 420px;
+  height: 100%;
   object-fit: cover;
+  opacity: 0.46;
+  filter: saturate(0.9) contrast(1.03);
 }
 
-.title {
-  letter-spacing: -0.02em;
-  line-height: 1.15;
+.heroOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(13, 17, 15, 0.04) 0%, rgba(13, 17, 15, 0.18) 44%, var(--hf-bg) 100%),
+    radial-gradient(circle at 42% 20%, rgba(76, 96, 58, 0.24), transparent 46%);
 }
 
-.star {
-  color: var(--mantine-color-yellow-6);
+.heroTopControls {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: clamp(28px, 4vw, 48px);
 }
 
-.ratingStack {
-  line-height: 1;
-}
-
-.ratingsPanel {
-  width: fit-content;
-  max-width: 100%;
-  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
-}
-
-.ratingItem {
-  min-width: 92px;
-}
-
-.ratingValue {
-  min-height: 36px;
-}
-
-.personalStar,
-.personalStarActive {
-  color: light-dark(var(--mantine-color-gray-4), var(--mantine-color-dark-2)) !important;
-}
-
-.personalStar:hover,
-.personalStarActive,
-.personalStarActive:hover {
-  color: var(--mantine-color-yellow-6) !important;
+.circleButton,
+.wishlistButton,
+.heroTopControls :global(.mantine-Menu-target) > button {
+  background: rgba(10, 13, 10, 0.82) !important;
+  color: var(--hf-text) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
 .wishlistButton {
-  color: light-dark(var(--mantine-color-red-6), var(--mantine-color-red-4));
+  color: #ff8faf !important;
 }
 
 .wishlistButton[data-active] {
-  background: light-dark(var(--mantine-color-red-0), color-mix(in srgb, var(--mantine-color-red-9) 34%, transparent));
-  color: light-dark(var(--mantine-color-red-7), var(--mantine-color-red-3));
-  border: 1px solid light-dark(var(--mantine-color-red-2), var(--mantine-color-red-8));
+  background: rgba(10, 13, 10, 0.92) !important;
+  color: #ff8faf !important;
+  border-color: rgba(255, 143, 175, 0.2) !important;
 }
 
-.macro {
-  text-align: center;
+.heroContent {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: clamp(92px, 11vw, 170px) clamp(28px, 5vw, 64px) clamp(36px, 6vw, 74px);
 }
 
-.ingImg {
-  flex-shrink: 0;
-  background: var(--mantine-color-gray-1);
+.heroTags {
+  margin-bottom: 16px;
 }
 
-.ingredientWarning {
+.heroTag {
   display: inline-flex;
-  margin-left: 6px;
-  vertical-align: text-bottom;
-  forced-color-adjust: none;
-  color-scheme: light only;
-  --ti-bg: rgb(255, 243, 191) !important;
-  --ti-color: rgb(124, 77, 0) !important;
-  background: rgb(255, 243, 191) !important;
-  color: rgb(124, 77, 0) !important;
-  border: 1px solid rgb(255, 212, 59) !important;
+  align-items: center;
+  min-height: 34px;
+  padding-inline: 14px;
+  border-radius: 8px;
+  color: #0d160f;
+  background: var(--hf-accent);
+  font-size: 0.92rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
-.ingredientWarning svg {
-  color: currentColor;
+.heroTag.gray {
+  color: var(--hf-text);
+  background: color-mix(in srgb, var(--hf-text) 18%, transparent);
 }
 
-.step {
-  line-height: 1.6;
-  padding-top: 2px;
+.title {
+  max-width: 980px;
+  color: #fff;
+  font-size: clamp(2.8rem, 7vw, 5.6rem);
+  line-height: 0.98;
+  letter-spacing: -0.07em;
 }
-.macroDot {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  margin-right: 7px;
+
+.contentShell {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: clamp(26px, 4vw, 44px) clamp(28px, 5vw, 64px) 72px;
+}
+
+.headline {
+  max-width: 860px;
+  color: var(--hf-text-muted);
+  font-size: clamp(1.4rem, 3vw, 2.05rem);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.metaRow {
+  margin-top: 22px;
+  color: var(--hf-text-muted);
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+
+.heroRating {
+  color: var(--hf-text);
+}
+
+.star {
+  color: var(--hf-warning);
+}
+
+.ctaGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 26px;
+}
+
+.primaryCta,
+.secondaryCta {
+  min-height: 88px;
+  padding-inline: 28px;
+  font-size: 1.45rem;
+  font-weight: 950;
+}
+
+.primaryCta span,
+.secondaryCta span {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  line-height: 1.05;
+}
+
+.primaryCta small,
+.secondaryCta small {
+  color: color-mix(in srgb, #08120a 72%, transparent);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.secondaryCta {
+  border-width: 2px;
+  border-color: var(--hf-border-strong) !important;
+  color: var(--hf-accent-soft) !important;
+  background: color-mix(in srgb, var(--hf-accent) 7%, transparent) !important;
+}
+
+.secondaryCta small {
+  color: var(--hf-text-muted);
+}
+
+.plannedControls {
+  min-height: 88px;
+  justify-content: center;
+  border: 2px solid var(--hf-border-strong);
   border-radius: 999px;
-  background: var(--macro-color);
-  vertical-align: 0.08em;
-}
-
-.costBadge {
-  text-transform: none;
-  letter-spacing: 0;
+  background: color-mix(in srgb, var(--hf-accent) 7%, transparent);
 }
 
 .portionStepper {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  height: 36px;
+  height: 42px;
   padding: 3px;
-  border: 1px solid var(--mantine-color-gray-2);
+  border: 1px solid var(--hf-border);
   border-radius: 999px;
-  background: var(--mantine-color-white);
+  background: rgba(8, 12, 10, 0.86);
 }
 
 .portionCount {
-  min-width: 24px;
+  min-width: 28px;
+  color: var(--hf-text);
   text-align: center;
   line-height: 1;
 }
 
-.ingredientsTable th:first-child,
-.ingredientsTable td:first-child {
-  padding-left: 8px;
+.macroPanel,
+.ratePanel,
+.detailControls {
+  margin-top: 32px;
+  overflow: hidden;
+  border-color: var(--hf-border) !important;
+  border-radius: 24px !important;
+  background: var(--hf-surface) !important;
 }
 
-.ingredientRow {
+.macroGrid {
+  min-height: 108px;
+}
+
+.macro {
+  display: grid;
+  align-content: center;
+  min-height: 108px;
+  padding: 18px 24px !important;
+  border: 0 !important;
+  border-right: 1px solid var(--hf-border) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  text-align: left;
+}
+
+.macro:last-child {
+  border-right: 0 !important;
+}
+
+.macro :global(.mantine-Text-root:first-child) {
+  color: var(--hf-text);
+  font-size: 2rem;
+  font-weight: 950;
+  letter-spacing: -0.05em;
+}
+
+.macroDot {
+  display: none;
+}
+
+.macroFooter {
+  min-height: 70px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--hf-border);
+}
+
+.macroCaption {
+  color: var(--hf-text-muted);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.ratePanel {
+  min-height: 84px;
+  padding: 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.personalStar,
+.personalStarActive {
+  color: var(--hf-text-subtle) !important;
+}
+
+.personalStar:hover,
+.personalStarActive,
+.personalStarActive:hover {
+  color: var(--hf-text-muted) !important;
+}
+
+.detailControls {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+  gap: 22px;
+  padding: 20px 24px;
+}
+
+.recipeSection {
+  margin-top: 34px;
+  border-top: 1px solid var(--hf-border);
+}
+
+.sectionHeader,
+.collapsibleHeader {
+  min-height: 86px;
+  width: 100%;
+  color: inherit;
+}
+
+.collapsibleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.sectionHeading {
+  color: var(--hf-text);
+  font-size: clamp(1.55rem, 3vw, 2.1rem);
+  letter-spacing: -0.045em;
+}
+
+.sectionHeading span {
+  margin-left: 10px;
+  color: var(--hf-text-subtle);
+  font-size: 0.82em;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.sectionToggle {
+  color: var(--hf-text-muted);
+  font-size: 1.7rem;
+  font-weight: 900;
+}
+
+.ingredientList {
+  border-top: 1px solid var(--hf-border);
+}
+
+.ingredientItem {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  width: 100%;
+  min-height: 72px;
+  align-items: center;
+  border-bottom: 1px solid var(--hf-border);
+  color: var(--hf-text);
+  text-align: left;
+}
+
+.ingredientItem:not(:disabled) {
   cursor: pointer;
 }
 
-.ingredientRow:hover {
-  box-shadow: inset 3px 0 var(--mantine-color-fresh-6);
+.ingredientItem:not(:disabled):hover {
+  color: var(--hf-accent-soft);
 }
 
-.ingredientRow:hover td {
-  background: transparent !important;
+.ingredientItem span {
+  font-size: 1.35rem;
+  font-weight: 850;
+  line-height: 1.22;
 }
 
-.quantityCell {
-  width: 96px;
-  vertical-align: top;
+.ingredientItem strong {
+  color: var(--hf-text-muted);
+  font-size: 1.25rem;
+  font-weight: 900;
+  text-align: right;
 }
 
-.ingPlaceholder {
-  flex-shrink: 0;
+.ingredientItem small {
+  grid-column: 2;
+  margin-top: -16px;
+  color: var(--hf-text-subtle);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.inlineWarning {
+  color: var(--hf-warning);
+  font-size: 0.75em !important;
+}
+
+.showMoreButton {
+  min-height: 70px;
+  color: var(--hf-accent-soft);
+  font-size: 1.15rem;
+  font-weight: 950;
+}
+
+.recipeTotals {
+  display: grid;
+  gap: 8px;
+  padding-top: 18px;
+  color: var(--hf-text-muted);
+  font-weight: 800;
+}
+
+.recipeTotals span {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.recipeTotals strong {
+  color: var(--hf-text);
+}
+
+.sectionChevron {
+  color: var(--hf-text-muted);
+  transition: transform 180ms ease;
+}
+
+.sectionChevronOpen {
+  transform: rotate(180deg);
+}
+
+.collapsibleBody {
+  padding: 0 0 26px;
+  color: var(--hf-text-muted);
+}
+
+.methodStep {
+  padding-top: 10px;
+}
+
+.step {
+  color: var(--hf-text);
+  line-height: 1.65;
+  padding-top: 2px;
+}
+
+.sourceLink {
+  display: inline-flex;
+  margin-top: 28px;
+  text-decoration: none;
+}
+
+.costBadge,
+.ratingStack,
+.ratingsPanel,
+.ratingItem,
+.ratingValue,
+.ingImg,
+.ingredientWarning,
+.quantityCell,
+.ingPlaceholder,
+.ingredientsTable {
+  color: inherit;
+}
+
+@media (min-width: 60em) {
+  .contentShell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.48fr);
+    column-gap: 42px;
+  }
+
+  .headline,
+  .metaRow,
+  .ctaGrid,
+  .macroPanel,
+  .ratePanel,
+  .detailControls,
+  .recipeSection,
+  .sourceLink {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 48em) {
+  .detailPage {
+    border-inline: 1px solid var(--hf-border);
+  }
+
+  .mobileStatusBar {
+    position: absolute;
+    inset: 0 0 auto 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 52px;
+    padding: 0 35px;
+    color: var(--hf-text-muted);
+    font-weight: 950;
+  }
+
+  .heroShell {
+    min-height: 475px;
+  }
+
+  .heroTopControls {
+    padding: 76px 26px 0;
+  }
+
+  .heroContent {
+    padding: 158px 34px 28px;
+  }
+
+  .title {
+    font-size: 2.65rem;
+  }
+
+  .contentShell {
+    padding: 24px 34px 34px;
+  }
+
+  .headline {
+    font-size: 1.55rem;
+  }
+
+  .metaRow {
+    font-size: 1.25rem;
+  }
+
+  .ctaGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .primaryCta,
+  .secondaryCta,
+  .plannedControls {
+    min-height: 102px;
+    padding-inline: 12px;
+    font-size: 1.45rem;
+  }
+
+  .primaryCta small,
+  .secondaryCta small {
+    font-size: 1rem;
+  }
+
+  .macroPanel,
+  .ratePanel,
+  .detailControls {
+    border-radius: 22px !important;
+  }
+
+  .macroGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .macro {
+    min-height: 86px;
+    padding: 16px 18px !important;
+  }
+
+  .macro :global(.mantine-Text-root:first-child) {
+    font-size: 1.65rem;
+  }
+
+  .macroFooter {
+    min-height: 70px;
+    padding: 16px 28px;
+  }
+
+  .detailControls {
+    grid-template-columns: 1fr;
+  }
+
+  .sectionHeader,
+  .collapsibleHeader {
+    min-height: 86px;
+  }
+
+  .ingredientItem span {
+    font-size: 1.35rem;
+  }
+
+  .ingredientItem strong {
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-width: 34em) {
+  .contentShell {
+    padding-inline: 24px;
+  }
+
+  .heroContent {
+    padding-inline: 24px;
+  }
+
+  .ctaGrid {
+    gap: 12px;
+  }
+
+  .primaryCta,
+  .secondaryCta,
+  .plannedControls {
+    min-height: 92px;
+    font-size: 1.18rem;
+  }
+
+  .primaryCta small,
+  .secondaryCta small {
+    font-size: 0.86rem;
+  }
 }

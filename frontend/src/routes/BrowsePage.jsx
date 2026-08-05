@@ -33,7 +33,7 @@ import {
   useRecipes,
   useRecipeSuggestions,
 } from '../hooks/useRecipeQueries.js'
-  formatWeekRange,
+import {
   formatWeekStart,
   isPastWeekStart,
   resolveTargetWeek,

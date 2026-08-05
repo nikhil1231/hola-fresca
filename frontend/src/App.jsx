@@ -55,19 +55,26 @@ function LastUpdatedFooter() {
 }
 
 function App() {
-  // A one-off carry-over of any plan still living in this browser's
-  // localStorage. Runs once per browser and then never again; see the hook.
   useLocalPlanImport()
+  const { pathname } = useLocation()
+  const immersive = pathname === '/basket' || pathname.startsWith('/recipes/')
 
   return (
-    <AppShell header={{ height: 64 }} padding={0}>
-      <AppShell.Header>
-        <Header />
-      </AppShell.Header>
+    <AppShell header={immersive ? undefined : { height: 64 }} padding={0}>
+      {!immersive && (
+        <AppShell.Header>
+          <Header />
+        </AppShell.Header>
+      )}
       <AppShell.Main>
-        <Container size="xl" px={{ base: 24, sm: 'xl' }} py={{ base: 'lg', sm: 'xl' }}>
+        <Container
+          fluid={immersive}
+          size={immersive ? undefined : 'xl'}
+          px={immersive ? 0 : { base: 24, sm: 'xl' }}
+          py={immersive ? 0 : { base: 'lg', sm: 'xl' }}
+        >
           <Outlet />
-          <LastUpdatedFooter />
+          {!immersive && <LastUpdatedFooter />}
         </Container>
       </AppShell.Main>
     </AppShell>

@@ -2,6 +2,46 @@
   box-sizing: border-box;
 }
 
+:root {
+  color-scheme: dark;
+  --hf-bg: #0d110f;
+  --hf-bg-elevated: #111611;
+  --hf-surface: #171d18;
+  --hf-surface-soft: #1d241e;
+  --hf-surface-strong: #202720;
+  --hf-border: #2b332d;
+  --hf-border-strong: #2f7b4b;
+  --hf-text: #f1f3ee;
+  --hf-text-muted: #8c918a;
+  --hf-text-subtle: #696f68;
+  --hf-accent: #4ade80;
+  --hf-accent-soft: #8cf0ae;
+  --hf-warning: #f1b950;
+  --hf-purple: #6f5795;
+  --hf-radius: 28px;
+  --hf-radius-sm: 14px;
+  --hf-shadow: 0 20px 60px rgba(0, 0, 0, 0.38);
+}
+
+html {
+  background: var(--hf-bg);
+}
+
 body {
   margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 50% -20%, rgba(72, 101, 66, 0.14), transparent 42%),
+    var(--hf-bg);
+  color: var(--hf-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--hf-accent) 36%, transparent);
+}
+
+a {
+  color: inherit;
 }

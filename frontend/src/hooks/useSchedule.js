@@ -50,7 +50,7 @@ export function useUpdateScheduleSettings() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: updateScheduleSettings,
-    onSuccess: (schedule) => {
+    onSuccess: () => {
       refresh()
       queryClient.invalidateQueries({ queryKey: ['planner-basket'] })
     },

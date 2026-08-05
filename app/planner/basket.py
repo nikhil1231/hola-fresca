@@ -630,7 +630,14 @@ def pack_options(
     unit = cover.quantity_unit
     if need <= 0:
         return ()
-    packs = list(_preferred_tier(ingredient)[1])
+    packs: list[Pack] = []
+    for match_type in ("exact", "form_differs"):
+        packs.extend(drop_poorly_rated(tuple(
+            pack for pack in ingredient.available_packs if pack.match_type == match_type
+        )))
+    for choice in cover.choices:
+        if choice.pack not in packs:
+            packs.append(choice.pack)
     for held in (pinned_pack(ingredient, standing), pinned_pack(ingredient, override)):
         if held is not None and held not in packs:
             packs.append(held)

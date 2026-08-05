@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
   Alert,
@@ -13,7 +13,6 @@ import {
   Modal,
   SegmentedControl,
   Select,
-  SimpleGrid,
   Stack,
   Table,
   Text,
@@ -24,7 +23,6 @@ import {
 import {
   IconAlertCircle,
   IconAlertTriangle,
-  IconBasket,
   IconBuildingStore,
   IconArrowRight,
   IconArrowDown,
@@ -144,22 +142,25 @@ function recipePortionPrices(lines, entries) {
   )
 }
 
-function Stat({ label, value, description, tone = 'default' }) {
+function Stat({ label, value, description, support, tone = 'default' }) {
   return (
     <Box className={`${classes.stat} ${classes[tone] ?? ''}`}>
-      <Group gap={5} justify="space-between" align="center" wrap="nowrap">
-        <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+      <Group gap={5} align="center" wrap="nowrap">
+        <Text className={classes.statLabel}>
           {label}
         </Text>
-        <Tooltip label={description} withArrow position="top">
-          <span className={classes.infoIcon} aria-label={`${label} explanation`} tabIndex={0}>
-            <IconInfoCircle size={14} stroke={2} />
-          </span>
-        </Tooltip>
+        {description && (
+          <Tooltip label={description} withArrow position="top">
+            <span className={classes.infoIcon} aria-label={`${label} explanation`} tabIndex={0}>
+              <IconInfoCircle size={14} stroke={2} />
+            </span>
+          </Tooltip>
+        )}
       </Group>
-      <Text fw={800} className={classes.statValue}>
+      <Text className={classes.statValue}>
         {value}
       </Text>
+      {support && <Text className={classes.statDescription}>{support}</Text>}
     </Box>
   )
 }
@@ -467,17 +468,20 @@ function LineTable({
   setItemOwned,
   onToggleSnap,
   readOnly = false,
+  compactHeader = false,
 }) {
   if (!lines.length) return null
 
   return (
     <Box className={classes.section}>
-      <Group gap="xs" mb="xs">
-        {icon}
-        <Title order={3} className={classes.sectionTitle}>
-          {title}
-        </Title>
-      </Group>
+      {!compactHeader && (
+        <Group gap="xs" mb="xs">
+          {icon}
+          <Title order={3} className={classes.sectionTitle}>
+            {title}
+          </Title>
+        </Group>
+      )}
       <Table.ScrollContainer minWidth={720}>
         <Table verticalSpacing="sm" className={classes.lineTable}>
           <colgroup>
@@ -756,6 +760,327 @@ function NameList({ title, names, muted = false }) {
   )
 }
 
+function shortWeekLabel(value) {
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return formatWeekLabel(value)
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(date)
+}
+
+function stockStatusText(stockRefresh, stockAge) {
+  if (stockRefresh.isPending) return 'Checking Ocado...'
+  if (stockAge) return `Stock checked ${stockAge}`
+  return 'Stock not checked'
+}
+
+function BasketSummary({
+  entries,
+  orderCost,
+  orderWaste,
+  basketPortionPrice,
+  totalPortions,
+  weekStart,
+  buyLines,
+}) {
+  const score = orderCost + orderWaste
+  const recipeWord = entries.length === 1 ? 'recipe' : 'recipes'
+  const portionWord = totalPortions === 1 ? 'portion' : 'portions'
+
+  return (
+    <Box className={classes.summaryCard}>
+      <div className={classes.summaryTop}>
+        <div>
+          <Title order={1} className={classes.summaryTitle}>Basket</Title>
+          <Text className={classes.summarySubtitle}>
+            {entries.length} {recipeWord} · {totalPortions} {portionWord} · {formatWeekLabel(weekStart)}
+          </Text>
+        </div>
+        <Text className={classes.summaryMeta}>
+          {entries.length} {recipeWord} · {buyLines.length} items · {totalPortions} {portionWord}
+        </Text>
+      </div>
+      <Box className={classes.statsGrid}>
+        <Stat
+          label="Spend"
+          value={formatMoney(orderCost)}
+          support={`${buyLines.length} items, online order`}
+          description="Estimated total cost of basket items not marked as owned."
+          tone="spend"
+        />
+        <Stat
+          label="Waste"
+          value={formatMoney(orderWaste)}
+          support={`${Math.round((orderWaste / Math.max(orderCost, 0.01)) * 100)}% of spend`}
+          description="Estimated value of unused pack leftovers after this week's recipes."
+        />
+        <Stat
+          label="Score"
+          value={formatMoney(score)}
+          support="spend + waste"
+          description="Spend plus waste, used to compare basket efficiency."
+        />
+        <Stat
+          label="Per portion"
+          value={formatMoney(basketPortionPrice)}
+          support={`${formatMoney(orderCost)} ÷ ${Math.max(totalPortions, 1)}`}
+          description="Estimated spend divided by the total planned portions."
+          tone="portion"
+        />
+      </Box>
+    </Box>
+  )
+}
+
+function BasketControls({ pageView, setPageView, weekStart, setWeekStart, weekOptions }) {
+  return (
+    <Group gap="sm" wrap="nowrap" className={classes.controls}>
+      <SegmentedControl
+        size="md"
+        value={pageView}
+        onChange={setPageView}
+        data={[
+          { label: 'Basket', value: 'basket' },
+          { label: 'Checkout', value: 'checkout' },
+        ]}
+        className={classes.viewToggle}
+        aria-label="Basket view"
+      />
+      <Select
+        value={weekStart}
+        onChange={(value) => value && setWeekStart(value)}
+        data={weekOptions.map((start) => ({ value: start, label: shortWeekLabel(start) }))}
+        allowDeselect={false}
+        radius="xl"
+        className={classes.weekSelect}
+        aria-label="Week"
+      />
+    </Group>
+  )
+}
+
+function RecipeRail({
+  entries,
+  recipesPerWeek,
+  recipesScrollRef,
+  recipeRefs,
+  recipePrices,
+  glowRecipeIds,
+  setHoverRecipeId,
+  removeRecipeFromWeek,
+  setRecipePortions,
+  weekStart,
+}) {
+  return (
+    <Box className={classes.recipesPanel}>
+      <Group justify="space-between" className={classes.panelHeading}>
+        <Title order={3} className={classes.panelTitle}>Recipes</Title>
+        <Text className={classes.panelCount}>{entries.length}/{recipesPerWeek}</Text>
+      </Group>
+      {entries.length === 0 ? (
+        <Box className={classes.emptyState}>
+          <Text fw={800}>No recipes selected</Text>
+          <Text size="sm" c="dimmed">Add recipes from Browse to build this week.</Text>
+        </Box>
+      ) : (
+        <Box className={classes.recipesScroll} ref={recipesScrollRef}>
+          <div className={classes.recipeRail}>
+            {entries.map((entry) => (
+              <Box
+                key={entry.recipe.id}
+                ref={(node) => {
+                  if (node) recipeRefs.current.set(entry.recipe.id, node)
+                  else recipeRefs.current.delete(entry.recipe.id)
+                }}
+                className={classes.compactRecipeTile}
+                onMouseEnter={() => setHoverRecipeId(entry.recipe.id)}
+                onMouseLeave={() => setHoverRecipeId(null)}
+              >
+                <RecipeCard
+                  recipe={entry.recipe}
+                  basketBadgeLabel={`${formatMoney(recipePrices.get(entry.recipe.id))} pp`}
+                  highlighted={glowRecipeIds.has(entry.recipe.id)}
+                  plannerEntry={entry}
+                  plannerControlsVisible
+                  onRemoveFromPlan={() => removeRecipeFromWeek(weekStart, entry.recipe.id)}
+                  onPortionsChange={(portions) =>
+                    setRecipePortions(weekStart, entry.recipe.id, portions)
+                  }
+                  showStats
+                />
+              </Box>
+            ))}
+            <Link to="/browse" className={classes.addRecipeTile}>
+              Add a recipe
+            </Link>
+          </div>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+function MobileLineCard({
+  line,
+  rowKey,
+  onOpenPacks,
+  busyPackKey,
+  owned,
+  setItemOwned,
+  setActiveLineKey,
+  setHoverLineKey,
+  onToggleSnap,
+}) {
+  const canExpand = line.choices?.length > 0
+  const packRecommendation = (line.options ?? []).find((option) => option.recommended && !option.chosen)
+  const heldOption = (line.options ?? []).find((option) => option.pinned || option.this_week)
+  const canSwap = (line.options?.length ?? 0) > 1
+  const summary = `${formatQuantity(line.need_qty ?? line.need_g, line.quantity_unit)} · ${packsText(
+    line,
+  )} → ${formatQuantity(line.leftover_qty ?? line.leftover_g, line.quantity_unit)} left`
+
+  return (
+    <div
+      className={`${classes.mobileLineCard} ${owned ? classes.mobileLineOwned : ''}`}
+      onMouseEnter={() => setHoverLineKey(rowKey)}
+      onMouseLeave={() => setHoverLineKey(null)}
+      onClick={() => setActiveLineKey(rowKey)}
+      role={canExpand ? 'button' : undefined}
+      tabIndex={canExpand ? 0 : undefined}
+    >
+      <Checkbox
+        checked={owned}
+        className={classes.mobileLineCheck}
+        onChange={(event) => setItemOwned(line.key, event.currentTarget.checked)}
+        onClick={(event) => event.stopPropagation()}
+        aria-label={`Mark ${line.name} as already owned`}
+      />
+      <div className={classes.mobileLineMain}>
+        <Group gap={6} align="center">
+          <Text className={classes.mobileLineName}>{line.name}</Text>
+          {heldOption && (
+            <span className={classes.packTag}>{heldOption.pack_size_raw || 'chosen'}</span>
+          )}
+          {line.trace && <span className={classes.traceTag}>trace</span>}
+        </Group>
+        <Text className={classes.mobileLineSummary}>{summary}</Text>
+        <Group gap={8} className={classes.mobileLineActions}>
+          {line.snap && (
+            <UnstyledButton
+              className={classes.mobileSwapAction}
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggleSnap(line.key, !line.snapped)
+              }}
+            >
+              {line.snapped ? 'Snap owned' : 'Snap available'}
+            </UnstyledButton>
+          )}
+          {canSwap && (
+            <UnstyledButton
+              className={classes.mobileSwapAction}
+              disabled={busyPackKey === line.key}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenPacks(line.key)
+              }}
+            >
+              {packRecommendation ? 'Swap available' : 'Change pack'}
+            </UnstyledButton>
+          )}
+        </Group>
+      </div>
+      <div className={classes.mobileLinePrice}>
+        {owned ? (
+          <Text className={classes.mobileOwnedText}>Owned</Text>
+        ) : (
+          <>
+            <Text className={classes.mobileCost}>{formatMoney(line.cost)}</Text>
+            <Text className={line.waste_gbp > 1 ? classes.mobileWasteHot : classes.mobileWaste}>
+              {formatMoney(line.waste_gbp)} waste
+            </Text>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MobileLineList({
+  lines,
+  tableId,
+  onOpenPacks,
+  busyPackKey,
+  ownedItemKeySet,
+  setItemOwned,
+  setActiveLineKey,
+  setHoverLineKey,
+  onToggleSnap,
+}) {
+  if (!lines.length) return null
+
+  return (
+    <div className={classes.mobileLineList}>
+      {lines.map((line) => {
+        const rowKey = `${tableId}:${line.key}`
+        return (
+          <MobileLineCard
+            key={rowKey}
+            line={line}
+            rowKey={rowKey}
+            onOpenPacks={onOpenPacks}
+            busyPackKey={busyPackKey}
+            owned={ownedItemKeySet.has(line.key)}
+            setItemOwned={setItemOwned}
+            setActiveLineKey={setActiveLineKey}
+            setHoverLineKey={setHoverLineKey}
+            onToggleSnap={onToggleSnap}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function OrderPanelHeader({
+  title,
+  subtitle,
+  itemCount,
+  stockText,
+  stockRefresh,
+  selections,
+  packOverrides,
+  snapOverrides,
+}) {
+  return (
+    <Group justify="space-between" align="flex-start" className={classes.orderHeader}>
+      <div>
+        <Group gap="xs" align="baseline">
+          <Title order={3} className={classes.orderTitle}>{title}</Title>
+          <Text className={classes.orderCount}>{itemCount} items</Text>
+        </Group>
+        {subtitle && <Text className={classes.orderSubtitle}>{subtitle}</Text>}
+      </div>
+      <Group gap="md" align="center" wrap="nowrap" className={classes.stockControls}>
+        <Text className={classes.stockText}>{stockText}</Text>
+        <Button
+          variant="outline"
+          size="sm"
+          radius="lg"
+          className={classes.refreshButton}
+          loading={stockRefresh.isPending}
+          disabled={!selections.length}
+          onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
+        >
+          Refresh stock
+        </Button>
+      </Group>
+    </Group>
+  )
+}
+
 export default function BasketPage() {
   const {
     upcomingWeekStart,
@@ -951,153 +1276,75 @@ export default function BasketPage() {
     return () => window.clearTimeout(handle)
   }, [hoverLineKey, glowRecipeIds])
 
+  const orderStockText = stockStatusText(stockRefresh, stockAge)
+  const busyPackKey = packPreference.isPending ? packPreference.variables?.ingredientKey : null
+
   return (
-    <Stack gap="xl" className={classes.pageStack}>
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Group gap="xs">
-            <IconBasket size={28} className={classes.titleIcon} />
-            <Title order={2}>Basket</Title>
-          </Group>
-          <Group gap="xs">
-            <Text c="dimmed">{entries.length} recipes for {formatWeekLabel(weekStart)}</Text>
-            {readOnly && (
-              <Badge color="gray" variant="light" radius="sm" leftSection={<IconLock size={12} />}>
-                Past
-              </Badge>
-            )}
-          </Group>
-        </div>
-        <Select
-          value={weekStart}
-          onChange={(value) => value && setWeekStart(value)}
-          data={weekOptions.map((start) => ({
-            value: start,
-            // Marked in the list rather than only after you pick one: which of
-            // these weeks are history is the first thing you want to know.
-            label: isPastWeekStart(start)
-              ? `${formatWeekLabel(start)} · past`
-              : formatWeekLabel(start),
-          }))}
-          allowDeselect={false}
-          radius="md"
-          w={{ base: 220, sm: 300 }}
-          aria-label="Week"
+    <main className={classes.pageStack}>
+      <div className={classes.mobileStatusBar} aria-hidden="true">
+        <span>9:41</span>
+        <span>???</span>
+      </div>
+
+      <div className={classes.pageFrame}>
+        <RecipeRail
+          entries={entries}
+          recipesPerWeek={recipesPerWeek}
+          recipesScrollRef={recipesScrollRef}
+          recipeRefs={recipeRefs}
+          recipePrices={recipePrices}
+          glowRecipeIds={glowRecipeIds}
+          setHoverRecipeId={setHoverRecipeId}
+          removeRecipeFromWeek={removeRecipeFromWeek}
+          setRecipePortions={setRecipePortions}
+          weekStart={weekStart}
+          readOnly={readOnly}
         />
-      </Group>
 
-      <SegmentedControl
-        size="lg"
-        value={pageView}
-        onChange={setPageView}
-        data={[
-          { label: 'Basket', value: 'basket' },
-          { label: 'Checkout', value: 'checkout' },
-        ]}
-        className={classes.viewToggle}
-        aria-label="Basket view"
-      />
-
-      <Box className={classes.weekLayout}>
-        <Box className={classes.recipesPanel}>
-          <Group justify="space-between" mb="lg">
-            <Title order={3} className={classes.sectionTitle}>
-              Recipes
-            </Title>
-            <Text size="sm" c="dimmed">
-              {entries.length}/{recipesPerWeek}
-            </Text>
-          </Group>
-          {entries.length === 0 ? (
-            <Box className={classes.emptyState}>
-              <Text fw={700}>No recipes selected</Text>
-              <Text size="sm" c="dimmed">
-                Add recipes from Browse to build this week.
-              </Text>
-            </Box>
-          ) : (
-            <Box className={classes.recipesScroll} ref={recipesScrollRef}>
-              <SimpleGrid cols={{ base: 1, xs: 2, md: 1 }} spacing="lg">
-                {entries.map((entry) => (
-                  <Box
-                    key={entry.recipe.id}
-                    ref={(node) => {
-                      if (node) recipeRefs.current.set(entry.recipe.id, node)
-                      else recipeRefs.current.delete(entry.recipe.id)
-                    }}
-                    className={classes.compactRecipeTile}
-                    onMouseEnter={() => setHoverRecipeId(entry.recipe.id)}
-                    onMouseLeave={() => setHoverRecipeId(null)}
-                  >
-                    <RecipeCard
-                      recipe={entry.recipe}
-                      basketBadgeLabel={`${formatMoney(recipePrices.get(entry.recipe.id))} pp share`}
-                      highlighted={glowRecipeIds.has(entry.recipe.id)}
-                      plannerEntry={entry}
-                      plannerControlsVisible
-                      plannerReadOnly={readOnly}
-                      onRemoveFromPlan={() => removeRecipeFromWeek(weekStart, entry.recipe.id)}
-                      onPortionsChange={(portions) =>
-                        setRecipePortions(weekStart, entry.recipe.id, portions)
-                      }
-                    />
-                  </Box>
-                ))}
-              </SimpleGrid>
-            </Box>
-          )}
-        </Box>
-
-        <Box className={classes.basketPanel}>
-          {pageView === 'checkout' ? (
-            <CheckoutPanel
-              lines={data?.lines ?? []}
-              ownedItemKeys={ownedItemKeys}
-              ownedItemKeySet={ownedItemKeySet}
-              packOverrides={packOverrides}
-              selections={selections}
-              snapOverrides={snapOverrides}
-              unmapped={data?.unmapped ?? []}
-              soldOut={data?.sold_out ?? []}
-              weekStart={weekStart}
-            />
-          ) : (
-            <>
-          <Group justify="space-between" align="center" mb="md" wrap="nowrap">
-            <Group gap="xs">
-              <IconBasket size={22} className={classes.titleIcon} />
-              <Title order={3} className={classes.sectionTitle}>
-                Basket
-              </Title>
-            </Group>
-            <Group gap="xs" wrap="nowrap">
-              <Text size="xs" c="dimmed">
-                {stockRefresh.isPending
-                  ? 'Checking Ocado…'
-                  : stockAge
-                    ? `Stock checked ${stockAge}`
-                    : 'Stock not checked'}
-              </Text>
-              {/* Not offered on a finished week: re-pricing a shop that already
-                  happened tells you nothing, and the check writes stock back
-                  against the whole catalogue. */}
-              {!readOnly && (
-                <Button
-                  variant="subtle"
-                  size="compact-sm"
-                  leftSection={<IconRefresh size={16} />}
-                  loading={stockRefresh.isPending}
-                  disabled={!selections.length}
-                  onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
-                >
-                  Refresh stock
-                </Button>
+        <section className={classes.mainColumn}>
+          <div className={classes.mobileTopRow}>
+            <Group gap="xs" align="center">
+              <Title order={1} className={classes.mobilePageTitle}>Basket</Title>
+              {readOnly && (
+                <Badge color="gray" variant="light" radius="sm" leftSection={<IconLock size={12} />}>
+                  Past
+                </Badge>
               )}
             </Group>
-          </Group>
+            <Select
+              value={weekStart}
+              onChange={(value) => value && setWeekStart(value)}
+              data={weekOptions.map((start) => ({
+                value: start,
+                label: isPastWeekStart(start) ? `${shortWeekLabel(start)} · past` : shortWeekLabel(start),
+              }))}
+              allowDeselect={false}
+              radius="xl"
+              className={classes.mobileWeekSelect}
+              aria-label="Week"
+            />
+          </div>
+
+          <BasketControls
+            pageView={pageView}
+            setPageView={setPageView}
+            weekStart={weekStart}
+            setWeekStart={setWeekStart}
+            weekOptions={weekOptions}
+          />
+
+          <BasketSummary
+            entries={entries}
+            orderCost={orderCost}
+            orderWaste={orderWaste}
+            basketPortionPrice={basketPortionPrice}
+            totalPortions={totalPortions}
+            weekStart={weekStart}
+            buyLines={buyLines}
+          />
 
           {stockRefresh.error && (
-            <Alert color="red" mb="md" icon={<IconAlertCircle size={18} />}>
+            <Alert color="red" icon={<IconAlertCircle size={18} />} className={classes.alertCard}>
               {stockRefresh.error.message}
             </Alert>
           )}
@@ -1106,8 +1353,8 @@ export default function BasketPage() {
             <Alert
               color={stockRefresh.data.sold_out.length ? 'yellow' : 'teal'}
               variant="light"
-              mb="md"
               icon={<IconRefresh size={18} />}
+              className={classes.alertCard}
             >
               Checked {stockRefresh.data.checked} products: {stockRefresh.data.available}{' '}
               available, {stockRefresh.data.sold_out.length} sold out,{' '}
@@ -1116,128 +1363,157 @@ export default function BasketPage() {
             </Alert>
           )}
 
-          {isError ? (
-            <Alert color="red" title="Couldn't price basket" icon={<IconAlertCircle size={18} />}>
-              {error?.message ?? 'Please check the backend is running and try again.'}
-            </Alert>
-          ) : isLoading ? (
-            <Group justify="center" py="xl">
-              <Loader color="fresh" />
-            </Group>
-          ) : (
-            <>
-              <Box className={classes.statsGrid}>
-                <Stat
-                  label="Spend"
-                  value={formatMoney(orderCost)}
-                  description="Estimated total cost of basket items not marked as owned."
-                  tone="spend"
-                />
-                <Stat
-                  label="Waste"
-                  value={formatMoney(orderWaste)}
-                  description="Estimated value of unused pack leftovers after this week's recipes."
-                />
-                <Stat
-                  label="Score"
-                  value={formatMoney(orderCost + orderWaste)}
-                  description="Spend plus waste, used to compare basket efficiency."
-                />
-                <Stat
-                  label="Portion price"
-                  value={formatMoney(basketPortionPrice)}
-                  description="Estimated spend divided by the total planned portions."
-                />
+          <Box className={classes.basketPanel}>
+            {pageView === 'checkout' ? (
+              <CheckoutPanel
+                lines={data?.lines ?? []}
+                ownedItemKeys={ownedItemKeys}
+                ownedItemKeySet={ownedItemKeySet}
+                packOverrides={packOverrides}
+                selections={selections}
+                snapOverrides={snapOverrides}
+                unmapped={data?.unmapped ?? []}
+                soldOut={data?.sold_out ?? []}
+                weekStart={weekStart}
+              />
+            ) : isError ? (
+              <Alert color="red" title="Couldn't price basket" icon={<IconAlertCircle size={18} />}>
+                {error?.message ?? 'Please check the backend is running and try again.'}
+              </Alert>
+            ) : isLoading ? (
+              <Group justify="center" py="xl">
+                <Loader color="fresh" />
+              </Group>
+            ) : entries.length === 0 ? (
+              <Box className={classes.emptyState}>
+                <Text fw={800}>No basket yet</Text>
+                <Text size="sm" c="dimmed">Upcoming week selections appear here.</Text>
               </Box>
+            ) : (
+              <div className={classes.orderPanel}>
+                <OrderPanelHeader
+                  title="Online order"
+                  subtitle={entries.map((entry) => entry.recipe.name).join(', ')}
+                  itemCount={onlineLines.length}
+                  stockText={orderStockText}
+                  stockRefresh={stockRefresh}
+                  selections={selections}
+                  packOverrides={packOverrides}
+                  snapOverrides={snapOverrides}
+                />
 
-              {data.unmapped.length > 0 && (
-                <Alert
-                  color="yellow"
-                  variant="outline"
-                  title="Unmapped ingredients"
-                  icon={<IconAlertTriangle size={18} />}
-                  className={classes.unmappedAlert}
-                >
-                  <Group gap={6}>
-                    {data.unmapped.map((name) => (
-                      <Badge
-                        key={name}
-                        color="yellow"
-                        variant="outline"
-                        radius="sm"
-                        className={classes.warningBadge}
-                      >
-                        {name}
-                      </Badge>
-                    ))}
-                  </Group>
-                </Alert>
-              )}
-
-              <Stack gap="lg" className={classes.basketScroll}>
-                {entries.length === 0 ? (
-                  <Box className={classes.emptyState}>
-                    <Text fw={700}>No basket yet</Text>
-                    <Text size="sm" c="dimmed">
-                      Upcoming week selections appear here.
-                    </Text>
-                  </Box>
-                ) : (
-                  <>
-                    <LineTable
-                      title="Online order"
-                      icon={<IconBuildingStore size={20} className={classes.sectionIcon} />}
-                      lines={onlineLines}
-                      openLineKey={openLineKey}
-                      setOpenLineKey={setOpenLineKey}
-                      tableId="online"
-                      hoverRecipeId={hoverRecipeId}
-                      selectedLineKey={selectedLineKey}
-                      setActiveLineKey={setActiveLineKey}
-                      setHoverLineKey={setHoverLineKey}
-                      ownedItemKeySet={ownedItemKeySet}
-                      setItemOwned={setItemOwned}
-                      onToggleSnap={setWeekSnap}
-                      readOnly={readOnly}
-                      onOpenPacks={setPackLineKey}
-                      busyPackKey={
-                        packPreference.isPending ? packPreference.variables?.ingredientKey : null
-                      }
-                    />
-                    <LineTable
-                      title="Source elsewhere"
-                      icon={<IconHome size={20} className={classes.sectionIcon} />}
-                      lines={externalLines}
-                      openLineKey={openLineKey}
-                      setOpenLineKey={setOpenLineKey}
-                      tableId="external"
-                      hoverRecipeId={hoverRecipeId}
-                      selectedLineKey={selectedLineKey}
-                      setActiveLineKey={setActiveLineKey}
-                      setHoverLineKey={setHoverLineKey}
-                      ownedItemKeySet={ownedItemKeySet}
-                      setItemOwned={setItemOwned}
-                      onToggleSnap={setWeekSnap}
-                      readOnly={readOnly}
-                      onOpenPacks={setPackLineKey}
-                      busyPackKey={
-                        packPreference.isPending ? packPreference.variables?.ingredientKey : null
-                      }
-                    />
-                    <Box className={classes.bucketGrid}>
-                      <NameList title="Pantry staples" names={data.staples} muted />
-                      <NameList title="Mapped, not priceable" names={data.unpriceable} />
-                      <NameList title="Out of stock at Ocado" names={data.sold_out} />
-                    </Box>
-                  </>
+                {data.unmapped.length > 0 && (
+                  <Alert
+                    color="yellow"
+                    variant="outline"
+                    title="Unmapped ingredients"
+                    icon={<IconAlertTriangle size={18} />}
+                    className={classes.unmappedAlert}
+                  >
+                    <Group gap={6}>
+                      {data.unmapped.map((name) => (
+                        <Badge
+                          key={name}
+                          color="yellow"
+                          variant="outline"
+                          radius="sm"
+                          className={classes.warningBadge}
+                        >
+                          {name}
+                        </Badge>
+                      ))}
+                    </Group>
+                  </Alert>
                 )}
-              </Stack>
-            </>
-          )}
-            </>
-          )}
-        </Box>
-      </Box>
+
+                <div className={classes.desktopTables}>
+                  <LineTable
+                    title="Online order"
+                    icon={<IconBuildingStore size={20} className={classes.sectionIcon} />}
+                    lines={onlineLines}
+                    openLineKey={openLineKey}
+                    setOpenLineKey={setOpenLineKey}
+                    tableId="online"
+                    hoverRecipeId={hoverRecipeId}
+                    selectedLineKey={selectedLineKey}
+                    setActiveLineKey={setActiveLineKey}
+                    setHoverLineKey={setHoverLineKey}
+                    ownedItemKeySet={ownedItemKeySet}
+                    setItemOwned={setItemOwned}
+                    onToggleSnap={setWeekSnap}
+                    onOpenPacks={setPackLineKey}
+                    busyPackKey={busyPackKey}
+                    readOnly={readOnly}
+                    compactHeader
+                  />
+                  <LineTable
+                    title="Source elsewhere"
+                    icon={<IconHome size={20} className={classes.sectionIcon} />}
+                    lines={externalLines}
+                    openLineKey={openLineKey}
+                    setOpenLineKey={setOpenLineKey}
+                    tableId="external"
+                    hoverRecipeId={hoverRecipeId}
+                    selectedLineKey={selectedLineKey}
+                    setActiveLineKey={setActiveLineKey}
+                    setHoverLineKey={setHoverLineKey}
+                    ownedItemKeySet={ownedItemKeySet}
+                    setItemOwned={setItemOwned}
+                    onToggleSnap={setWeekSnap}
+                    onOpenPacks={setPackLineKey}
+                    busyPackKey={busyPackKey}
+                    readOnly={readOnly}
+                  />
+                </div>
+
+                <div className={classes.mobileOrderLists}>
+                  <MobileLineList
+                    lines={onlineLines}
+                    tableId="online"
+                    onOpenPacks={setPackLineKey}
+                    busyPackKey={busyPackKey}
+                    ownedItemKeySet={ownedItemKeySet}
+                    setItemOwned={setItemOwned}
+                    setActiveLineKey={setActiveLineKey}
+                    setHoverLineKey={setHoverLineKey}
+                    onToggleSnap={setWeekSnap}
+                  />
+                  <MobileLineList
+                    lines={externalLines}
+                    tableId="external"
+                    onOpenPacks={setPackLineKey}
+                    busyPackKey={busyPackKey}
+                    ownedItemKeySet={ownedItemKeySet}
+                    setItemOwned={setItemOwned}
+                    setActiveLineKey={setActiveLineKey}
+                    setHoverLineKey={setHoverLineKey}
+                    onToggleSnap={setWeekSnap}
+                  />
+                </div>
+
+                <Group justify="flex-end" className={classes.mobileTotalRow}>
+                  <Text>Total</Text>
+                  <Text>{formatMoney(orderWaste)} waste</Text>
+                  <Text>{formatMoney(orderCost)}</Text>
+                </Group>
+
+                <Box className={classes.bucketGrid}>
+                  <NameList title="Pantry staples" names={data.staples} muted />
+                  <NameList title="Mapped, not priceable" names={data.unpriceable} />
+                  <NameList title="Out of stock at Ocado" names={data.sold_out} />
+                </Box>
+              </div>
+            )}
+          </Box>
+        </section>
+      </div>
+
+      {pageView === 'basket' && !isError && !isLoading && entries.length > 0 && (
+        <button className={classes.mobileCheckoutBar} onClick={() => setPageView('checkout')}>
+          <span>Checkout</span>
+          <strong>{formatMoney(orderCost)}</strong>
+        </button>
+      )}
 
       <PackSizeModal
         line={packLine}
@@ -1249,6 +1525,6 @@ export default function BasketPage() {
         onReset={resetPack}
         pending={packPreference.isPending}
       />
-    </Stack>
+    </main>
   )
 }

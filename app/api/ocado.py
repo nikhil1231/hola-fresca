@@ -11,7 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import schedule as sched
-from app.api.deps import get_planner_csv_path, get_session, get_session_factory
+from app.api.deps import (
+    get_current_user,
+    get_planner_csv_path,
+    get_session,
+    get_session_factory,
+)
 from app.api.planner import (
     _load_planner_index,
     _planner_selection,
@@ -39,7 +44,7 @@ from app.api.schemas import (
     PushLineOut,
 )
 from app.api.schedule import pack_shortfall_tolerance_pct
-from app.db.models import Product
+from app.db.models import Product, User
 from app.ocado.availability import mark_unavailable, refresh_stock
 from app.ocado.client import OcadoClient
 from app.ocado.ledger import read_ledger, write_ledger
@@ -228,6 +233,7 @@ def stock_refresh(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> OcadoStockRefreshOut:
     """Re-read stock and price for everything this basket could be covered from.
 
@@ -237,7 +243,7 @@ def stock_refresh(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    tolerance = pack_shortfall_tolerance_pct(session)
+    tolerance = pack_shortfall_tolerance_pct(session, user.id)
     index, basket = _rebuild(
         factory, recipe_ids, csv_path, selections, body.pack_overrides,
         body.snap_overrides, tolerance,
@@ -448,6 +454,7 @@ def plan(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     injected_client: OcadoClient = Depends(get_ocado_client),
+    user: User = Depends(get_current_user),
 ) -> OcadoPushPlanOut:
     """What a push would change, without changing it.
 
@@ -459,7 +466,7 @@ def plan(
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    tolerance = pack_shortfall_tolerance_pct(session)
+    tolerance = pack_shortfall_tolerance_pct(session, user.id)
     _, basket = _rebuild(
         factory, recipe_ids, csv_path, selections, body.pack_overrides,
         body.snap_overrides, tolerance,
@@ -527,12 +534,13 @@ def push(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     injected_client: OcadoClient = Depends(get_ocado_client),
+    user: User = Depends(get_current_user),
 ) -> OcadoPushResultOut:
     _refuse_past_week(body.week_start)
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
-    tolerance = pack_shortfall_tolerance_pct(session)
+    tolerance = pack_shortfall_tolerance_pct(session, user.id)
     index, basket = _rebuild(
         factory, recipe_ids, csv_path, selections, body.pack_overrides,
         body.snap_overrides, tolerance,

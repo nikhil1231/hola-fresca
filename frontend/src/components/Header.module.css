@@ -1,35 +1,36 @@
 .header {
   height: 100%;
-  border-bottom: 1px solid var(--mantine-color-gray-2);
-  background: var(--mantine-color-body);
+  border-bottom: 1px solid var(--hf-border);
+  background: color-mix(in srgb, var(--hf-bg-elevated) 92%, transparent);
+  backdrop-filter: blur(18px);
 }
 
 .logo {
   text-decoration: none;
-  color: var(--mantine-color-dark-8);
+  color: var(--hf-text);
   letter-spacing: -0.02em;
 }
 
 .logoAccent {
-  color: var(--mantine-color-fresh-7);
+  color: var(--hf-accent);
 }
 
 .navLink {
   text-decoration: none;
-  color: var(--mantine-color-gray-7);
-  font-weight: 500;
+  color: var(--hf-text-muted);
+  font-weight: 700;
   font-size: var(--mantine-font-size-sm);
   padding: 4px 0;
   border-bottom: 2px solid transparent;
 }
 
 .navLink:hover {
-  color: var(--mantine-color-dark-8);
+  color: var(--hf-text);
 }
 
 .navLinkActive {
-  color: var(--mantine-color-fresh-8);
-  border-bottom-color: var(--mantine-color-fresh-6);
+  color: var(--hf-accent-soft);
+  border-bottom-color: var(--hf-accent);
 }
 
 .mobileNavLink {
@@ -38,16 +39,16 @@
   align-items: center;
   padding: 0 var(--mantine-spacing-md);
   border-radius: var(--mantine-radius-md);
-  color: var(--mantine-color-gray-8);
-  font-weight: 600;
+  color: var(--hf-text);
+  font-weight: 700;
   text-decoration: none;
 }
 
 .mobileNavLink:hover {
-  background: var(--mantine-color-gray-0);
+  background: var(--hf-surface-soft);
 }
 
 .mobileNavLinkActive {
-  color: var(--mantine-color-fresh-8);
-  background: var(--mantine-color-fresh-0);
+  color: var(--hf-accent-soft);
+  background: color-mix(in srgb, var(--hf-accent) 14%, transparent);
 }

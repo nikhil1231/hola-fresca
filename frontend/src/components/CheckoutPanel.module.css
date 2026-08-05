@@ -10,10 +10,10 @@
 
 .connectionPanel,
 .emptyState {
-  border: 1px dashed var(--mantine-color-default-border);
-  border-radius: var(--mantine-radius-md);
+  border: 1px dashed var(--hf-border);
+  border-radius: var(--hf-radius-sm);
   padding: var(--mantine-spacing-md);
-  background: var(--mantine-color-body);
+  background: var(--hf-surface);
 }
 
 .tableScroll {
@@ -25,7 +25,7 @@
   table-layout: fixed;
   width: 100%;
   color: var(--mantine-color-text);
-  background: var(--mantine-color-body);
+  background: var(--hf-surface);
 }
 
 .table th {
@@ -48,7 +48,7 @@
 }
 
 .productLink {
-  color: var(--mantine-color-fresh-7);
+  color: var(--hf-accent-soft);
   font-size: var(--mantine-font-size-sm);
   font-weight: 600;
   text-decoration: none;

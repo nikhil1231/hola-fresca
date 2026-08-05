@@ -1,6 +1,8 @@
 .card {
   color: inherit;
   text-decoration: none;
+  border-color: var(--hf-border);
+  background: var(--hf-surface);
   transition:
     transform 150ms ease,
     box-shadow 150ms ease,
@@ -14,12 +16,13 @@
 
 .card:hover {
   transform: translateY(-3px);
-  box-shadow: var(--mantine-shadow-md);
+  box-shadow: var(--hf-shadow);
+  border-color: color-mix(in srgb, var(--hf-accent) 34%, var(--hf-border));
 }
 
 .cardSelected {
-  border-color: var(--mantine-color-fresh-6);
-  box-shadow: 0 0 0 1px var(--mantine-color-fresh-6);
+  border-color: var(--hf-border-strong);
+  box-shadow: 0 0 0 1px var(--hf-border-strong);
 }
 
 .cardSelected:hover {
@@ -58,6 +61,9 @@
   position: relative;
   aspect-ratio: 3 / 2;
   overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(42, 50, 35, 0.78), rgba(15, 18, 15, 0.96)),
+    var(--hf-surface-soft);
 }
 
 .image {
@@ -77,9 +83,9 @@
   position: absolute;
   top: 36px;
   right: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--mantine-color-dark-9);
-  border: 1px solid rgba(0, 0, 0, 0.16);
+  background: rgba(16, 18, 16, 0.88);
+  color: var(--hf-text);
+  border: 1px solid var(--hf-border);
   box-shadow: var(--mantine-shadow-xs);
   text-transform: none;
 }
@@ -169,9 +175,9 @@
   gap: 3px;
   height: 34px;
   padding: 3px;
-  border: 1px solid var(--mantine-color-gray-2);
+  border: 1px solid var(--hf-border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(12, 16, 13, 0.94);
   box-shadow: var(--mantine-shadow-sm);
 }
 
@@ -192,7 +198,7 @@
 
 .portionCount {
   min-width: 22px;
-  color: var(--mantine-color-dark-8);
+  color: var(--hf-text);
   text-align: center;
   line-height: 1;
 }
@@ -200,11 +206,13 @@
 .cuisine {
   font-size: 14px;
   letter-spacing: 0.04em;
+  color: var(--hf-text-muted);
 }
 
 .title {
   font-size: var(--mantine-font-size-md);
   line-height: 1.25;
+  color: var(--hf-text);
 }
 
 .headline {
@@ -224,7 +232,7 @@
 }
 
 .stats {
-  color: var(--mantine-color-gray-7);
+  color: var(--hf-text-muted);
   display: grid;
   gap: 10px;
   margin-top: auto;
@@ -247,7 +255,7 @@
 }
 
 .statSlotStrong {
-  color: var(--mantine-color-gray-8);
+  color: var(--hf-text);
   font-weight: 600;
 }
 
@@ -290,11 +298,11 @@
 .densitySegment {
   width: 4px;
   border-radius: 2px;
-  background: var(--mantine-color-gray-2);
+  background: var(--hf-border);
 }
 
 .densitySegmentActive {
-  background: var(--mantine-color-fresh-6);
+  background: var(--hf-accent);
 }
 
 @media (hover: none) {

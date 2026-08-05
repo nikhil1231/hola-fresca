@@ -6,8 +6,7 @@ import {
   Anchor,
   Badge,
   Button,
-  Divider,
-  Grid,
+  Collapse,
   Group,
   Image,
   Loader,
@@ -18,32 +17,26 @@ import {
   Select,
   SimpleGrid,
   Skeleton,
-  Table,
   Stack,
   Text,
   ThemeIcon,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core'
 import {
   IconAlertTriangle,
   IconArrowBackUp,
   IconArrowLeft,
-  IconCalendarWeek,
-  IconChefHat,
-  IconClock,
+  IconChevronDown,
   IconDots,
   IconExternalLink,
   IconFlag,
-  IconFlame,
   IconHeart,
   IconHeartFilled,
   IconEyeOff,
-  IconLock,
   IconMinus,
-  IconPhoto,
   IconPlus,
-  IconBasketPlus,
   IconStarFilled,
   IconTrash,
   IconUsers,
@@ -270,10 +263,16 @@ function sumCosts(costs) {
   return total
 }
 
-function PlannerControls({ disabled, entry, readOnly = false, onAdd, onPortionsChange, onRemove }) {
-  // On a week that has been shopped for, the portions are what was cooked. Shown
-  // plainly, with nothing offering to change them; adding the recipe to a
-  // finished week is not a thing that can happen either.
+function PlannerControls({
+  disabled,
+  entry,
+  readOnly = false,
+  onAdd,
+  onPortionsChange,
+  onRemove,
+  weekStart,
+  marginalPerPortion,
+}) {
   if (readOnly) {
     if (!entry) return null
     return (
@@ -282,23 +281,30 @@ function PlannerControls({ disabled, entry, readOnly = false, onAdd, onPortionsC
       </Badge>
     )
   }
-
   if (!entry) {
     return (
       <Button
+        variant="outline"
         color="fresh"
-        leftSection={<IconBasketPlus size={17} />}
+        radius="xl"
+        className={classes.secondaryCta}
         disabled={disabled}
         onClick={() => !disabled && onAdd?.()}
       >
-        Add to this week
+        <span>
+          Add to this week
+          <small>
+            {weekStart ? formatWeekRange(weekStart) : 'planned week'}
+            {marginalPerPortion != null ? ` · ${formatSignedMoney(marginalPerPortion)} pp` : ''}
+          </small>
+        </span>
       </Button>
     )
   }
 
   const portions = entry.portions
   return (
-    <Group gap="xs" wrap="nowrap">
+    <Group gap="xs" wrap="nowrap" className={classes.plannedControls}>
       <Group gap={4} wrap="nowrap" className={classes.portionStepper}>
         <Tooltip label="Decrease portions" withArrow>
           <ActionIcon
@@ -399,57 +405,6 @@ function WishlistButton({ wishlisted, pending, onToggle }) {
         {wishlisted ? <IconHeartFilled size={19} /> : <IconHeart size={19} />}
       </ActionIcon>
     </Tooltip>
-  )
-}
-
-function RecipeRatings({ recipe, personalRating, wishlist }) {
-  return (
-    <Paper withBorder radius="md" p="sm" className={classes.ratingsPanel}>
-      <Group gap="lg" align="center" wrap="wrap">
-        <Stack gap={3} className={classes.ratingItem}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-            Source
-          </Text>
-          {recipe.avg_rating != null ? (
-            <Group gap={6} wrap="nowrap" className={classes.ratingValue}>
-              <IconStarFilled size={17} className={classes.star} />
-              <Text fw={700}>{recipe.avg_rating.toFixed(1)}</Text>
-              {recipe.ratings_count != null && (
-                <Text c="dimmed" size="sm">
-                  ({recipe.ratings_count.toLocaleString()})
-                </Text>
-              )}
-            </Group>
-          ) : (
-            <Text size="sm" c="dimmed">
-              Not rated
-            </Text>
-          )}
-        </Stack>
-
-        <Stack gap={3} className={classes.ratingItem}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-            Yours
-          </Text>
-          <PersonalRatingControl
-            value={recipe.personal_rating}
-            pending={personalRating.isPending}
-            onSet={(rating) => personalRating.mutate(rating)}
-          />
-        </Stack>
-
-        <Stack gap={3} className={classes.ratingItem}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-            Wishlist
-          </Text>
-          <WishlistButton
-            wishlisted={recipe.wishlisted}
-            pending={wishlist.isPending}
-            onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
-          />
-        </Stack>
-      </Group>
-    </Paper>
   )
 }
 
@@ -625,6 +580,212 @@ function MacroNotes({ audit, edits }) {
   )
 }
 
+function HeroTag({ children, tone = 'green' }) {
+  return <span className={`${classes.heroTag} ${classes[tone] ?? ''}`}>{children}</span>
+}
+
+function RatingSummary({ recipe }) {
+  if (recipe.avg_rating == null) return null
+
+  return (
+    <Group gap={7} wrap="nowrap" className={classes.heroRating}>
+      <IconStarFilled size={18} className={classes.star} />
+      <Text fw={900}>{recipe.avg_rating.toFixed(1)}</Text>
+      {recipe.ratings_count != null && (
+        <Text c="dimmed" fw={800}>
+          ({recipe.ratings_count.toLocaleString()})
+        </Text>
+      )}
+    </Group>
+  )
+}
+
+function MacroPanel({ view, modified, recipe, originalMacros, audit, revert }) {
+  return (
+    <Paper withBorder className={classes.macroPanel}>
+      <SimpleGrid cols={4} spacing={0} className={classes.macroGrid}>
+        <MacroStat
+          label="Energy"
+          value={view.energy_kcal}
+          unit=" kcal"
+          corrected={modified ? null : originalMacros.energy_kcal}
+        />
+        <MacroStat
+          label="Protein"
+          value={view.protein_g}
+          unit="g"
+          corrected={modified ? null : originalMacros.protein_g}
+        />
+        <MacroStat
+          label="Carbs"
+          value={view.carbs_g}
+          unit="g"
+          corrected={modified ? null : originalMacros.carbs_g}
+        />
+        <MacroStat
+          label="Fat"
+          value={view.fat_g}
+          unit="g"
+          corrected={modified ? null : originalMacros.fat_g}
+        />
+      </SimpleGrid>
+      <Group justify="space-between" align="center" wrap="nowrap" className={classes.macroFooter}>
+        <Group gap={6} wrap="nowrap">
+          <Text className={classes.macroCaption}>
+            {modified ? 'Per serving, as modified' : 'Per serving'}
+            {!modified && recipe.serving_size_g ? ` · ~${Math.round(recipe.serving_size_g)}g` : ''}
+            {!modified && recipe.protein_energy_ratio != null
+              ? ` · ${recipe.protein_energy_ratio}g protein / 100 kcal`
+              : ''}
+          </Text>
+          {!modified && recipe.macros_suspect && (
+            <Tooltip label="These four numbers don't add up against each other" withArrow multiline w={220}>
+              <ThemeIcon variant="transparent" color="orange" size="xs">
+                <IconAlertTriangle size={14} />
+              </ThemeIcon>
+            </Tooltip>
+          )}
+        </Group>
+        <MacroMenu audit={audit} revert={revert} hasEdits={(recipe.edits ?? []).length > 0} />
+      </Group>
+    </Paper>
+  )
+}
+
+function RateRecipePanel({ recipe, personalRating }) {
+  return (
+    <Paper withBorder className={classes.ratePanel}>
+      <Text fw={900}>Rate this recipe</Text>
+      <PersonalRatingControl
+        value={recipe.personal_rating}
+        pending={personalRating.isPending}
+        onSet={(rating) => personalRating.mutate(rating)}
+      />
+    </Paper>
+  )
+}
+
+function DetailControls({ servings, setServingsOverride, recipe, protein, proteinPreview, baseYield, applyProtein }) {
+  return (
+    <Paper withBorder className={classes.detailControls}>
+      <div>
+        <Text size="xs" fw={900} c="dimmed" tt="uppercase" mb={6}>
+          Servings
+        </Text>
+        <SegmentedControl
+          size="xs"
+          color="fresh"
+          fullWidth
+          value={String(servings)}
+          onChange={(v) => setServingsOverride(Number(v))}
+          data={SERVINGS.map((n) => ({ label: SERVINGS_LABELS[n], value: String(n) }))}
+        />
+      </div>
+      {recipe.protein && (
+        <ProteinControls
+          profile={recipe.protein}
+          modifier={protein}
+          preview={proteinPreview}
+          baseYield={baseYield}
+          onChange={applyProtein}
+        />
+      )}
+    </Paper>
+  )
+}
+
+function IngredientList({
+  ingredients,
+  factor,
+  ingredientCosts,
+  navigate,
+  expanded,
+  setExpanded,
+  marginalTotal,
+  usedTotal,
+  leftoverTotal,
+}) {
+  const visible = expanded ? ingredients : ingredients.slice(0, 4)
+  const hiddenCount = Math.max(ingredients.length - visible.length, 0)
+
+  return (
+    <section className={classes.recipeSection}>
+      <Group justify="space-between" align="baseline" className={classes.sectionHeader}>
+        <Title order={2} className={classes.sectionHeading}>
+          Ingredients <span>{ingredients.length} items</span>
+        </Title>
+        <Text className={classes.sectionToggle}>−</Text>
+      </Group>
+      <div className={classes.ingredientList}>
+        {visible.map((ing, index) => {
+          const { quantity, estimate } = splitQuantityLabel(scaledQuantity(ing, factor))
+          const cost = ing.ingredient_key ? ingredientCosts.get(ing.ingredient_key) : null
+          const canOpenMapping = Boolean(ing.ingredient_key)
+          return (
+            <UnstyledButton
+              key={`${ing.name}-${index}`}
+              className={classes.ingredientItem}
+              disabled={!canOpenMapping}
+              onClick={() =>
+                canOpenMapping && navigate(`/mapping/${encodeURIComponent(ing.ingredient_key)}`)
+              }
+            >
+              <span>
+                {ing.name}
+                {ing.unmapped && <span className={classes.inlineWarning}> unmapped</span>}
+                {estimatedPotent(ing) && <span className={classes.inlineWarning}> estimate</span>}
+              </span>
+              <strong>
+                {quantity}
+                {estimate ? ` (${estimate})` : ''}
+              </strong>
+              {cost != null && <small>{formatMoney(cost)}</small>}
+            </UnstyledButton>
+          )
+        })}
+        {hiddenCount > 0 && (
+          <UnstyledButton className={classes.showMoreButton} onClick={() => setExpanded(true)}>
+            Show {hiddenCount} more
+          </UnstyledButton>
+        )}
+        {expanded && ingredients.length > 4 && (
+          <UnstyledButton className={classes.showMoreButton} onClick={() => setExpanded(false)}>
+            Show less
+          </UnstyledButton>
+        )}
+      </div>
+      {marginalTotal != null && (
+        <div className={classes.recipeTotals}>
+          <span>Used by this recipe <strong>{formatMoney(usedTotal)}</strong></span>
+          {leftoverTotal > 0.005 && (
+            <span>Left over in packs <strong>{formatMoney(leftoverTotal)}</strong></span>
+          )}
+          <span>Added to the shop <strong>{formatMoney(marginalTotal)}</strong></span>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function CollapsibleRecipeSection({ title, meta, opened, onToggle, children }) {
+  return (
+    <section className={classes.recipeSection}>
+      <UnstyledButton className={classes.collapsibleHeader} onClick={onToggle}>
+        <Title order={2} className={classes.sectionHeading}>
+          {title} {meta && <span>{meta}</span>}
+        </Title>
+        <IconChevronDown
+          size={20}
+          className={`${classes.sectionChevron} ${opened ? classes.sectionChevronOpen : ''}`}
+        />
+      </UnstyledButton>
+      <Collapse in={opened}>
+        <div className={classes.collapsibleBody}>{children}</div>
+      </Collapse>
+    </section>
+  )
+}
+
 // Scale presets, plus the mode where you name the number you want a portion to
 // hit and the weight is solved backwards from it.
 const PROTEIN_SCALES = [
@@ -791,6 +952,9 @@ export default function RecipeDetailPage() {
   const [searchParams] = useSearchParams()
   const { data: recipe, isLoading, isError } = useRecipe(id)
   const [servingsOverride, setServingsOverride] = useState(null)
+  const [ingredientsExpanded, setIngredientsExpanded] = useState(false)
+  const [methodOpen, setMethodOpen] = useState(false)
+  const [nutritionOpen, setNutritionOpen] = useState(false)
   const {
     upcomingWeekStart,
     getWeekRecipes,
@@ -936,445 +1100,214 @@ export default function RecipeDetailPage() {
     if (!(edit.field in originalMacros)) originalMacros[edit.field] = edit.old_value
   }
 
+  const displayIngredients = view.ingredients.filter(hasDisplayQuantity)
+  const primaryTags = [...recipe.cuisines, ...recipe.tags].slice(0, 2)
+
   return (
-    <Stack gap="xl">
-      <Button
-        variant="subtle"
-        color="gray"
-        size="sm"
-        w="fit-content"
-        leftSection={<IconArrowLeft size={16} />}
-        onClick={() => navigate(-1)}
-      >
-        Back
-      </Button>
+    <main className={classes.detailPage}>
+      <div className={classes.mobileStatusBar} aria-hidden="true">
+        <span>9:41</span>
+        <span>???</span>
+      </div>
 
-      <Grid gutter="xl">
-        <Grid.Col span={{ base: 12, sm: 6 }}>
-          <Image
-            src={recipe.image_url || RECIPE_PLACEHOLDER_IMAGE}
-            fallbackSrc={RECIPE_PLACEHOLDER_IMAGE}
-            alt={recipe.name}
-            radius="md"
-            className={classes.hero}
-          />
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, sm: 6 }}>
-          <Stack gap="sm" h="100%" justify="center">
-            <Group gap="xs">
-              {recipe.cuisines.map((c) => (
-                <Badge key={c} color="fresh" variant="light" radius="sm">
-                  {c}
-                </Badge>
-              ))}
-              {recipe.tags.map((t) => (
-                <Badge key={t} color="gray" variant="light" radius="sm">
-                  {t}
-                </Badge>
-              ))}
-            </Group>
-            <Title order={1} className={classes.title}>
-              {recipe.name}
-            </Title>
-            {recipe.headline && (
-              <Text c="dimmed" fz="lg">
-                {recipe.headline}
-              </Text>
-            )}
-
-            <Group gap="sm" mt="xs">
-              {recipe.steps.length > 0 && (
-                <Button
-                  component={Link}
-                  /* The week goes with you into the kitchen: the steps are
-                     rewritten for whatever swap it holds, and cooking the dish
-                     as published when the shop bought something else is exactly
-                     the mistake this is here to stop. */
-                  to={`/recipes/${recipe.id}/cook?week=${weekStart}`}
-                  replace
-                  color="fresh"
-                  leftSection={<IconChefHat size={17} />}
-                >
-                  Let's cook!
-                </Button>
-              )}
-              <PlannerControls
-                entry={plannerEntry}
-                readOnly={weekReadOnly}
-                disabled={!plannerEntry && upcomingWeekFull}
-                onAdd={() =>
-                  addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })
-                }
-                onRemove={() => removeRecipeFromWeek(weekStart, recipe.id)}
-                onPortionsChange={(portions) =>
-                  setRecipePortions(weekStart, recipe.id, portions)
-                }
-              />
-              {/* Which week this is about — the page is reachable from any of
-                  them, and the controls alone do not say. On a finished week it
-                  is the more important half: everything below describes how the
-                  dish was cooked then, not what it would be now. */}
-              <Tooltip
-                label={
-                  weekReadOnly ? 'Shown as it was cooked this week' : 'The week this adds to'
-                }
-                withArrow
-              >
-                <Badge
-                  color="gray"
-                  variant="light"
-                  radius="sm"
-                  size="lg"
-                  leftSection={
-                    weekReadOnly ? <IconLock size={13} /> : <IconCalendarWeek size={13} />
-                  }
-                >
-                  {formatWeekRange(weekStart)}
-                </Badge>
-              </Tooltip>
-              <RecipeOptionsMenu
-                pending={hideRecipe.isPending}
-                onHide={() => {
-                  if (!window.confirm('Hide this recipe from the library?')) return
-                  // Hiding takes it out of the week you are planning, not out of
-                  // the record of a week you have already cooked.
-                  if (!weekReadOnly) removeRecipeFromWeek(weekStart, recipe.id)
-                  hideRecipe.mutate(undefined, { onSuccess: () => navigate('/browse') })
-                }}
-              />
-              {marginalPerPortion != null && (
-                <Tooltip
-                  label={
-                    `What this recipe adds to the week's shop, per portion: whole packs, ` +
-                    `less anything the rest of the week already buys. The ingredient list ` +
-                    `below prices only what the recipe uses, so it comes to less.`
-                  }
-                  withArrow
-                  multiline
-                  w={280}
-                >
-                  <Badge color="fresh" variant="light" radius="sm" size="lg" className={classes.costBadge}>
-                    {formatSignedMoney(marginalPerPortion)} pp to shop
-                  </Badge>
-                </Tooltip>
-              )}
-            </Group>
-
-            <RecipeRatings recipe={recipe} personalRating={personalRating} wishlist={wishlist} />
-
-            <Group gap="lg" mt="xs" align="flex-start">
-              {recipe.total_time_min != null && (
-                <Group gap={6} wrap="nowrap">
-                  <IconClock size={18} />
-                  <Text>{recipe.total_time_min} min</Text>
-                </Group>
-              )}
-              {recipe.difficulty != null && (
-                <Group gap={6} wrap="nowrap">
-                  <IconChefHat size={18} />
-                  <Text>{DIFFICULTY[recipe.difficulty] ?? '—'}</Text>
-                </Group>
-              )}
-              {recipe.base_yield != null && (
-                <Group gap={6} wrap="nowrap">
-                  <IconUsers size={18} />
-                  <Text>Serves {recipe.base_yield}</Text>
-                </Group>
-              )}
-            </Group>
-          </Stack>
-        </Grid.Col>
-      </Grid>
-
-      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
-        <MacroStat
-          label="Energy"
-          value={view.energy_kcal}
-          unit=" kcal"
-          corrected={modified ? null : originalMacros.energy_kcal}
+      <section className={classes.heroShell}>
+        <Image
+          src={recipe.image_url || RECIPE_PLACEHOLDER_IMAGE}
+          fallbackSrc={RECIPE_PLACEHOLDER_IMAGE}
+          alt={recipe.name}
+          className={classes.hero}
+          loading="eager"
         />
-        <MacroStat
-          label="Protein"
-          value={view.protein_g}
-          unit="g"
-          corrected={modified ? null : originalMacros.protein_g}
-        />
-        <MacroStat
-          label="Carbs"
-          value={view.carbs_g}
-          unit="g"
-          corrected={modified ? null : originalMacros.carbs_g}
-        />
-        <MacroStat
-          label="Fat"
-          value={view.fat_g}
-          unit="g"
-          corrected={modified ? null : originalMacros.fat_g}
-        />
-      </SimpleGrid>
-      <Group justify="space-between" align="center" wrap="nowrap" mt={-12}>
-        <Group gap={6} wrap="nowrap">
-          <Text size="xs" c="dimmed">
-            {modified ? 'Per serving, as modified' : 'Per serving'}
-            {!modified && recipe.serving_size_g
-              ? ` · ~${Math.round(recipe.serving_size_g)}g`
-              : ''}
-            {!modified && recipe.protein_energy_ratio != null
-              ? ` · ${recipe.protein_energy_ratio}g protein / 100 kcal`
-              : ''}
-          </Text>
-          {!modified && recipe.macros_suspect && (
-            <Tooltip
-              label="These four numbers don't add up against each other"
-              withArrow
-              multiline
-              w={220}
-            >
-              <ThemeIcon variant="transparent" color="orange" size="xs">
-                <IconAlertTriangle size={14} />
-              </ThemeIcon>
-            </Tooltip>
-          )}
+        <div className={classes.heroOverlay} />
+        <div className={classes.heroTopControls}>
+          <ActionIcon
+            variant="filled"
+            color="dark"
+            radius="xl"
+            size={58}
+            className={classes.circleButton}
+            aria-label="Back"
+            onClick={() => navigate(-1)}
+          >
+            <IconArrowLeft size={26} />
+          </ActionIcon>
+          <Group gap="md" wrap="nowrap">
+            <WishlistButton
+              wishlisted={recipe.wishlisted}
+              pending={wishlist.isPending}
+              onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
+            />
+            <RecipeOptionsMenu
+              pending={hideRecipe.isPending}
+              onHide={() => {
+                if (!window.confirm('Hide this recipe from the library?')) return
+                // Hiding takes it out of the week you are planning, not out of
+                // the record of a week you have already cooked.
+                if (!weekReadOnly) removeRecipeFromWeek(weekStart, recipe.id)
+                hideRecipe.mutate(undefined, { onSuccess: () => navigate('/browse') })
+              }}
+            />
+          </Group>
+        </div>
+        <div className={classes.heroContent}>
+          <Group gap="xs" className={classes.heroTags}>
+            {primaryTags.map((tag, index) => (
+              <HeroTag key={tag} tone={index === 0 ? 'green' : 'gray'}>
+                {tag}
+              </HeroTag>
+            ))}
+          </Group>
+          <Title order={1} className={classes.title}>{recipe.name}</Title>
+        </div>
+      </section>
+
+      <section className={classes.contentShell}>
+        {recipe.headline && <Text className={classes.headline}>with {recipe.headline}</Text>}
+
+        <Group justify="space-between" align="center" className={classes.metaRow}>
+          <Group gap="sm" wrap="wrap">
+            {recipe.total_time_min != null && <Text>{recipe.total_time_min} min</Text>}
+            {recipe.difficulty != null && <Text>?</Text>}
+            {recipe.difficulty != null && <Text>{DIFFICULTY[recipe.difficulty] ?? '?'}</Text>}
+            {recipe.base_yield != null && <Text>?</Text>}
+            {recipe.base_yield != null && <Text>Serves {recipe.base_yield}</Text>}
+          </Group>
+          <RatingSummary recipe={recipe} />
         </Group>
-        <MacroMenu audit={audit} revert={revert} hasEdits={(recipe.edits ?? []).length > 0} />
-      </Group>
 
-      {personalRating.isError && (
-        <Alert color="red" variant="light">
-          {personalRating.error?.message ?? "Couldn't save your rating."}
-        </Alert>
-      )}
+        <div className={classes.ctaGrid}>
+          {recipe.steps.length > 0 && (
+            <Button
+              component={Link}
+              to={`/recipes/${recipe.id}/cook`}
+              replace
+              color="fresh"
+              radius="xl"
+              className={classes.primaryCta}
+            >
+              <span>
+                Let?s cook
+                <small>{recipe.total_time_min ?? 25} min ? step by step</small>
+              </span>
+            </Button>
+          )}
+          <PlannerControls
+            entry={plannerEntry}
+            readOnly={weekReadOnly}
+            disabled={!plannerEntry && upcomingWeekFull}
+            weekStart={weekStart}
+            marginalPerPortion={marginalPerPortion}
+            onAdd={() => addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })}
+            onRemove={() => removeRecipeFromWeek(weekStart, recipe.id)}
+            onPortionsChange={(portions) => setRecipePortions(weekStart, recipe.id, portions)}
+          />
+        </div>
 
-      {wishlist.isError && (
-        <Alert color="red" variant="light">
-          {wishlist.error?.message ?? "Couldn't update your wishlist."}
-        </Alert>
-      )}
+        <MacroPanel
+          view={view}
+          modified={modified}
+          recipe={recipe}
+          originalMacros={originalMacros}
+          audit={audit}
+          revert={revert}
+        />
 
-      {hideRecipe.isError && (
-        <Alert color="red" variant="light">
-          {hideRecipe.error?.message ?? "Couldn't hide this recipe."}
-        </Alert>
-      )}
+        <RateRecipePanel recipe={recipe} personalRating={personalRating} />
 
-      <MacroNotes audit={audit} edits={recipe.edits ?? []} />
+        {personalRating.isError && (
+          <Alert color="red" variant="light">
+            {personalRating.error?.message ?? "Couldn't save your rating."}
+          </Alert>
+        )}
 
-      <Divider />
+        {wishlist.isError && (
+          <Alert color="red" variant="light">
+            {wishlist.error?.message ?? "Couldn't update your wishlist."}
+          </Alert>
+        )}
 
-      <Grid gutter="xl">
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <Stack gap="md">
-            <Title order={3}>Ingredients</Title>
-            <div>
-              <Text size="sm" fw={600} mb={4}>
-                Servings
-              </Text>
-              <SegmentedControl
-                size="xs"
-                color="fresh"
-                fullWidth
-                value={String(servings)}
-                onChange={(v) => setServingsOverride(Number(v))}
-                data={SERVINGS.map((n) => ({ label: SERVINGS_LABELS[n], value: String(n) }))}
-              />
-            </div>
-            {recipe.protein && (
-              <ProteinControls
-                profile={recipe.protein}
-                modifier={protein}
-                preview={proteinPreview}
-                baseYield={baseYield}
-                onChange={applyProtein}
-                readOnly={weekReadOnly}
-              />
-            )}
-            <Table.ScrollContainer minWidth={320}>
-              <Table verticalSpacing="xs" className={classes.ingredientsTable}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th />
-                    <Table.Th>Qty</Table.Th>
-                    <Table.Th>Item</Table.Th>
-                    <Table.Th ta="right">Cost</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {view.ingredients.filter(hasDisplayQuantity).map((ing, i) => {
-                    const { quantity, estimate } = splitQuantityLabel(scaledQuantity(ing, factor))
-                    const cost = ing.ingredient_key ? ingredientCosts.get(ing.ingredient_key) : null
-                    const canOpenMapping = Boolean(ing.ingredient_key)
-                    return (
-                      <Table.Tr
-                        key={i}
-                        className={canOpenMapping ? classes.ingredientRow : undefined}
-                        onClick={() =>
-                          canOpenMapping && navigate(`/mapping/${encodeURIComponent(ing.ingredient_key)}`)
-                        }
-                      >
-                        <Table.Td w={42}>
-                          {ing.image_url ? (
-                            <Image src={ing.image_url} w={34} h={34} radius="sm" className={classes.ingImg} />
-                          ) : (
-                            <ThemeIcon variant="light" color="gray" size={34} radius="sm" className={classes.ingPlaceholder}>
-                              <IconPhoto size={17} />
-                            </ThemeIcon>
-                          )}
-                        </Table.Td>
-                        <Table.Td className={classes.quantityCell}>
-                          <Text size="sm" fw={600}>{quantity}</Text>
-                          {estimate && <Text size="xs" c="dimmed">({estimate})</Text>}
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="sm" fw={500}>
-                            {ing.name}
-                            {ing.unmapped && (
-                              <Tooltip label="Not mapped to a basket product" withArrow>
-                                <ThemeIcon
-                                  component="span"
-                                  variant="light"
-                                  color="yellow"
-                                  size="sm"
-                                  radius="xl"
-                                  className={classes.ingredientWarning}
-                                  data-darkreader-ignore="true"
-                                  style={{
-                                    backgroundColor: 'rgb(255, 243, 191)',
-                                    color: 'rgb(124, 77, 0)',
-                                  }}
-                                  aria-label="Unmapped ingredient"
-                                >
-                                  <IconAlertTriangle size={13} />
-                                </ThemeIcon>
-                              </Tooltip>
-                            )}
-                            {estimatedPotent(ing) && (
-                              <Tooltip
-                                label="Quantity is our estimate - the source ships this pre-portioned and states no weight. Easy to overdo, so add to taste."
-                                withArrow
-                                multiline
-                                w={260}
-                              >
-                                <ThemeIcon
-                                  component="span"
-                                  variant="light"
-                                  color="orange"
-                                  size="sm"
-                                  radius="xl"
-                                  className={classes.ingredientWarning}
-                                  aria-label="Estimated quantity, easy to overdo"
-                                >
-                                  <IconFlame size={13} />
-                                </ThemeIcon>
-                              </Tooltip>
-                            )}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text size="xs" c="dimmed" fw={600}>
-                            {cost == null ? '-' : formatMoney(cost)}
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    )
-                  })}
-                </Table.Tbody>
-                {marginalTotal != null && (
-                  <Table.Tfoot>
-                    <Table.Tr>
-                      <Table.Td colSpan={3}>
-                        <Text size="xs" c="dimmed" fw={600}>
-                          Used by this recipe
-                        </Text>
-                      </Table.Td>
-                      <Table.Td ta="right">
-                        <Text size="xs" c="dimmed" fw={700}>{formatMoney(usedTotal)}</Text>
-                      </Table.Td>
-                    </Table.Tr>
-                    {leftoverTotal > 0.005 && (
-                      <Table.Tr>
-                        <Table.Td colSpan={3}>
-                          <Group gap={6} wrap="nowrap">
-                            <Text size="xs" c="dimmed" fw={600}>
-                              Left over in the packs
-                            </Text>
-                            <Tooltip
-                              label="Packs come in fixed sizes, so a recipe needing 5 g of something still buys the whole bag. This is what stays in the cupboard for next time."
-                              withArrow
-                              multiline
-                              w={260}
-                            >
-                              <ThemeIcon variant="transparent" color="gray" size="xs">
-                                <IconAlertTriangle size={13} />
-                              </ThemeIcon>
-                            </Tooltip>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td ta="right">
-                          <Text size="xs" c="dimmed" fw={700}>{formatMoney(leftoverTotal)}</Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    )}
-                    <Table.Tr>
-                      <Table.Td colSpan={3}>
-                        <Text size="sm" fw={700}>Added to the shop</Text>
-                      </Table.Td>
-                      <Table.Td ta="right">
-                        <Text size="sm" fw={700}>{formatMoney(marginalTotal)}</Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  </Table.Tfoot>
-                )}
-              </Table>
-            </Table.ScrollContainer>
+        {hideRecipe.isError && (
+          <Alert color="red" variant="light">
+            {hideRecipe.error?.message ?? "Couldn't hide this recipe."}
+          </Alert>
+        )}
 
-            {recipe.allergens.length > 0 && (
-              <>
-                <Divider mt="sm" />
-                <div>
-                  <Text size="sm" fw={700} mb={6}>
-                    Allergens
-                  </Text>
-                  <Group gap={6}>
-                    {recipe.allergens.map((a) => (
-                      <Badge key={a} variant="outline" color="gray" radius="sm" size="sm">
-                        {a}
-                      </Badge>
-                    ))}
-                  </Group>
-                </div>
-              </>
-            )}
+        <MacroNotes audit={audit} edits={recipe.edits ?? []} />
+
+        <DetailControls
+          servings={servings}
+          setServingsOverride={setServingsOverride}
+          recipe={recipe}
+          protein={protein}
+          proteinPreview={proteinPreview}
+          baseYield={baseYield}
+          applyProtein={applyProtein}
+        />
+
+        <IngredientList
+          ingredients={displayIngredients}
+          factor={factor}
+          ingredientCosts={ingredientCosts}
+          navigate={navigate}
+          expanded={ingredientsExpanded}
+          setExpanded={setIngredientsExpanded}
+          marginalTotal={marginalTotal}
+          usedTotal={usedTotal}
+          leftoverTotal={leftoverTotal}
+        />
+
+        <CollapsibleRecipeSection
+          title="Method"
+          meta={`${view.steps.length} steps`}
+          opened={methodOpen}
+          onToggle={() => setMethodOpen((value) => !value)}
+        >
+          <Stack gap="lg">
+            {view.steps.map((step) => (
+              <Group key={step.index} gap="md" align="flex-start" wrap="nowrap" className={classes.methodStep}>
+                <ThemeIcon color="fresh" radius="xl" size={30} variant="filled">
+                  {step.index}
+                </ThemeIcon>
+                <Text className={classes.step}>{step.text}</Text>
+              </Group>
+            ))}
           </Stack>
-        </Grid.Col>
+        </CollapsibleRecipeSection>
 
-        <Grid.Col span={{ base: 12, md: 8 }}>
-          <Stack gap="md">
-            <Title order={3}>Method</Title>
-            <Stack gap="lg">
-              {view.steps.map((step) => (
-                <Group key={step.index} gap="md" align="flex-start" wrap="nowrap">
-                  <ThemeIcon color="fresh" radius="xl" size={30} variant="filled">
-                    {step.index}
-                  </ThemeIcon>
-                  <Text className={classes.step}>{step.text}</Text>
-                </Group>
+        <CollapsibleRecipeSection
+          title="Allergens & nutrition detail"
+          opened={nutritionOpen}
+          onToggle={() => setNutritionOpen((value) => !value)}
+        >
+          {recipe.allergens.length > 0 ? (
+            <Group gap={6} mb="md">
+              {recipe.allergens.map((allergen) => (
+                <Badge key={allergen} variant="outline" color="gray" radius="sm" size="sm">
+                  {allergen}
+                </Badge>
               ))}
-            </Stack>
-          </Stack>
-        </Grid.Col>
-      </Grid>
+            </Group>
+          ) : (
+            <Text c="dimmed" mb="md">No allergens listed.</Text>
+          )}
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+            <MacroStat label="Energy" value={view.energy_kcal} unit=" kcal" />
+            <MacroStat label="Protein" value={view.protein_g} unit="g" />
+            <MacroStat label="Carbs" value={view.carbs_g} unit="g" />
+            <MacroStat label="Fat" value={view.fat_g} unit="g" />
+          </SimpleGrid>
+        </CollapsibleRecipeSection>
 
-      {recipe.source_url && (
-        <>
-          <Divider />
-          <Anchor href={recipe.source_url} target="_blank" c="dimmed" size="sm">
+        {recipe.source_url && (
+          <Anchor href={recipe.source_url} target="_blank" c="dimmed" size="sm" className={classes.sourceLink}>
             <Group gap={6} wrap="nowrap">
               <IconExternalLink size={14} />
               View original on HelloFresh
             </Group>
           </Anchor>
-        </>
-      )}
-    </Stack>
+        )}
+      </section>
+    </main>
   )
+
 }
