@@ -3,7 +3,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  background: var(--mantine-color-body);
+  background: var(--hf-bg);
 }
 
 .header {
@@ -12,8 +12,8 @@
   gap: var(--mantine-spacing-sm);
   min-height: 64px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--mantine-color-gray-2);
-  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+  border-bottom: 1px solid var(--hf-border);
+  background: var(--hf-surface);
 }
 
 .recipeName {
@@ -38,7 +38,7 @@
   height: 100%;
   min-height: 0;
   object-fit: cover;
-  background: var(--mantine-color-gray-1);
+  background: var(--hf-surface-soft);
 }
 
 .instructions {
@@ -46,7 +46,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 24px 20px 32px;
-  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+  background: var(--hf-surface);
 }
 
 .stepLabel {
@@ -67,8 +67,8 @@
   gap: 16px;
   min-height: 76px;
   padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--mantine-color-gray-2);
-  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+  border-top: 1px solid var(--hf-border);
+  background: var(--hf-surface);
 }
 
 .loadingImage {
@@ -89,6 +89,6 @@
   .errorPage {
     width: min(100%, 640px);
     margin: 0 auto;
-    box-shadow: 0 0 0 1px var(--mantine-color-gray-2);
+    box-shadow: 0 0 0 1px var(--hf-border);
   }
 }

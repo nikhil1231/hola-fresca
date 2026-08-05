@@ -1,21 +1,14 @@
-
 .detailPage {
   min-height: 100dvh;
   background: var(--hf-bg);
   color: var(--hf-text);
 }
 
-.mobileStatusBar {
-  display: none;
-}
-
 .heroShell {
   position: relative;
-  min-height: min(58vw, 560px);
+  height: clamp(360px, 32vw, 460px);
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(33, 43, 29, 0.92), rgba(8, 12, 10, 0.98)),
-    var(--hf-surface-soft);
+  background: var(--hf-surface-soft);
 }
 
 .hero {
@@ -24,16 +17,16 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.46;
-  filter: saturate(0.9) contrast(1.03);
+  opacity: 0.72;
+  filter: saturate(0.86) contrast(1.04);
 }
 
 .heroOverlay {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(13, 17, 15, 0.04) 0%, rgba(13, 17, 15, 0.18) 44%, var(--hf-bg) 100%),
-    radial-gradient(circle at 42% 20%, rgba(76, 96, 58, 0.24), transparent 46%);
+    linear-gradient(180deg, rgba(8, 12, 10, 0.22) 0%, rgba(8, 12, 10, 0.08) 34%, rgba(8, 12, 10, 0.88) 100%),
+    linear-gradient(90deg, rgba(8, 12, 10, 0.3), transparent 66%);
 }
 
 .heroTopControls {
@@ -42,48 +35,61 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: clamp(28px, 4vw, 48px);
+  width: min(1280px, 100%);
+  margin: 0 auto;
+  padding: 28px clamp(28px, 5vw, 64px);
 }
 
 .circleButton,
 .wishlistButton,
 .heroTopControls :global(.mantine-Menu-target) > button {
-  background: rgba(10, 13, 10, 0.82) !important;
+  background: rgba(8, 12, 10, 0.82) !important;
   color: var(--hf-text) !important;
-  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(10px);
 }
 
-.wishlistButton {
+.wishlistButton,
+.wishlistButton[data-active] {
   color: #ff8faf !important;
 }
 
 .wishlistButton[data-active] {
-  background: rgba(10, 13, 10, 0.92) !important;
-  color: #ff8faf !important;
-  border-color: rgba(255, 143, 175, 0.2) !important;
+  background: rgba(50, 16, 28, 0.88) !important;
+  border-color: rgba(255, 143, 175, 0.24) !important;
+}
+
+.wishlistButton[aria-busy='true'] {
+  animation: wishlistPulse 800ms ease-in-out infinite alternate;
+}
+
+@keyframes wishlistPulse {
+  to { transform: scale(0.94); }
 }
 
 .heroContent {
-  position: relative;
+  position: absolute;
+  inset: auto 0 0;
   z-index: 1;
-  width: min(1120px, 100%);
+  width: min(1180px, 100%);
   margin: 0 auto;
-  padding: clamp(92px, 11vw, 170px) clamp(28px, 5vw, 64px) clamp(36px, 6vw, 74px);
+  padding: 36px clamp(28px, 5vw, 64px) 42px;
 }
 
 .heroTags {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .heroTag {
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding-inline: 14px;
-  border-radius: 8px;
-  color: #0d160f;
+  min-height: 31px;
+  padding-inline: 12px;
+  border-radius: 7px;
+  color: #0b160e;
   background: var(--hf-accent);
-  font-size: 0.92rem;
+  font-size: 0.78rem;
   font-weight: 950;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -92,58 +98,95 @@
 
 .heroTag.gray {
   color: var(--hf-text);
-  background: color-mix(in srgb, var(--hf-text) 18%, transparent);
+  background: rgba(230, 235, 231, 0.2);
+  backdrop-filter: blur(8px);
 }
 
 .title {
-  max-width: 980px;
+  max-width: 900px;
   color: #fff;
-  font-size: clamp(2.8rem, 7vw, 5.6rem);
+  font-size: clamp(2.3rem, 4vw, 3.6rem);
   line-height: 0.98;
-  letter-spacing: -0.07em;
+  letter-spacing: -0.055em;
+  text-wrap: balance;
 }
 
 .contentShell {
-  width: min(1120px, 100%);
+  width: min(1180px, 100%);
   margin: 0 auto;
-  padding: clamp(26px, 4vw, 44px) clamp(28px, 5vw, 64px) 72px;
+  padding: 38px clamp(28px, 5vw, 64px) 76px;
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.72fr);
+  grid-template-rows: auto auto;
+  gap: 28px;
+  align-items: start;
+}
+
+.introPanel {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  padding: 2px 0 0;
+}
+
+.sideStack {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  gap: 16px;
 }
 
 .headline {
-  max-width: 860px;
+  max-width: 760px;
   color: var(--hf-text-muted);
-  font-size: clamp(1.4rem, 3vw, 2.05rem);
-  font-weight: 800;
-  line-height: 1.35;
+  font-size: clamp(1.25rem, 1.8vw, 1.65rem);
+  font-weight: 550;
+  line-height: 1.34;
 }
 
 .metaRow {
   margin-top: 22px;
   color: var(--hf-text-muted);
-  font-size: 1.25rem;
-  font-weight: 900;
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
-.heroRating {
-  color: var(--hf-text);
+.metaFacts p {
+  position: relative;
 }
 
-.star {
-  color: var(--hf-warning);
+.metaFacts p + p::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -12px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--hf-text-subtle);
 }
 
 .ctaGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 18px;
-  margin-top: 26px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 30px;
+}
+
+.primaryCta,
+.secondaryCta,
+.plannedControls {
+  min-height: 66px;
 }
 
 .primaryCta,
 .secondaryCta {
-  min-height: 88px;
-  padding-inline: 28px;
-  font-size: 1.45rem;
+  padding-inline: 20px;
+  border-radius: var(--hf-radius-sm) !important;
+  font-size: 1rem;
   font-weight: 950;
 }
 
@@ -157,16 +200,16 @@
 
 .primaryCta small,
 .secondaryCta small {
-  color: color-mix(in srgb, #08120a 72%, transparent);
-  font-size: 1rem;
+  color: rgba(7, 18, 10, 0.7);
+  font-size: 0.78rem;
   font-weight: 850;
 }
 
 .secondaryCta {
-  border-width: 2px;
+  border-width: 1px;
   border-color: var(--hf-border-strong) !important;
   color: var(--hf-accent-soft) !important;
-  background: color-mix(in srgb, var(--hf-accent) 7%, transparent) !important;
+  background: rgba(73, 221, 132, 0.06) !important;
 }
 
 .secondaryCta small {
@@ -174,50 +217,120 @@
 }
 
 .plannedControls {
-  min-height: 88px;
   justify-content: center;
-  border: 2px solid var(--hf-border-strong);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--hf-accent) 7%, transparent);
+  border: 1px solid var(--hf-border-strong);
+  border-radius: var(--hf-radius-sm);
+  background: rgba(73, 221, 132, 0.06);
 }
 
 .portionStepper {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
   height: 42px;
   padding: 3px;
   border: 1px solid var(--hf-border);
   border-radius: 999px;
-  background: rgba(8, 12, 10, 0.86);
+  background: rgba(8, 12, 10, 0.78);
 }
 
 .portionCount {
   min-width: 28px;
   color: var(--hf-text);
   text-align: center;
-  line-height: 1;
 }
 
-.macroPanel,
 .ratePanel,
-.detailControls {
-  margin-top: 32px;
+.detailControls,
+.macroPanel {
   overflow: hidden;
   border-color: var(--hf-border) !important;
-  border-radius: 24px !important;
+  border-radius: 20px !important;
   background: var(--hf-surface) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+.ratePanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+  padding: 10px 18px;
+}
+
+.panelLabel {
+  color: var(--hf-text-muted);
+  font-size: 0.74rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heroRating {
+  color: var(--hf-text);
+}
+
+.ratingValue {
+  color: var(--hf-text);
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.ratingCount {
+  color: var(--hf-text-subtle);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.rateLabel {
+  color: var(--hf-text-muted);
+  font-size: 0.95rem;
+  font-weight: 850;
+}
+
+.star,
+.personalStarActive,
+.personalStarActive:hover {
+  color: var(--hf-warning) !important;
+}
+
+.personalStar {
+  color: var(--hf-text-subtle) !important;
+}
+
+.personalStar:hover {
+  color: color-mix(in srgb, var(--hf-warning) 65%, var(--hf-text-subtle)) !important;
+}
+
+.detailControls {
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+}
+
+.servingControl :global(.mantine-SegmentedControl-root) {
+  overflow-x: auto;
+}
+
+.servingControl :global(.mantine-SegmentedControl-control) {
+  min-width: 36px;
+}
+
+.macroPanel {
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 0;
 }
 
 .macroGrid {
-  min-height: 108px;
+  min-height: 104px;
 }
 
 .macro {
   display: grid;
   align-content: center;
-  min-height: 108px;
-  padding: 18px 24px !important;
+  min-height: 104px;
+  padding: 18px 22px !important;
   border: 0 !important;
   border-right: 1px solid var(--hf-border) !important;
   border-radius: 0 !important;
@@ -229,53 +342,48 @@
   border-right: 0 !important;
 }
 
-.macro :global(.mantine-Text-root:first-child) {
+.macroValue {
   color: var(--hf-text);
-  font-size: 2rem;
+  font-size: 1.4rem;
   font-weight: 950;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.macro > :last-child {
+  justify-content: flex-start !important;
+}
+
+.macroLabel {
+  color: var(--hf-text-muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .macroDot {
   display: none;
 }
 
+.macroUnit {
+  margin-left: 2px;
+}
+
 .macroFooter {
-  min-height: 70px;
-  padding: 16px 24px;
+  min-height: 62px;
+  padding: 14px 22px;
   border-top: 1px solid var(--hf-border);
 }
 
 .macroCaption {
   color: var(--hf-text-muted);
-  font-size: 1rem;
-  font-weight: 850;
+  font-size: 0.9rem;
+  font-weight: 750;
 }
 
-.ratePanel {
-  min-height: 84px;
-  padding: 0 28px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.personalStar,
-.personalStarActive {
-  color: var(--hf-text-subtle) !important;
-}
-
-.personalStar:hover,
-.personalStarActive,
-.personalStarActive:hover {
-  color: var(--hf-text-muted) !important;
-}
-
-.detailControls {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
-  gap: 22px;
-  padding: 20px 24px;
+.fullWidth {
+  width: 100%;
 }
 
 .recipeSection {
@@ -285,7 +393,7 @@
 
 .sectionHeader,
 .collapsibleHeader {
-  min-height: 86px;
+  min-height: 76px;
   width: 100%;
   color: inherit;
 }
@@ -299,22 +407,22 @@
 
 .sectionHeading {
   color: var(--hf-text);
-  font-size: clamp(1.55rem, 3vw, 2.1rem);
-  letter-spacing: -0.045em;
+  font-size: clamp(1.2rem, 1.7vw, 1.5rem);
+  letter-spacing: -0.035em;
 }
 
 .sectionHeading span {
-  margin-left: 10px;
+  margin-left: 9px;
   color: var(--hf-text-subtle);
-  font-size: 0.82em;
-  font-weight: 900;
-  letter-spacing: -0.02em;
+  font-size: 0.72em;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .sectionToggle {
   color: var(--hf-text-muted);
-  font-size: 1.7rem;
-  font-weight: 900;
+  font-size: 1.2rem;
+  font-weight: 800;
 }
 
 .ingredientList {
@@ -324,13 +432,14 @@
 .ingredientItem {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 10px 16px;
   width: 100%;
-  min-height: 72px;
+  min-height: 66px;
   align-items: center;
   border-bottom: 1px solid var(--hf-border);
   color: var(--hf-text);
+  font-family: inherit;
   text-align: left;
 }
 
@@ -340,48 +449,82 @@
 
 .ingredientItem:not(:disabled):hover {
   color: var(--hf-accent-soft);
+  background: rgba(73, 221, 132, 0.035);
 }
 
-.ingredientItem span {
-  font-size: 1.35rem;
-  font-weight: 850;
-  line-height: 1.22;
+.ingredientName {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.ingredientImage {
+  grid-row: 1 / span 2;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border: 1px solid var(--hf-border);
+  border-radius: 12px;
+  background: var(--hf-bg-elevated);
+}
+
+.ingredientImage:empty::after {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--hf-surface-strong);
+}
+
+.ingredientImage :global(.mantine-Image-root) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .ingredientItem strong {
+  grid-column: 3;
   color: var(--hf-text-muted);
-  font-size: 1.25rem;
-  font-weight: 900;
+  font-size: 1rem;
+  font-weight: 800;
   text-align: right;
 }
 
 .ingredientItem small {
-  grid-column: 2;
-  margin-top: -16px;
+  grid-column: 3;
+  margin-top: -12px;
   color: var(--hf-text-subtle);
-  font-size: 0.8rem;
-  font-weight: 800;
+  font-size: 0.76rem;
+  font-weight: 700;
   text-align: right;
 }
 
 .inlineWarning {
   color: var(--hf-warning);
-  font-size: 0.75em !important;
+  font-size: 0.72rem !important;
+  font-weight: 850 !important;
+  text-transform: uppercase;
 }
 
 .showMoreButton {
-  min-height: 70px;
+  min-height: 62px;
   color: var(--hf-accent-soft);
-  font-size: 1.15rem;
-  font-weight: 950;
+  font-size: 0.98rem;
+  font-weight: 900;
 }
 
 .recipeTotals {
   display: grid;
-  gap: 8px;
-  padding-top: 18px;
+  gap: 7px;
+  padding: 18px 0 4px;
   color: var(--hf-text-muted);
-  font-weight: 800;
+  font-size: 0.9rem;
+  font-weight: 750;
 }
 
 .recipeTotals span {
@@ -395,6 +538,7 @@
 }
 
 .sectionChevron {
+  flex: 0 0 auto;
   color: var(--hf-text-muted);
   transition: transform 180ms ease;
 }
@@ -404,7 +548,7 @@
 }
 
 .collapsibleBody {
-  padding: 0 0 26px;
+  padding: 2px 0 28px;
   color: var(--hf-text-muted);
 }
 
@@ -414,8 +558,7 @@
 
 .step {
   color: var(--hf-text);
-  line-height: 1.65;
-  padding-top: 2px;
+  line-height: 1.62;
 }
 
 .sourceLink {
@@ -424,35 +567,47 @@
   text-decoration: none;
 }
 
-.costBadge,
-.ratingStack,
-.ratingsPanel,
-.ratingItem,
-.ratingValue,
-.ingImg,
-.ingredientWarning,
-.quantityCell,
-.ingPlaceholder,
-.ingredientsTable {
-  color: inherit;
+.mobileAdjustments {
+  display: none;
 }
 
-@media (min-width: 60em) {
-  .contentShell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.48fr);
-    column-gap: 42px;
+@media (max-width: 59.99em) {
+  .heroShell {
+    height: 400px;
   }
 
-  .headline,
-  .metaRow,
-  .ctaGrid,
+  .heroTopControls {
+    padding: 20px 24px;
+  }
+
+  .heroContent {
+    padding: 30px 28px 26px;
+  }
+
+  .title {
+    font-size: clamp(2.2rem, 7vw, 3.2rem);
+  }
+
+  .contentShell {
+    padding: 24px 28px 44px;
+  }
+
+  .overviewGrid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    gap: 24px;
+  }
+
+  .introPanel,
   .macroPanel,
-  .ratePanel,
-  .detailControls,
-  .recipeSection,
-  .sourceLink {
-    grid-column: 1 / -1;
+  .sideStack {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .sideStack {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
   }
 }
 
@@ -461,128 +616,273 @@
     border-inline: 1px solid var(--hf-border);
   }
 
-  .mobileStatusBar {
-    position: absolute;
-    inset: 0 0 auto 0;
-    z-index: 4;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 52px;
-    padding: 0 35px;
-    color: var(--hf-text-muted);
-    font-weight: 950;
-  }
-
   .heroShell {
-    min-height: 475px;
+    height: 250px;
   }
 
   .heroTopControls {
-    padding: 76px 26px 0;
+    padding: 16px 18px;
+  }
+
+  .heroTopControls :global(.mantine-ActionIcon-root) {
+    width: 42px;
+    height: 42px;
   }
 
   .heroContent {
-    padding: 158px 34px 28px;
+    padding: 18px 17px 16px;
   }
 
   .title {
-    font-size: 2.65rem;
+    font-size: clamp(1.55rem, 7vw, 1.9rem);
+    line-height: 1.04;
+    letter-spacing: -0.04em;
   }
 
   .contentShell {
-    padding: 24px 34px 34px;
+    padding: 9px 17px 34px;
+  }
+
+  .heroTags {
+    gap: 6px !important;
+    margin-bottom: 10px;
+  }
+
+  .heroTag {
+    min-height: 22px;
+    padding-inline: 8px;
+    border-radius: 5px;
+    font-size: 0.62rem;
   }
 
   .headline {
-    font-size: 1.55rem;
+    font-size: 0.98rem;
+    font-weight: 500;
+    line-height: 1.42;
   }
 
   .metaRow {
-    font-size: 1.25rem;
+    gap: 12px !important;
+    margin-top: 13px;
+    font-size: 0.68rem;
+  }
+
+  .metaFacts {
+    gap: 14px !important;
+  }
+
+  .metaFacts p + p::before {
+    left: -8px;
+  }
+
+  .heroRating {
+    gap: 5px !important;
+  }
+
+  .ratingValue {
+    font-size: 0.84rem;
+  }
+
+  .ratingCount {
+    font-size: 0.72rem;
   }
 
   .ctaGrid {
-    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+    margin-top: 16px;
   }
 
   .primaryCta,
   .secondaryCta,
   .plannedControls {
-    min-height: 102px;
-    padding-inline: 12px;
-    font-size: 1.45rem;
+    min-height: 52px;
+  }
+
+  .primaryCta,
+  .secondaryCta {
+    padding-inline: 10px;
+    font-size: 0.9rem;
   }
 
   .primaryCta small,
   .secondaryCta small {
-    font-size: 1rem;
+    font-size: 0.66rem;
   }
 
-  .macroPanel,
+  .portionStepper {
+    height: 34px;
+  }
+
+  .sideStack {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .desktopAdjustments {
+    display: none;
+  }
+
+  .mobileAdjustments {
+    display: block;
+  }
+
+  .mobileAdjustments .recipeSection {
+    margin-top: 0;
+  }
+
+  .overviewGrid {
+    gap: 14px;
+  }
+
   .ratePanel,
+  .detailControls,
+  .macroPanel {
+    border-radius: 14px !important;
+  }
+
+  .ratePanel {
+    min-height: 50px;
+    padding: 7px 14px;
+  }
+
+  .rateLabel {
+    font-size: 0.82rem;
+  }
+
   .detailControls {
-    border-radius: 22px !important;
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .panelLabel {
+    font-size: 0.62rem;
+  }
+
+  .servingControl :global(.mantine-Text-root:last-child) {
+    font-size: 0.68rem;
+  }
+
+  .servingControl :global(.mantine-SegmentedControl-label) {
+    padding: 5px 7px;
+    font-size: 0.7rem;
   }
 
   .macroGrid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    min-height: 56px;
   }
 
   .macro {
-    min-height: 86px;
-    padding: 16px 18px !important;
+    min-height: 56px;
+    padding: 10px 14px !important;
   }
 
-  .macro :global(.mantine-Text-root:first-child) {
-    font-size: 1.65rem;
+  .macroValue {
+    font-size: 1.08rem;
+  }
+
+  .macroLabel {
+    font-size: 0.58rem;
+  }
+
+  .macroUnit {
+    font-size: 0.56rem !important;
   }
 
   .macroFooter {
-    min-height: 70px;
-    padding: 16px 28px;
+    min-height: 38px;
+    padding: 9px 14px;
   }
 
-  .detailControls {
-    grid-template-columns: 1fr;
+  .macroCaption {
+    font-size: 0.7rem;
+  }
+
+  .recipeSection {
+    margin-top: 0;
   }
 
   .sectionHeader,
   .collapsibleHeader {
-    min-height: 86px;
+    min-height: 52px;
   }
 
-  .ingredientItem span {
-    font-size: 1.35rem;
+  .sectionHeading {
+    font-size: 1rem;
   }
 
+  .ingredientItem {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: 7px 11px;
+    min-height: 58px;
+  }
+
+  .ingredientImage {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
+  }
+
+  .ingredientName,
   .ingredientItem strong {
-    font-size: 1.25rem;
+    font-size: 0.86rem;
+  }
+
+  .ingredientItem small {
+    margin-top: -8px;
+    font-size: 0.66rem;
+  }
+
+  .showMoreButton {
+    min-height: 48px;
+    font-size: 0.82rem;
+  }
+
+  .recipeTotals {
+    font-size: 0.75rem;
+  }
+
+  .collapsibleBody {
+    padding-bottom: 20px;
+  }
+
+  .methodStep {
+    padding-top: 6px;
+  }
+
+  .step {
+    font-size: 0.84rem;
   }
 }
 
 @media (max-width: 34em) {
+  .heroShell {
+    height: 238px;
+  }
+
+  .heroTopControls {
+    padding-inline: 18px;
+  }
+
+  .heroContent,
   .contentShell {
-    padding-inline: 24px;
+    padding-inline: 18px;
   }
 
-  .heroContent {
-    padding-inline: 24px;
+  .servingControl :global(.mantine-SegmentedControl-label) {
+    padding-inline: 6px;
   }
 
-  .ctaGrid {
-    gap: 12px;
+  .macroFooter {
+    align-items: flex-start !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wishlistButton[aria-busy='true'] {
+    animation: none;
   }
 
-  .primaryCta,
-  .secondaryCta,
-  .plannedControls {
-    min-height: 92px;
-    font-size: 1.18rem;
-  }
-
-  .primaryCta small,
-  .secondaryCta small {
-    font-size: 0.86rem;
+  .sectionChevron {
+    transition: none;
   }
 }

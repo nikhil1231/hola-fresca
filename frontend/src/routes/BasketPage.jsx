@@ -1283,7 +1283,11 @@ export default function BasketPage() {
     <main className={classes.pageStack}>
       <div className={classes.mobileStatusBar} aria-hidden="true">
         <span>9:41</span>
-        <span>???</span>
+        <span className={classes.statusPills}>
+          <span />
+          <span />
+          <span />
+        </span>
       </div>
 
       <div className={classes.pageFrame}>

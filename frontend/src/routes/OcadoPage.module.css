@@ -3,7 +3,7 @@
 }
 
 .titleIcon {
-  color: var(--mantine-color-fresh-7);
+  color: var(--hf-accent);
 }
 
 /* The week basket carries the sync diff - a five-column table - so it takes the
@@ -22,9 +22,9 @@
 }
 
 .panel {
-  border: 1px solid var(--mantine-color-gray-3);
-  border-radius: 8px;
-  background: var(--mantine-color-white);
+  border: 1px solid var(--hf-border);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-surface);
   padding: var(--mantine-spacing-md);
   min-width: 0;
 }
@@ -36,8 +36,8 @@
 }
 
 .stat {
-  border: 1px solid var(--mantine-color-gray-2);
-  border-radius: 8px;
+  border: 1px solid var(--hf-border);
+  border-radius: var(--hf-radius-sm);
   padding: var(--mantine-spacing-sm);
   min-height: 76px;
 }
@@ -45,9 +45,9 @@
 /* A nested panel rather than an Alert: the diff is a table, and Alert's padded,
    centred body makes a table look like it fell in by accident. */
 .diffPanel {
-  border: 1px solid var(--mantine-color-gray-3);
-  border-radius: 8px;
-  background: var(--mantine-color-gray-0);
+  border: 1px solid var(--hf-border);
+  border-radius: var(--hf-radius-sm);
+  background: var(--hf-surface-soft);
   padding: var(--mantine-spacing-sm);
   min-width: 0;
 }

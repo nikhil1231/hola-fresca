@@ -166,28 +166,49 @@ export function useRevertRecipeEdits(id) {
   })
 }
 
-export function usePersonalRecipeRating(id) {
+function useOptimisticRecipeFieldMutation(id, field, mutationFn) {
   const qc = useQueryClient()
+  const recipeKey = ['recipe', id]
+
   return useMutation({
-    mutationFn: (rating) => setPersonalRecipeRating(id, rating),
-    onSuccess: (data) => {
-      qc.setQueryData(['recipe', id], data)
+    mutationFn,
+    onMutate: async (value) => {
+      await qc.cancelQueries({ queryKey: recipeKey })
+      const previous = qc.getQueryData(recipeKey)
+      qc.setQueryData(recipeKey, (current) => (
+        current ? { ...current, [field]: value } : current
+      ))
+      return { previous }
+    },
+    onError: (_error, value, context) => {
+      qc.setQueryData(recipeKey, (current) => (
+        current?.[field] === value ? context?.previous : current
+      ))
+    },
+    onSuccess: (data, value) => {
+      qc.setQueryData(recipeKey, (current) => (
+        current?.[field] === value ? data : current
+      ))
       qc.invalidateQueries({ queryKey: ['recipes'] })
       qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
     },
   })
 }
 
+export function usePersonalRecipeRating(id) {
+  return useOptimisticRecipeFieldMutation(
+    id,
+    'personal_rating',
+    (rating) => setPersonalRecipeRating(id, rating),
+  )
+}
+
 export function useRecipeWishlist(id) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (wishlisted) => setRecipeWishlist(id, wishlisted),
-    onSuccess: (data) => {
-      qc.setQueryData(['recipe', id], data)
-      qc.invalidateQueries({ queryKey: ['recipes'] })
-      qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
-    },
-  })
+  return useOptimisticRecipeFieldMutation(
+    id,
+    'wishlisted',
+    (wishlisted) => setRecipeWishlist(id, wishlisted),
+  )
 }
 
 export function useHideRecipe(id) {
