@@ -1032,7 +1032,14 @@ def preview_protein(
         macros_after=MacrosOut.of(resolution.macros_after),
         ingredients=out_ingredients,
         steps=[
-            StepOut(index=s.index, text=protein_mod.rewrite_text(s.instructions_text, resolution))
+            StepOut(
+                index=s.index,
+                text=protein_mod.rewrite_text(s.instructions_text, resolution),
+                # A modifier rewrites the words, not the photos. The preview
+                # stands in for the whole recipe wherever it renders, so a step
+                # that dropped its image would show the placeholder mid-cook.
+                image_url=image_url(s.image_path, 1200),
+            )
             for s in sorted(recipe.steps, key=lambda s: s.index)
         ],
         diet=diet_after,

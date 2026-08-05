@@ -272,7 +272,7 @@ def _seed_world(factory, tmp_path):
                                  amount=20, unit="grams", amount_g=20, position=2),
             ],
             steps=[
-                RecipeStep(index=1, instructions_text=(
+                RecipeStep(index=1, image_path="/image/step-one.jpg", instructions_text=(
                     "Fry the British Chicken Breasts for 5 mins, then stir in the "
                     "chicken stock paste."
                 )),
@@ -435,6 +435,20 @@ def test_the_preview_returns_the_modified_recipe_not_a_diff(protein_client):
     assert "chicken stock paste" in body["steps"][0]["text"]
     assert "Now vegetarian" in body["diet_changes"]
     assert body["cook_note"]
+
+
+def test_the_preview_keeps_the_step_photos(protein_client):
+    """Cooking mode renders the preview's steps, and a step without its photo
+    falls back to the placeholder - so the swap would silently strip the
+    pictures out of the method."""
+    client, ids = protein_client
+    stored = client.get(f"/api/recipes/{ids['chicken']}").json()
+    body = client.post(
+        f"/api/recipes/{ids['chicken']}/protein/preview", json={"swap_to": "tofu"}
+    ).json()
+
+    assert body["steps"][0]["image_url"] == stored["steps"][0]["image_url"]
+    assert "/image/step-one.jpg" in body["steps"][0]["image_url"]
 
 
 def test_the_preview_leaves_the_stored_recipe_alone(protein_client):
