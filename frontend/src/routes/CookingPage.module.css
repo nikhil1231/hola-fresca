@@ -26,27 +26,62 @@
   line-height: 1.25;
 }
 
-.stepArea {
-  height: 100%;
+/* The steps laid end to end between the two fixed bars, one screen wide each.
+   Snapping to them is the browser's job, which is what makes a swipe drag the
+   next step along under your finger instead of waiting to see where it ended
+   up. */
+.track {
   min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(220px, 1fr) minmax(0, 1fr);
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  /* `none` rather than `contain`: containment only stops the scroll reaching an
+     ancestor, and the gesture we have to stop belongs to the browser itself -
+     swiping right on the first step was walking back through history and out of
+     the recipe. */
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
+}
+
+.track::-webkit-scrollbar {
+  display: none;
+}
+
+/* The picture and the method are one scroller: the photo belongs to the step,
+   and holding it on screen was taking the height the instructions needed. */
+.pane {
+  position: relative;
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow-y: auto;
+  /* Not `visible`, which a scrolling y quietly promotes to `auto`, and not
+     `hidden`: either leaves the step a sideways scroller of its own, and one
+     that cannot move swallows the swipe instead of handing it to the track. */
+  overflow-x: clip;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.pane::-webkit-scrollbar {
+  display: none;
 }
 
 .stepImage {
   width: 100%;
-  height: 100%;
-  min-height: 0;
+  aspect-ratio: 4 / 3;
+  max-height: 42dvh;
   object-fit: cover;
   background: var(--mantine-color-gray-1);
 }
 
 .instructions {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  position: relative;
   padding: 24px 20px 32px;
-  background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-7));
 }
 
 .stepLabel {
@@ -58,6 +93,97 @@
   font-size: clamp(1.05rem, 4.5vw, 1.25rem);
   line-height: 1.65;
   white-space: pre-wrap;
+}
+
+/* An ingredient the step names. Green and underlined so it reads as something
+   to press without breaking the line up the way a button would. */
+.ingredientMention {
+  color: light-dark(var(--mantine-color-fresh-8), var(--mantine-color-fresh-4));
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ingredientMention:focus-visible {
+  outline: 2px solid var(--mantine-color-fresh-6);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Anchored on the word by the page, which measures where the word actually
+   sits; everything here is how it looks getting there and leaving. */
+.tooltip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -100%);
+  max-width: 220px;
+  width: max-content;
+  padding: 5px 10px;
+  border-radius: var(--mantine-radius-sm);
+  background: light-dark(var(--mantine-color-dark-8), var(--mantine-color-gray-1));
+  color: light-dark(var(--mantine-color-white), var(--mantine-color-dark-9));
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+  animation: tooltipIn 110ms ease-out;
+}
+
+.tooltip[data-below] {
+  transform: translate(-50%, 0);
+  animation-name: tooltipInBelow;
+}
+
+.tooltip[data-closing],
+.tooltip[data-below][data-closing] {
+  animation: tooltipOut 110ms ease-in forwards;
+}
+
+.tooltipArrow {
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  background: inherit;
+}
+
+.tooltip[data-below] .tooltipArrow {
+  bottom: auto;
+  top: -4px;
+}
+
+@keyframes tooltipIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 4px));
+  }
+}
+
+@keyframes tooltipOut {
+  to {
+    opacity: 0;
+  }
+}
+
+/* The same fade for a tooltip that had to go under the word instead. */
+@keyframes tooltipInBelow {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tooltip {
+    animation-duration: 1ms;
+  }
 }
 
 .navigation {
