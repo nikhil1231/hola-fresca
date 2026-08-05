@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import schedule as sched
-from app.api.deps import get_session
+from app.api.deps import get_current_user, get_session
 from app.api.schemas import (
     ScheduleOut,
     ScheduleSettingsIn,
@@ -23,17 +23,25 @@ from app.api.schemas import (
     ScheduleWeekIn,
     ScheduleWeekOut,
 )
-from app.db.models import PlanSettings, PlanWeek
+from app.db.models import PlanSettings, PlanWeek, User
 
 router = APIRouter(prefix="/api/schedule", tags=["schedule"])
 
 
-def _settings_row(session: Session) -> PlanSettings:
-    """The one settings row, created with defaults the first time it is asked for."""
-    row = session.scalar(select(PlanSettings).order_by(PlanSettings.id).limit(1))
+def _settings_row(session: Session, user_id: int) -> PlanSettings:
+    """This user's settings row, created with defaults the first time it is asked for.
+
+    Created lazily rather than alongside the account: the defaults are the
+    schedule until someone changes it, so a row that says exactly that is worth
+    nothing until it does.
+    """
+    row = session.scalar(select(PlanSettings).where(PlanSettings.user_id == user_id))
     if row is not None:
         return row
-    row = PlanSettings(anchor_week_start=sched.format_date(sched.upcoming_week_start()))
+    row = PlanSettings(
+        user_id=user_id,
+        anchor_week_start=sched.format_date(sched.upcoming_week_start()),
+    )
     session.add(row)
     session.commit()
     return row
@@ -65,6 +73,7 @@ def _week_out(week: sched.ScheduleWeek) -> ScheduleWeekOut:
         status=week.status,
         skipped=week.skipped,
         closed=week.closed,
+        complete=week.complete,
         is_active=week.is_active,
     )
 
@@ -79,14 +88,20 @@ def _require_week_start(value: str) -> date:
     return parsed
 
 
-def _prune_past_weeks(session: Session, before: date) -> None:
-    """Forget overrides for weeks that have been and gone.
+def _prune_past_weeks(session: Session, user_id: int, before: date) -> None:
+    """Forget overrides for weeks too old to be shown at all.
 
-    A skip only means anything ahead of time, and without this the table grows a
-    row a week forever.
+    Not simply "weeks that have been and gone": history is displayed, and a week
+    that reads as an ordinary empty shop when it was deliberately skipped is a
+    worse record than no record. So the floor is the oldest week the schedule
+    could ever hand back, which still stops the table growing a row a week
+    forever.
     """
     stale = session.scalars(
-        select(PlanWeek).where(PlanWeek.week_start < sched.format_date(before))
+        select(PlanWeek).where(
+            PlanWeek.user_id == user_id,
+            PlanWeek.week_start < sched.format_date(before),
+        )
     ).all()
     if not stale:
         return
@@ -95,52 +110,91 @@ def _prune_past_weeks(session: Session, before: date) -> None:
     session.commit()
 
 
-def _skipped_week_starts(session: Session) -> set[str]:
-    return set(session.scalars(select(PlanWeek.week_start).where(PlanWeek.skipped == True)))  # noqa: E712
-
-
-def _schedule_out(session: Session, row: PlanSettings) -> ScheduleOut:
-    now = datetime.now()
-    _prune_past_weeks(session, sched.upcoming_week_start(now.date()))
-    week_starts = sched.cycle_week_starts(
-        sched.parse_date(row.anchor_week_start),
-        cadence_weeks=row.cadence_weeks,
-        count=row.horizon_weeks,
-        today=now.date(),
+def _skipped_week_starts(session: Session, user_id: int) -> set[str]:
+    return set(
+        session.scalars(
+            select(PlanWeek.week_start).where(
+                PlanWeek.user_id == user_id,
+                PlanWeek.skipped == True,  # noqa: E712
+            )
+        )
     )
-    weeks = sched.build_weeks(
-        week_starts,
-        skipped=_skipped_week_starts(session),
-        cutoff_days_before=row.cutoff_days_before,
-        cutoff_time=sched.parse_time(row.cutoff_time),
+
+
+def _schedule_out(
+    session: Session, row: PlanSettings, past_weeks: int = 0
+) -> ScheduleOut:
+    now = datetime.now()
+    anchor = sched.parse_date(row.anchor_week_start)
+    cadence = row.cadence_weeks
+    history_floor = sched.past_week_starts(
+        anchor, cadence_weeks=cadence, count=sched.MAX_PAST_WEEKS, today=now.date()
+    )[0]
+    _prune_past_weeks(session, row.user_id, history_floor)
+
+    skipped = _skipped_week_starts(session, row.user_id)
+    cutoff_time = sched.parse_time(row.cutoff_time)
+
+    def build(week_starts: list[date], *, paused: bool) -> list[sched.ScheduleWeek]:
+        return sched.build_weeks(
+            week_starts,
+            skipped=skipped,
+            cutoff_days_before=row.cutoff_days_before,
+            cutoff_time=cutoff_time,
+            paused=paused,
+            now=now,
+        )
+
+    weeks = build(
+        sched.cycle_week_starts(
+            anchor, cadence_weeks=cadence, count=row.horizon_weeks, today=now.date()
+        ),
         paused=bool(row.paused),
-        now=now,
+    )
+    # Pausing is a statement about what happens next, so history is built as it
+    # actually was: a shop that happened does not retroactively become paused.
+    past = build(
+        sched.past_week_starts(
+            anchor, cadence_weeks=cadence, count=past_weeks, today=now.date()
+        ),
+        paused=False,
     )
     active = next((week for week in weeks if week.is_active), None)
     return ScheduleOut(
         settings=_settings_out(row),
         weeks=[_week_out(week) for week in weeks],
+        past_weeks=[_week_out(week) for week in past],
+        has_more_past=past_weeks < sched.MAX_PAST_WEEKS,
         active_week_start=sched.format_date(active.week_start) if active else None,
         now=now.isoformat(timespec="minutes"),
     )
 
 
 @router.get("", response_model=ScheduleOut)
-def get_schedule(session: Session = Depends(get_session)) -> ScheduleOut:
-    return _schedule_out(session, _settings_row(session))
+def get_schedule(
+    past_weeks: int = Query(default=0, ge=0, le=sched.MAX_PAST_WEEKS),
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> ScheduleOut:
+    """The planning window, plus however many finished shops were asked for."""
+    return _schedule_out(session, _settings_row(session, user.id), past_weeks)
 
 
 @router.get("/settings", response_model=ScheduleSettingsOut)
-def get_settings(session: Session = Depends(get_session)) -> ScheduleSettingsOut:
-    return _settings_out(_settings_row(session))
+def get_settings(
+    session: Session = Depends(get_session), user: User = Depends(get_current_user)
+) -> ScheduleSettingsOut:
+    return _settings_out(_settings_row(session, user.id))
 
 
 @router.put("/settings", response_model=ScheduleOut)
 def update_settings(
-    body: ScheduleSettingsIn, session: Session = Depends(get_session)
+    body: ScheduleSettingsIn,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> ScheduleOut:
     """Change the rhythm. Returns the whole schedule, since every field reshapes it."""
-    row = _settings_row(session)
+    row = _settings_row(session, user.id)
     values = body.model_dump(exclude_unset=True, exclude_none=True)
 
     if "anchor_week_start" in values:
@@ -162,18 +216,25 @@ def update_settings(
 
 @router.put("/weeks/{week_start}", response_model=ScheduleOut)
 def set_week(
-    week_start: str, body: ScheduleWeekIn, session: Session = Depends(get_session)
+    week_start: str,
+    body: ScheduleWeekIn,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> ScheduleOut:
     """Skip a week, or put it back."""
     parsed = _require_week_start(week_start)
     if parsed < sched.upcoming_week_start():
         raise HTTPException(status_code=400, detail=f"{week_start} has already been and gone")
 
-    row = session.scalar(select(PlanWeek).where(PlanWeek.week_start == week_start))
+    row = session.scalar(
+        select(PlanWeek).where(
+            PlanWeek.user_id == user.id, PlanWeek.week_start == week_start
+        )
+    )
     if row is None:
-        row = PlanWeek(week_start=week_start)
+        row = PlanWeek(user_id=user.id, week_start=week_start)
         session.add(row)
     row.skipped = body.skipped
     row.note = body.note
     session.commit()
-    return _schedule_out(session, _settings_row(session))
+    return _schedule_out(session, _settings_row(session, user.id))

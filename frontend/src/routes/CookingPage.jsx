@@ -1,19 +1,32 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ActionIcon, Alert, Button, Image, Skeleton, Text, Title } from '@mantine/core'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ActionIcon, Alert, Badge, Button, Group, Image, Skeleton, Text, Title } from '@mantine/core'
 import { IconArrowLeft, IconArrowRight, IconCheck, IconX } from '@tabler/icons-react'
 
-import { useRecipe } from '../hooks/useRecipeQueries.js'
+import { useProteinPreview, useRecipe } from '../hooks/useRecipeQueries.js'
 import { usePreloadStepImages } from '../hooks/usePreloadStepImages.js'
+import { formatProteinModifier, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import classes from './CookingPage.module.css'
 
 export default function CookingPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { data: recipe, isLoading, isError } = useRecipe(id)
+  // Cook the dish you planned, not the one the library publishes. A week's
+  // protein swap rewrites the weights in the steps as well as the ingredient
+  // list, so following the stored method with a bag of tofu in front of you is
+  // how you end up cooking to the chicken's timings and quantities.
+  const { getCookingEntry } = useWeeklyPlan()
+  const entry = getCookingEntry(Number(id), searchParams.get('week'))
+  const { data: proteinPreview } = useProteinPreview(id, entry?.protein, {
+    enabled: Boolean(entry?.protein),
+  })
+  const modified = proteinPreview?.changed ? proteinPreview : null
+  const modifierLabel = formatProteinModifier(entry?.protein)
   const [stepPosition, setStepPosition] = useState(0)
-  usePreloadStepImages(recipe?.steps)
+  usePreloadStepImages(modified?.steps ?? recipe?.steps)
 
   if (isLoading) {
     return (
@@ -38,7 +51,7 @@ export default function CookingPage() {
     )
   }
 
-  const steps = recipe.steps ?? []
+  const steps = modified?.steps ?? recipe.steps ?? []
   if (steps.length === 0) {
     return (
       <main className={classes.errorPage}>
@@ -52,12 +65,20 @@ export default function CookingPage() {
     )
   }
 
-  const currentStep = steps[stepPosition]
-  const isFirst = stepPosition === 0
-  const isLast = stepPosition === steps.length - 1
+  // Clamped, because the step list can change underneath you: the modified
+  // method arrives a moment after the stored one, and being three steps into a
+  // recipe that just got shorter should move you back, not blank the page.
+  const position = Math.min(stepPosition, steps.length - 1)
+  const currentStep = steps[position]
+  const isFirst = position === 0
+  const isLast = position === steps.length - 1
   const image = currentStep.image_url || recipe.image_url || RECIPE_PLACEHOLDER_IMAGE
+  // Back where you came from, week and all — the detail page reads the week to
+  // decide which plan entry it is describing.
+  const weekParam = searchParams.get('week')
+  const detailHref = `/recipes/${recipe.id}${weekParam ? `?week=${weekParam}` : ''}`
 
-  const finish = () => navigate(`/recipes/${recipe.id}`, { replace: true })
+  const finish = () => navigate(detailHref, { replace: true })
 
   return (
     <main className={classes.page}>
@@ -69,10 +90,27 @@ export default function CookingPage() {
           <Title order={1} className={classes.title} lineClamp={1}>
             {recipe.name}
           </Title>
+          {/* What you planned, said before the first step rather than left for
+              you to notice halfway through. The steps below are already written
+              for it; this is why they do not match the recipe you remember. */}
+          {(modifierLabel || entry) && (
+            <Group gap={6} mt={4} wrap="nowrap">
+              {modifierLabel && (
+                <Badge color="grape" variant="light" size="sm" radius="sm">
+                  {modifierLabel}
+                </Badge>
+              )}
+              {entry && (
+                <Badge color="gray" variant="light" size="sm" radius="sm">
+                  {entry.portions} portions
+                </Badge>
+              )}
+            </Group>
+          )}
         </div>
         <ActionIcon
           component={Link}
-          to={`/recipes/${recipe.id}`}
+          to={detailHref}
           replace
           variant="subtle"
           color="gray"
@@ -107,12 +145,12 @@ export default function CookingPage() {
           radius="xl"
           disabled={isFirst}
           aria-label="Previous step"
-          onClick={() => setStepPosition((position) => position - 1)}
+          onClick={() => setStepPosition(position - 1)}
         >
           <IconArrowLeft size={22} />
         </ActionIcon>
         <Text fw={700} size="sm" ta="center">
-          Step {stepPosition + 1} of {steps.length}
+          Step {position + 1} of {steps.length}
         </Text>
         <ActionIcon
           variant="filled"
@@ -120,7 +158,7 @@ export default function CookingPage() {
           size="xl"
           radius="xl"
           aria-label={isLast ? 'Finish cooking' : 'Next step'}
-          onClick={isLast ? finish : () => setStepPosition((position) => position + 1)}
+          onClick={isLast ? finish : () => setStepPosition(position + 1)}
         >
           {isLast ? <IconCheck size={22} /> : <IconArrowRight size={22} />}
         </ActionIcon>

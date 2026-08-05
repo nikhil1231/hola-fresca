@@ -173,21 +173,38 @@ def test_list_returns_only_curated(client):
     assert "Hidden" not in names
 
 
-def test_hide_recipe_removes_it_from_active_library(client):
+def test_hide_recipe_takes_it_off_this_users_browse(client):
     rid = client.get("/api/recipes", params={"q": "taco"}).json()["items"][0]["id"]
 
     response = client.post(f"/api/recipes/{rid}/hide")
 
     assert response.status_code == 200
-    assert response.json() == {"id": rid, "manually_excluded": True}
+    assert response.json() == {"id": rid, "hidden": True}
     data = client.get("/api/recipes").json()
     assert data["total"] == 2
     assert {item["name"] for item in data["items"]} == {
         "Creamy Veggie Pasta",
         "Speedy Cajun Style Chicken Macaroni",
     }
-    assert client.get(f"/api/recipes/{rid}").status_code == 404
-    assert client.post("/api/planner/basket", json={"selections": [{"recipe_id": rid, "portions": 4}]}).status_code == 400
+    # A hide is about not being shown the recipe, not about the recipe going
+    # away: it is still in the library, still openable by link, and still
+    # priceable — which is what stops hiding one from breaking a plan or a
+    # basket that already contains it.
+    assert client.get(f"/api/recipes/{rid}").status_code == 200
+    assert client.post(
+        "/api/planner/basket", json={"selections": [{"recipe_id": rid, "portions": 4}]}
+    ).status_code == 200
+
+
+def test_a_hidden_recipe_can_be_put_back(client):
+    rid = client.get("/api/recipes", params={"q": "taco"}).json()["items"][0]["id"]
+    client.post(f"/api/recipes/{rid}/hide")
+
+    response = client.delete(f"/api/recipes/{rid}/hide")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": rid, "hidden": False}
+    assert client.get("/api/recipes").json()["total"] == 3
 
 
 def test_hide_rejects_unknown_or_unavailable_recipes(client):

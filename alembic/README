@@ -1,0 +1,45 @@
+# alembic/ — schema migrations
+
+The database is two things at once. Most of it is a derivative of the raw payload
+store and could be dropped and rebuilt by re-running the scrape and normalize
+stages. The rest — accounts, plans, ratings, standing pack choices — exists
+nowhere else, and that part is why migrations are here.
+
+## How it runs
+
+Normally you never invoke alembic by hand: `app.db.session.init_db` runs it in
+process on start-up, against whichever database `HOLAFRESCA_DB_PATH` points at.
+
+- **Fresh database** (every test, a rebuild from raw): built by
+  `Base.metadata.create_all` and stamped at head. Replaying migrations to reach a
+  schema the models already describe would be slower and less faithful.
+- **Existing database**: migrated. One that predates alembic is stamped
+  `0001_baseline` first — its schema *is* the baseline — and then upgraded.
+
+## Writing one
+
+`create_all` never touches a database that already has a `recipes` table, so
+**a new model without a migration will exist in tests and be missing in
+production**. There is no autoloading safety net.
+
+```sh
+.venv/bin/alembic revision -m "what it does"    # then write the upgrade by hand
+.venv/bin/alembic upgrade head                  # or just start the app
+.venv/bin/alembic current                       # where this database is
+```
+
+Autogenerate is available (`--autogenerate`) and worth using as a first draft,
+but read what it produces: SQLite cannot drop a column or alter a constraint in
+place, so anything beyond adding a nullable column needs `render_as_batch` (set
+globally in `env.py`) or hand-written SQL, and data has to be carried across
+explicitly — see `0002_accounts`.
+
+The URL is deliberately blank in `alembic.ini`; `env.py` takes it from
+`app.config`, so a migration run from a shell hits the same database the app
+does, and tests pointing at a temp file are not able to rewrite the real one.
+
+## Before migrating the real database
+
+Take a snapshot first — `python -m app.backup` — and see `deploy/README.md` for
+where they live. `0002_accounts` in particular has no downgrade: undoing it would
+mean deciding whose plan survives, which is a restore, not a migration.

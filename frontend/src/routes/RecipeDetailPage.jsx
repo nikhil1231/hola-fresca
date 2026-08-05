@@ -39,6 +39,7 @@ import {
   IconHeart,
   IconHeartFilled,
   IconEyeOff,
+  IconLock,
   IconMinus,
   IconPhoto,
   IconPlus,
@@ -59,10 +60,16 @@ import {
   useRevertRecipeEdits,
 } from '../hooks/useRecipeQueries.js'
 import { usePreloadStepImages } from '../hooks/usePreloadStepImages.js'
-import { formatWeekRange, resolveTargetWeek, useSchedule } from '../hooks/useSchedule.js'
+import {
+  formatWeekRange,
+  isPastWeekStart,
+  resolveTargetWeek,
+  useScheduleWithHistory,
+} from '../hooks/useSchedule.js'
 import {
   DEFAULT_PORTIONS,
   DEFAULT_RECIPES_PER_WEEK,
+  formatProteinModifier,
   MAX_PORTIONS,
   MIN_PORTIONS,
   normalizeProtein,
@@ -263,7 +270,19 @@ function sumCosts(costs) {
   return total
 }
 
-function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove }) {
+function PlannerControls({ disabled, entry, readOnly = false, onAdd, onPortionsChange, onRemove }) {
+  // On a week that has been shopped for, the portions are what was cooked. Shown
+  // plainly, with nothing offering to change them; adding the recipe to a
+  // finished week is not a thing that can happen either.
+  if (readOnly) {
+    if (!entry) return null
+    return (
+      <Badge color="gray" variant="light" radius="sm" size="lg" leftSection={<IconUsers size={13} />}>
+        {entry.portions} portions
+      </Badge>
+    )
+  }
+
   if (!entry) {
     return (
       <Button
@@ -622,10 +641,11 @@ function proteinScaleMode(modifier) {
   return '1'
 }
 
-function ProteinControls({ profile, modifier, preview, baseYield, onChange }) {
+function ProteinControls({ profile, modifier, preview, baseYield, onChange, readOnly = false }) {
   const scaleMode = proteinScaleMode(modifier)
   const targetMode = modifier?.target_mode ?? 'protein_g'
   const targetValue = modifier?.target_value ?? DEFAULT_TARGETS[targetMode]
+  const summary = formatProteinModifier(modifier)
 
   const setScale = (value) => {
     const { scale: _scale, target_mode: _mode, target_value: _value, ...rest } = modifier ?? {}
@@ -653,59 +673,76 @@ function ProteinControls({ profile, modifier, preview, baseYield, onChange }) {
         <Text size="sm" fw={600}>
           Protein
         </Text>
-        {changed && (
+        {changed && !readOnly && (
           <Anchor component="button" type="button" size="xs" c="dimmed" onClick={() => onChange(null)}>
             Reset
           </Anchor>
         )}
       </Group>
-      <Select
-        size="xs"
-        allowDeselect={false}
-        value={modifier?.swap_to ?? ''}
-        onChange={(value) => {
-          const { swap_to: _swap, ...rest } = modifier ?? {}
-          onChange(value ? { ...rest, swap_to: value } : rest)
-        }}
-        data={[
-          { value: '', label: `${profile.name} (as written)` },
-          ...profile.targets.map((target) => ({
-            value: target.id,
-            label: target.available ? target.label : `${target.label} (out of stock)`,
-          })),
-        ]}
-      />
-      <SegmentedControl
-        size="xs"
-        color="fresh"
-        fullWidth
-        value={scaleMode}
-        onChange={setScale}
-        data={PROTEIN_SCALES}
-      />
-      {scaleMode === 'target' && (
-        <Group gap={6} wrap="nowrap">
-          <NumberInput
-            size="xs"
-            min={1}
-            max={2000}
-            step={5}
-            value={targetValue}
-            onChange={(value) => setTarget(targetMode, Number(value) || targetValue)}
-            style={{ flex: '0 0 84px' }}
-          />
+      {/* A finished week states its modifier rather than offering it: the swap
+          is what you cooked, and the controls that would change it belong to a
+          week still being planned. The comparison below stays either way — it is
+          the whole reason to look. */}
+      {readOnly ? (
+        <Badge
+          color={summary ? 'grape' : 'gray'}
+          variant="light"
+          radius="sm"
+          w="fit-content"
+        >
+          {summary ?? `${profile.name}, as written`}
+        </Badge>
+      ) : (
+        <>
           <Select
             size="xs"
             allowDeselect={false}
-            value={targetMode}
-            onChange={(mode) => setTarget(mode, DEFAULT_TARGETS[mode])}
+            value={modifier?.swap_to ?? ''}
+            onChange={(value) => {
+              const { swap_to: _swap, ...rest } = modifier ?? {}
+              onChange(value ? { ...rest, swap_to: value } : rest)
+            }}
             data={[
-              { value: 'protein_g', label: 'g protein a serving' },
-              { value: 'energy_kcal', label: 'kcal a serving' },
+              { value: '', label: `${profile.name} (as written)` },
+              ...profile.targets.map((target) => ({
+                value: target.id,
+                label: target.available ? target.label : `${target.label} (out of stock)`,
+              })),
             ]}
-            style={{ flex: 1 }}
           />
-        </Group>
+          <SegmentedControl
+            size="xs"
+            color="fresh"
+            fullWidth
+            value={scaleMode}
+            onChange={setScale}
+            data={PROTEIN_SCALES}
+          />
+          {scaleMode === 'target' && (
+            <Group gap={6} wrap="nowrap">
+              <NumberInput
+                size="xs"
+                min={1}
+                max={2000}
+                step={5}
+                value={targetValue}
+                onChange={(value) => setTarget(targetMode, Number(value) || targetValue)}
+                style={{ flex: '0 0 84px' }}
+              />
+              <Select
+                size="xs"
+                allowDeselect={false}
+                value={targetMode}
+                onChange={(mode) => setTarget(mode, DEFAULT_TARGETS[mode])}
+                data={[
+                  { value: 'protein_g', label: 'g protein a serving' },
+                  { value: 'energy_kcal', label: 'kcal a serving' },
+                ]}
+                style={{ flex: 1 }}
+              />
+            </Group>
+          )}
+        </>
       )}
       {/* Everything here is stated a serving, so it reads against the macros
           above rather than against the ingredient list, which is sized to
@@ -766,11 +803,15 @@ export default function RecipeDetailPage() {
   // `undefined` means "not touched on this page", which is what lets a planned
   // recipe open showing the swap the week already holds.
   const [proteinOverride, setProteinOverride] = useState(undefined)
-  // Which week this page adds to: the one carried in from browse if there is
-  // one, otherwise whichever week the schedule says is being planned.
-  const { data: schedule } = useSchedule()
+  // Which week this page is about: the one carried in from browse or from the
+  // week rows on Home, otherwise whichever week the schedule says is being
+  // planned. Fetched with history, because a link from a finished week is how
+  // you find out that those five recipes were cooked at 1.5x protein — and
+  // without the history it would resolve to next week and show you nothing.
+  const { data: schedule } = useScheduleWithHistory()
   const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
   const weekStart = targetWeek?.week_start ?? upcomingWeekStart
+  const weekReadOnly = isPastWeekStart(weekStart)
   const recipesPerWeek = schedule?.settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
   const upcomingRecipes = useMemo(
     () => getWeekRecipes(weekStart),
@@ -867,6 +908,7 @@ export default function RecipeDetailPage() {
       }
     : recipe
   const applyProtein = (next) => {
+    if (weekReadOnly) return
     const value = normalizeProtein(next)
     setProteinOverride(value)
     if (plannerEntry) setRecipeProtein(weekStart, recipe.id, value)
@@ -944,7 +986,11 @@ export default function RecipeDetailPage() {
               {recipe.steps.length > 0 && (
                 <Button
                   component={Link}
-                  to={`/recipes/${recipe.id}/cook`}
+                  /* The week goes with you into the kitchen: the steps are
+                     rewritten for whatever swap it holds, and cooking the dish
+                     as published when the shop bought something else is exactly
+                     the mistake this is here to stop. */
+                  to={`/recipes/${recipe.id}/cook?week=${weekStart}`}
                   replace
                   color="fresh"
                   leftSection={<IconChefHat size={17} />}
@@ -954,6 +1000,7 @@ export default function RecipeDetailPage() {
               )}
               <PlannerControls
                 entry={plannerEntry}
+                readOnly={weekReadOnly}
                 disabled={!plannerEntry && upcomingWeekFull}
                 onAdd={() =>
                   addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })
@@ -963,15 +1010,24 @@ export default function RecipeDetailPage() {
                   setRecipePortions(weekStart, recipe.id, portions)
                 }
               />
-              {/* Which week the add lands in — the page is reachable from any of
-                  them, and the button alone does not say. */}
-              <Tooltip label="The week this adds to" withArrow>
+              {/* Which week this is about — the page is reachable from any of
+                  them, and the controls alone do not say. On a finished week it
+                  is the more important half: everything below describes how the
+                  dish was cooked then, not what it would be now. */}
+              <Tooltip
+                label={
+                  weekReadOnly ? 'Shown as it was cooked this week' : 'The week this adds to'
+                }
+                withArrow
+              >
                 <Badge
                   color="gray"
                   variant="light"
                   radius="sm"
                   size="lg"
-                  leftSection={<IconCalendarWeek size={13} />}
+                  leftSection={
+                    weekReadOnly ? <IconLock size={13} /> : <IconCalendarWeek size={13} />
+                  }
                 >
                   {formatWeekRange(weekStart)}
                 </Badge>
@@ -980,7 +1036,9 @@ export default function RecipeDetailPage() {
                 pending={hideRecipe.isPending}
                 onHide={() => {
                   if (!window.confirm('Hide this recipe from the library?')) return
-                  removeRecipeFromWeek(weekStart, recipe.id)
+                  // Hiding takes it out of the week you are planning, not out of
+                  // the record of a week you have already cooked.
+                  if (!weekReadOnly) removeRecipeFromWeek(weekStart, recipe.id)
                   hideRecipe.mutate(undefined, { onSuccess: () => navigate('/browse') })
                 }}
               />
@@ -1127,6 +1185,7 @@ export default function RecipeDetailPage() {
                 preview={proteinPreview}
                 baseYield={baseYield}
                 onChange={applyProtein}
+                readOnly={weekReadOnly}
               />
             )}
             <Table.ScrollContainer minWidth={320}>

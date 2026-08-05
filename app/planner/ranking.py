@@ -41,6 +41,7 @@ def rank_candidates(
     candidate_ids: Iterable[int],
     *,
     candidate_portions: int,
+    pack_preferences: dict[str, str] | None = None,
 ) -> list[RankedCandidate]:
     """Score every candidate against ``pinned``, cheapest addition first.
 
@@ -49,9 +50,15 @@ def rank_candidates(
     recipe to want coriander gets it for nothing. One that shares nothing can only
     cost what it costs on its own, so it is scored standalone and skips the
     second, more expensive basket entirely.
+
+    ``pack_preferences`` are the requesting user's standing pack choices. A
+    ranking rarely turns on them, but it has to be scored the same way the basket
+    will be priced, or the cheapest-looking recipe would not be the one that came
+    out cheapest.
     """
     candidate_ids = list(candidate_ids)
-    base = score_basket(index, pinned) if pinned else None
+    prefs = pack_preferences or {}
+    base = score_basket(index, pinned, pack_preferences=prefs) if pinned else None
     base_keys: set[str] = set()
     for selection in pinned:
         base_keys |= _need_keys(index, selection.recipe_id)
@@ -68,7 +75,7 @@ def rank_candidates(
     for recipe_id in candidate_ids:
         keys = _need_keys(index, recipe_id)
         candidate = Selection(recipe_id=recipe_id, servings=candidate_portions)
-        standalone = score_basket(index, [candidate])
+        standalone = score_basket(index, [candidate], pack_preferences=prefs)
         available = bool(keys) or standalone.gap_count > 0
         if not available:
             ranked.append(
@@ -80,7 +87,7 @@ def rank_candidates(
             )
             continue
         if base is not None and recipe_id in overlapping:
-            combined = score_basket(index, [*pinned, candidate])
+            combined = score_basket(index, [*pinned, candidate], pack_preferences=prefs)
             marginal = combined.score - base.score
             marginal_cost = combined.cost - base.cost
         else:

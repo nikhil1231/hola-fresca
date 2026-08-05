@@ -8,12 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from app.api.deps import get_planner_csv_path, get_session, get_session_factory
+from app.api.deps import (
+    get_current_user,
+    get_planner_csv_path,
+    get_session,
+    get_session_factory,
+)
 from app.api.recipes import (
     _filtered_recipe_ids,
     _personal_rating_map,
     _recipe_ids_with_pricing_gaps,
-    _visible_recipe_condition,
+    _library_condition,
     _wishlist_map,
     _to_card,
 )
@@ -33,7 +38,7 @@ from app.api.schemas import (
     SuggestionsIn,
 )
 from app.api.schedule import pack_shortfall_tolerance_pct
-from app.db.models import IngredientMapping, Recipe
+from app.db.models import IngredientMapping, Recipe, User
 from app.planner.basket import (
     Basket,
     BasketLine,
@@ -42,6 +47,7 @@ from app.planner.basket import (
 )
 from app.planner.cache import get_index, get_ranking, note_pack_preference
 from app.planner.index import RETAILER, PlanIndex
+from app.planner.preferences import pack_preferences, set_pack_preference as write_pack_preference
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
 assert SuggestionsIn.model_fields["candidate_portions"].default == 4
@@ -61,11 +67,18 @@ def _selection_ids(selections) -> list[int]:
 
 
 def _require_curated(session: Session, recipe_ids: list[int]) -> None:
+    """Every id must be in the shared library.
+
+    Checked against the library rather than against what the user can see: a
+    recipe they have personally hidden is still a legitimate thing to have in a
+    plan, and pricing one should not start failing because they hid it after
+    choosing it.
+    """
     if not recipe_ids:
         return
     found = set(
         session.scalars(
-            select(Recipe.id).where(*_visible_recipe_condition(), Recipe.id.in_(recipe_ids))
+            select(Recipe.id).where(*_library_condition(), Recipe.id.in_(recipe_ids))
         )
     )
     missing = [rid for rid in recipe_ids if rid not in found]
@@ -253,6 +266,7 @@ def basket(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> BasketOut:
     recipe_ids = _selection_ids(body.selections)
     _require_curated(session, recipe_ids)
@@ -266,6 +280,7 @@ def basket(
         selections,
         pack_overrides=body.pack_overrides,
         snap_overrides=body.snap_overrides,
+        pack_preferences=pack_preferences(session, user.id),
         pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session),
     ))
 
@@ -275,12 +290,17 @@ def set_pack_preference(
     body: PackPreferenceIn,
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
+    user: User = Depends(get_current_user),
 ) -> PackPreferenceOut:
-    """Fix (or release) the pack size an ingredient is always bought in.
+    """Fix (or release) the pack size this user always buys an ingredient in.
 
-    Kept on the mapping rather than on a week, because it is a standing
-    decision - having settled that you buy rice by the kilo, the planner should
-    not put it back to the 500 g bag every Monday.
+    A standing decision rather than a weekly one - having settled that you buy
+    rice by the kilo, the planner should not put it back to the 500 g bag every
+    Monday - but yours rather than the ingredient's, so it is stored against the
+    account and not on the mapping everyone shares.
+
+    The mapping is still what the choice is checked against: you may only pin a
+    pack that is an approved product for the ingredient.
     """
     mapping = session.scalar(
         select(IngredientMapping).where(
@@ -297,9 +317,9 @@ def set_pack_preference(
             status_code=400,
             detail=f"{body.sku} is not an approved product for {body.ingredient_key}",
         )
-    mapping.preferred_sku = body.sku
+    write_pack_preference(session, user.id, body.ingredient_key, body.sku)
     session.commit()
-    note_pack_preference(factory, body.ingredient_key, body.sku)
+    note_pack_preference(factory)
     return PackPreferenceOut(ingredient_key=body.ingredient_key, sku=body.sku)
 
 
@@ -309,6 +329,7 @@ def _candidate_ids(
     pinned_ids: set[int],
     factory: sessionmaker[Session],
     csv_path: Path | None,
+    user_id: int,
 ) -> set[int]:
     """Which recipes the request's filters allow — a membership test, not an order.
 
@@ -316,7 +337,7 @@ def _candidate_ids(
     any of this; the filters only decide which of the ranked recipes are shown.
     """
     filters = body.filters.model_dump()
-    candidate_ids = set(_filtered_recipe_ids(session, filters)) - pinned_ids
+    candidate_ids = set(_filtered_recipe_ids(session, filters, user_id)) - pinned_ids
     if "unmapped" not in body.filters.exclude:
         return candidate_ids
 
@@ -330,6 +351,7 @@ def suggestions(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> PlannerSuggestionsOut:
     pinned_recipe_ids = _selection_ids(body.selections)
     _require_curated(session, pinned_recipe_ids)
@@ -337,10 +359,16 @@ def suggestions(
     pinned = [_planner_selection(selection) for selection in body.selections]
     # Ranked over the whole library and cached against the pinned week, so paging
     # and filter changes are a walk over a list rather than a re-scoring of it.
+    # "What would adding this cost me" has to be priced the way the basket will
+    # price it, so the ranking carries the asking user's standing pack choices.
     ranked = get_ranking(
-        factory, pinned, candidate_portions=body.candidate_portions, csv_path=csv_path
+        factory,
+        pinned,
+        candidate_portions=body.candidate_portions,
+        csv_path=csv_path,
+        pack_preferences=pack_preferences(session, user.id),
     )
-    allowed = _candidate_ids(session, body, set(pinned_recipe_ids), factory, csv_path)
+    allowed = _candidate_ids(session, body, set(pinned_recipe_ids), factory, csv_path, user.id)
 
     page_scores = [c for c in ranked if c.recipe_id in allowed]
     total = len(page_scores)
@@ -356,8 +384,8 @@ def suggestions(
         ).all()
         by_id = {recipe.id: recipe for recipe in rows}
 
-    personal_ratings = _personal_rating_map(session, page_ids)
-    wishlist = _wishlist_map(session, page_ids)
+    personal_ratings = _personal_rating_map(session, user.id, page_ids)
+    wishlist = _wishlist_map(session, user.id, page_ids)
     items = []
     for candidate in page_scores:
         recipe = by_id.get(candidate.recipe_id)

@@ -34,6 +34,7 @@ import {
   IconClock,
   IconHome,
   IconInfoCircle,
+  IconLock,
   IconPackages,
   IconRefresh,
   IconStarFilled,
@@ -46,7 +47,11 @@ import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
 import { usePackPreference, usePlannerBasket } from '../hooks/useRecipeQueries.js'
-import { resolveTargetWeek, useSchedule } from '../hooks/useSchedule.js'
+import {
+  isPastWeekStart,
+  resolveTargetWeek,
+  useScheduleWithHistory,
+} from '../hooks/useSchedule.js'
 import {
   DEFAULT_RECIPES_PER_WEEK,
   formatWeekLabel,
@@ -461,6 +466,7 @@ function LineTable({
   ownedItemKeySet,
   setItemOwned,
   onToggleSnap,
+  readOnly = false,
 }) {
   if (!lines.length) return null
 
@@ -541,10 +547,18 @@ function LineTable({
                     <Table.Td className={classes.ownedCell}>
                       <Checkbox
                         checked={owned}
-                        onChange={(event) => setItemOwned(line.key, event.currentTarget.checked)}
+                        readOnly={readOnly}
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          !readOnly && setItemOwned(line.key, event.currentTarget.checked)
+                        }
                         onClick={(event) => event.stopPropagation()}
                         onKeyDown={(event) => event.stopPropagation()}
-                        aria-label={`Mark ${line.name} as already owned`}
+                        aria-label={
+                          readOnly
+                            ? `${line.name} was already owned`
+                            : `Mark ${line.name} as already owned`
+                        }
                       />
                     </Table.Td>
                     <Table.Td>
@@ -602,7 +616,28 @@ function LineTable({
                     <Table.Td>{formatMoney(line.cost)}</Table.Td>
                     <Table.Td>{formatMoney(line.waste_gbp)}</Table.Td>
                     <Table.Td className={classes.packSwapCell}>
-                      {line.snap && (
+                      {/* Read-only keeps the snap mark and drops the buttons:
+                          that this line was cooked short is part of the record,
+                          undoing it is not on offer. The pack actually bought is
+                          already spelled out in the Packs column. */}
+                      {readOnly && line.snapped && (
+                        <Tooltip
+                          label={`Cooked short, snapped to ${formatGrams(
+                            line.snap?.snapped_need_g ?? line.need_g,
+                          )}`}
+                        >
+                          <ActionIcon
+                            component="span"
+                            variant="subtle"
+                            size="md"
+                            className={`${classes.packSwapButton} ${classes.packSnapEnabled}`}
+                            aria-label={`${line.name} was snapped to a smaller amount`}
+                          >
+                            <IconCircleCheck size={18} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                      {!readOnly && line.snap && (
                         <Tooltip label={line.snapped ? `Snapped to ${formatGrams(line.snap.snapped_need_g)} — click to undo` : `Snap to ${formatGrams(line.snap.snapped_need_g)} and save ${formatMoney(line.snap.saving_gbp)}`}>
                           <ActionIcon
                             variant="subtle"
@@ -621,7 +656,7 @@ function LineTable({
                           </ActionIcon>
                         </Tooltip>
                       )}
-                      {(line.options?.length ?? 0) > 1 && (
+                      {!readOnly && (line.options?.length ?? 0) > 1 && (
                         <Tooltip label={packRecommendation ? 'A cheaper pack option is available' : 'Change pack size'}>
                           <ActionIcon
                             variant="subtle"
@@ -725,17 +760,25 @@ export default function BasketPage() {
   const {
     upcomingWeekStart,
     weekStarts,
+    plannedWeekStarts,
     getWeekRecipes,
     removeRecipeFromWeek,
     setRecipePortions,
   } = useWeeklyPlan()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { data: schedule } = useSchedule()
+  // With history, because the week in the URL may be a shop that has already
+  // happened — that is the point of a "Basket" link on a past week.
+  const { data: schedule } = useScheduleWithHistory()
   // The week lives in the URL, so a "Basket" link from Home opens the week it
   // was clicked for and the page stays linkable.
   const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
   const weekStart = targetWeek?.week_start ?? upcomingWeekStart
   const pageView = searchParams.get('view') === 'checkout' ? 'checkout' : 'basket'
+  // A basket that has been shopped for is a record of what was bought: the packs
+  // chosen, the demands snapped, the lines skipped as already owned. Changing any
+  // of it now would only lose the account of the shop, so the page shows it and
+  // touches nothing. The server agrees, and refuses the writes outright.
+  const readOnly = isPastWeekStart(weekStart)
   const recipesPerWeek = schedule?.settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
   const setWeekStart = useCallback(
     (value) => {
@@ -760,10 +803,14 @@ export default function BasketPage() {
   )
   // Scheduled weeks first, then any week still holding recipes that the current
   // cadence no longer lands on — those baskets are real and still need opening.
+  // Finished weeks are in there too: their shop is done, but looking up what was
+  // in it is exactly what the picker is for.
   const weekOptions = useMemo(() => {
     const scheduled = (schedule?.weeks ?? []).map((week) => week.week_start)
-    return [...new Set([...scheduled, ...weekStarts])].sort()
-  }, [schedule?.weeks, weekStarts])
+    return [
+      ...new Set([...scheduled, ...weekStarts, ...plannedWeekStarts, weekStart]),
+    ].sort()
+  }, [schedule?.weeks, weekStarts, plannedWeekStarts, weekStart])
   const [openLineKey, setOpenLineKey] = useState(null)
   const [activeLineKey, setActiveLineKey] = useState(null)
   const [hoverLineKey, setHoverLineKey] = useState(null)
@@ -912,12 +959,26 @@ export default function BasketPage() {
             <IconBasket size={28} className={classes.titleIcon} />
             <Title order={2}>Basket</Title>
           </Group>
-          <Text c="dimmed">{entries.length} recipes for {formatWeekLabel(weekStart)}</Text>
+          <Group gap="xs">
+            <Text c="dimmed">{entries.length} recipes for {formatWeekLabel(weekStart)}</Text>
+            {readOnly && (
+              <Badge color="gray" variant="light" radius="sm" leftSection={<IconLock size={12} />}>
+                Past
+              </Badge>
+            )}
+          </Group>
         </div>
         <Select
           value={weekStart}
           onChange={(value) => value && setWeekStart(value)}
-          data={weekOptions.map((start) => ({ value: start, label: formatWeekLabel(start) }))}
+          data={weekOptions.map((start) => ({
+            value: start,
+            // Marked in the list rather than only after you pick one: which of
+            // these weeks are history is the first thing you want to know.
+            label: isPastWeekStart(start)
+              ? `${formatWeekLabel(start)} · past`
+              : formatWeekLabel(start),
+          }))}
           allowDeselect={false}
           radius="md"
           w={{ base: 220, sm: 300 }}
@@ -974,6 +1035,7 @@ export default function BasketPage() {
                       highlighted={glowRecipeIds.has(entry.recipe.id)}
                       plannerEntry={entry}
                       plannerControlsVisible
+                      plannerReadOnly={readOnly}
                       onRemoveFromPlan={() => removeRecipeFromWeek(weekStart, entry.recipe.id)}
                       onPortionsChange={(portions) =>
                         setRecipePortions(weekStart, entry.recipe.id, portions)
@@ -1016,16 +1078,21 @@ export default function BasketPage() {
                     ? `Stock checked ${stockAge}`
                     : 'Stock not checked'}
               </Text>
-              <Button
-                variant="subtle"
-                size="compact-sm"
-                leftSection={<IconRefresh size={16} />}
-                loading={stockRefresh.isPending}
-                disabled={!selections.length}
-                onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
-              >
-                Refresh stock
-              </Button>
+              {/* Not offered on a finished week: re-pricing a shop that already
+                  happened tells you nothing, and the check writes stock back
+                  against the whole catalogue. */}
+              {!readOnly && (
+                <Button
+                  variant="subtle"
+                  size="compact-sm"
+                  leftSection={<IconRefresh size={16} />}
+                  loading={stockRefresh.isPending}
+                  disabled={!selections.length}
+                  onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
+                >
+                  Refresh stock
+                </Button>
+              )}
             </Group>
           </Group>
 
@@ -1131,6 +1198,7 @@ export default function BasketPage() {
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
                       onToggleSnap={setWeekSnap}
+                      readOnly={readOnly}
                       onOpenPacks={setPackLineKey}
                       busyPackKey={
                         packPreference.isPending ? packPreference.variables?.ingredientKey : null
@@ -1150,6 +1218,7 @@ export default function BasketPage() {
                       ownedItemKeySet={ownedItemKeySet}
                       setItemOwned={setItemOwned}
                       onToggleSnap={setWeekSnap}
+                      readOnly={readOnly}
                       onOpenPacks={setPackLineKey}
                       busyPackKey={
                         packPreference.isPending ? packPreference.variables?.ingredientKey : null
@@ -1172,7 +1241,7 @@ export default function BasketPage() {
 
       <PackSizeModal
         line={packLine}
-        opened={packLine != null}
+        opened={packLine != null && !readOnly}
         onClose={() => setPackLineKey(null)}
         scope={packScope}
         setScope={setPackScope}

@@ -251,17 +251,12 @@
   font-weight: 600;
 }
 
+/* Weight only, no colour. A stat recomputed for the week's swap is still the
+   same kind of number as the one beside it, and recolouring it — meter included
+   — made a card read as three unrelated palettes. The badge above already says
+   the dish has been modified. */
 .adjustedStat {
-  color: var(--mantine-color-grape-7);
   font-weight: 800;
-}
-
-.adjustedStat .densityIcon {
-  color: var(--mantine-color-grape-7);
-}
-
-.adjustedStat .densitySegmentActive {
-  background: var(--mantine-color-grape-6);
 }
 
 .statSlot :global(.mantine-Text-root) {

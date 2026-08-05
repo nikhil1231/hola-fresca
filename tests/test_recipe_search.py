@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from app.api.recipes import _ranked_recipe_ids, _relevance
+from tests.conftest import user_id
 from app.db.models import Recipe
 from app.db.session import init_db, make_engine, make_session_factory
 
@@ -108,7 +109,7 @@ _NO_FILTERS = dict(
 
 def test_relevance_beats_popularity(factory):
     with factory() as s:
-        ids = _ranked_recipe_ids(s, dict(q="pork noodles", **_NO_FILTERS))
+        ids = _ranked_recipe_ids(s, dict(q="pork noodles", **_NO_FILTERS), user_id(s))
         names = [s.get(Recipe, i).name for i in ids]
     assert names == ["Pork Noodles", "Sticky Pork Bowl"]
 
@@ -119,14 +120,14 @@ def test_popularity_still_breaks_ties(factory):
         s.add(Recipe(source="hellofresh", source_id="dup", url="x", curated=1,
                      is_complete=1, name="Pork Noodles", effective_ratings_count=9000))
         s.commit()
-        ids = _ranked_recipe_ids(s, dict(q="pork noodles", **_NO_FILTERS))
+        ids = _ranked_recipe_ids(s, dict(q="pork noodles", **_NO_FILTERS), user_id(s))
         counts = [s.get(Recipe, i).effective_ratings_count for i in ids[:2]]
     assert counts == [9000, 5]
 
 
 def test_no_query_returns_everything_unranked(factory):
     with factory() as s:
-        assert len(_ranked_recipe_ids(s, dict(q=None, **_NO_FILTERS))) == 3
+        assert len(_ranked_recipe_ids(s, dict(q=None, **_NO_FILTERS), user_id(s))) == 3
 
 
 # --- course filtering -------------------------------------------------------
@@ -159,7 +160,7 @@ def _names(factory, **overrides):
     filters = dict(q=None, **_NO_FILTERS)
     filters.update(overrides)
     with factory() as s:
-        return {s.get(Recipe, i).name for i in _ranked_recipe_ids(s, filters)}
+        return {s.get(Recipe, i).name for i in _ranked_recipe_ids(s, filters, user_id(s))}
 
 
 def test_browse_shows_mains_only_by_default(courses):

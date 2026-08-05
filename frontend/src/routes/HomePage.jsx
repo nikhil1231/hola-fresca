@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ActionIcon,
@@ -5,6 +6,7 @@ import {
   Badge,
   Box,
   Button,
+  Divider,
   Group,
   Loader,
   Skeleton,
@@ -17,6 +19,7 @@ import {
   IconAlertCircle,
   IconBasket,
   IconCalendarWeek,
+  IconChevronUp,
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
@@ -28,11 +31,16 @@ import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import {
   formatWeekRange,
   formatWeekStart,
+  MAX_PAST_WEEKS,
   useSchedule,
   useSetWeekSkipped,
   useUpdateScheduleSettings,
 } from '../hooks/useSchedule.js'
-import { DEFAULT_RECIPES_PER_WEEK, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
+import {
+  DEFAULT_RECIPES_PER_WEEK,
+  formatProteinModifier,
+  useWeeklyPlan,
+} from '../hooks/useWeeklyPlan.js'
 import classes from './HomePage.module.css'
 
 const STATUS_BADGE = {
@@ -40,6 +48,16 @@ const STATUS_BADGE = {
   closed: { label: 'Cutoff passed', color: 'gray' },
   skipped: { label: 'Skipped', color: 'orange' },
   paused: { label: 'Paused', color: 'gray' },
+}
+
+// How many more finished shops each click of the history button reveals.
+const PAST_WEEKS_STEP = 4
+
+// History says what became of a week, not how long is left to change it.
+function pastBadge(week) {
+  if (week.skipped) return { label: 'Skipped', color: 'orange' }
+  if (!week.complete) return { label: 'This week', color: 'fresh' }
+  return { label: 'Done', color: 'gray' }
 }
 
 function cadenceLabel(cadenceWeeks) {
@@ -50,15 +68,27 @@ function cadenceLabel(cadenceWeeks) {
 
 function RecipeTile({ entry, weekStart, onRemove, editable }) {
   const { recipe } = entry
+  // How it was cooked, not how it is written. A week's protein swap or scaling
+  // is the difference between the dish you planned and the one in the library,
+  // and it is worth nothing if you have to remember it yourself.
+  const modifier = formatProteinModifier(entry.protein)
   return (
     <Box className={classes.tile}>
-      <Link to={`/recipes/${recipe.id}`} aria-label={recipe.name}>
+      {/* The week goes with the link: the detail page shows the modifications
+          the week holds, and without it a tile from March opens showing next
+          week's plan for the same recipe. */}
+      <Link to={`/recipes/${recipe.id}?week=${weekStart}`} aria-label={recipe.name}>
         <img
           className={classes.tileImage}
           src={recipe.image_url || RECIPE_PLACEHOLDER_IMAGE}
           alt=""
           loading="lazy"
         />
+        {modifier && (
+          <Tooltip label={`Cooked with: ${modifier}`} withArrow>
+            <span className={classes.tileModifier}>{modifier}</span>
+          </Tooltip>
+        )}
         <div className={classes.tileCaption}>
           <div className={classes.tileName}>{recipe.name}</div>
           <div className={classes.tilePortions}>{entry.portions} portions</div>
@@ -101,9 +131,21 @@ function AddTile({ weekStart, remaining }) {
   )
 }
 
-function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, skipPending }) {
-  const badge = STATUS_BADGE[week.status] ?? STATUS_BADGE.open
-  const editable = week.status === 'open' || week.status === 'closed'
+function WeekRow({
+  week,
+  entries,
+  recipesPerWeek,
+  past = false,
+  onRemoveRecipe,
+  onToggleSkip,
+  skipPending,
+}) {
+  const badge = past ? pastBadge(week) : STATUS_BADGE[week.status] ?? STATUS_BADGE.open
+  const countdown = week.status === 'open' ? formatCutoffCountdown(week.cutoff_at) : null
+  // A week that has been shopped for is a record, not a draft: its recipes are
+  // what was cooked, and editing them would rewrite history rather than change
+  // anything. The planning window is where recipes are chosen.
+  const editable = !past && (week.status === 'open' || week.status === 'closed')
   const remaining = Math.max(recipesPerWeek - entries.length, 0)
 
   return (
@@ -111,7 +153,11 @@ function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, 
       className={[
         classes.weekRow,
         week.is_active ? classes.weekRowActive : '',
-        week.status === 'skipped' || week.status === 'paused' ? classes.weekRowInactive : '',
+        past ? classes.weekRowPast : '',
+        past && !week.complete ? classes.weekRowCurrent : '',
+        !past && (week.status === 'skipped' || week.status === 'paused')
+          ? classes.weekRowInactive
+          : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -133,21 +179,33 @@ function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, 
             {badge.label}
           </Badge>
           <Text size="xs" c="dimmed">
-            {entries.length}/{recipesPerWeek} recipes
+            {past
+              ? `${entries.length} ${entries.length === 1 ? 'recipe' : 'recipes'}`
+              : `${entries.length}/${recipesPerWeek} recipes`}
           </Text>
         </Group>
 
+        {/* A deadline that expired weeks ago is not news. */}
+        {!past && (
+          <Text size="xs" c={countdown === 'closed' || week.closed ? 'orange' : 'dimmed'}>
+            {week.closed ? 'Cutoff was ' : 'Cutoff '}
+            {formatCutoff(week.cutoff_at)}
+            {countdown ? ` · ${countdown}` : ''}
+          </Text>
+        )}
         <Group gap="xs" mt={4}>
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            color={week.skipped ? 'fresh' : 'gray'}
-            loading={skipPending}
-            onClick={() => onToggleSkip(week)}
-            disabled={week.status === 'paused'}
-          >
-            {week.skipped ? 'Plan this week' : 'Skip week'}
-          </Button>
+          {!past && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color={week.skipped ? 'fresh' : 'gray'}
+              loading={skipPending}
+              onClick={() => onToggleSkip(week)}
+              disabled={week.status === 'paused'}
+            >
+              {week.skipped ? 'Plan this week' : 'Skip week'}
+            </Button>
+          )}
           {entries.length > 0 && (
             <Button
               size="compact-xs"
@@ -177,7 +235,11 @@ function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, 
         )}
         {!editable && entries.length === 0 && (
           <div className={classes.emptyHint}>
-            {week.status === 'skipped' ? 'Skipped — no shop this week.' : 'Paused.'}
+            {week.skipped
+              ? 'Skipped — no shop this week.'
+              : past
+                ? 'Nothing was planned.'
+                : 'Paused.'}
           </div>
         )}
       </div>
@@ -186,11 +248,17 @@ function WeekRow({ week, entries, recipesPerWeek, onRemoveRecipe, onToggleSkip, 
 }
 
 export default function HomePage() {
-  const { data: schedule, isLoading, isError, error } = useSchedule()
+  // The last finished shop is shown by default — it is the one you are most
+  // likely to be looking back at — and older ones are asked for a few at a time.
+  const [pastWeeks, setPastWeeks] = useState(1)
+  const { data: schedule, isLoading, isError, error, isFetching } = useSchedule(pastWeeks)
   const { getWeekRecipes, removeRecipeFromWeek } = useWeeklyPlan()
   const setSkipped = useSetWeekSkipped()
   const updateSettings = useUpdateScheduleSettings()
 
+  // The old, shorter history stays on screen while a longer one loads, so the
+  // spinner belongs to that request only — not to every background refetch.
+  const expanding = isFetching && (schedule?.past_weeks?.length ?? 0) < pastWeeks
   const settings = schedule?.settings
   const paused = Boolean(settings?.paused)
   const recipesPerWeek = settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
@@ -266,6 +334,41 @@ export default function HomePage() {
         </Group>
       ) : (
         <Stack gap="md">
+          {schedule.has_more_past && (
+            <Group justify="center">
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                color="gray"
+                loading={expanding}
+                leftSection={<IconChevronUp size={14} />}
+                onClick={() =>
+                  setPastWeeks((count) => Math.min(count + PAST_WEEKS_STEP, MAX_PAST_WEEKS))
+                }
+              >
+                Show {PAST_WEEKS_STEP} earlier weeks
+              </Button>
+            </Group>
+          )}
+
+          {(schedule.past_weeks ?? []).map((week) => (
+            <WeekRow
+              key={week.week_start}
+              week={week}
+              entries={getWeekRecipes(week.week_start)}
+              recipesPerWeek={recipesPerWeek}
+              past
+            />
+          ))}
+
+          {schedule.past_weeks?.length > 0 && (
+            <Divider
+              className={classes.historyDivider}
+              labelPosition="center"
+              label="Coming up"
+            />
+          )}
+
           {schedule.weeks.map((week) => (
             <WeekRow
               key={week.week_start}

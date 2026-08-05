@@ -267,17 +267,23 @@ def test_a_pack_chosen_for_this_week_costs_no_write_and_reaches_the_push(stock_c
 
 def test_setting_a_preference_does_not_throw_the_cached_index_away(stock_client):
     """One click used to cost a full index rebuild - seconds - for a change that
-    touches a single ingredient."""
+    touches a single ingredient.
+
+    The preference is not in the index at all now that it belongs to a user
+    rather than to the ingredient, so the index survives untouched; what the
+    write must not do is move the database's mtime under the staleness check and
+    trigger a rebuild anyway.
+    """
     client, recipe_id, _ = stock_client
     factory = app.dependency_overrides[get_session_factory]()
     before = get_index(factory)
 
     client.put("/api/planner/preferences/pack", json={"ingredient_key": KEY_RICE, "sku": DEARER})
 
-    assert get_index(factory) is before, "patched in place, not rebuilt"
-    assert before.ingredient(KEY_RICE).preferred_sku == DEARER
+    assert get_index(factory) is before, "kept, not rebuilt"
     line = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
     assert line["choices"][0]["sku"] == DEARER
+    assert [o["pinned"] for o in line["options"] if o["sku"] == DEARER] == [True]
 
 
 def test_a_push_checks_the_shelves_before_filling_the_trolley(stock_client, monkeypatch):

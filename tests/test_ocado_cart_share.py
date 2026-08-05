@@ -10,6 +10,9 @@ The unit-level rules live in tests/test_ocado_sync.py.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
+from app import schedule as sched
 from app.api.deps import get_session_factory
 from app.ocado.ledger import read_ledger
 from main import app
@@ -122,7 +125,10 @@ def test_the_plan_says_what_the_push_will_do_without_doing_it(stock_client, monk
     assert [(l["sku"], l["quantity"]) for l in plan["yours"]] == [(BEER, 6)]
     assert plan["removed"] == []
 
-    body = {**_selections(recipe_id), "week_start": "2026-08-03"}
+    # Relative to today, not a fixed date: only a week still to be shopped for
+    # can be pushed, so a hard-coded one turns into a 409 as the clock passes it.
+    week = sched.format_date(sched.upcoming_week_start())
+    body = {**_selections(recipe_id), "week_start": week}
     client.post("/api/ocado/basket/push", json=body)
     after = client.post("/api/ocado/basket/plan", json=_selections(recipe_id)).json()
 
@@ -131,8 +137,28 @@ def test_the_plan_says_what_the_push_will_do_without_doing_it(stock_client, monk
     assert [(l["sku"], l["quantity"]) for l in after["yours"]] == [(BEER, 6)]
     # A plan proposing to empty half the cart reads very differently once you
     # can see which week the claims it is acting on were made for.
-    assert after["synced_week_start"] == "2026-08-03"
+    assert after["synced_week_start"] == week
     assert after["synced_at"] is not None
+
+
+def test_a_week_that_has_been_and_gone_cannot_be_pushed(stock_client, monkeypatch):
+    """Its shop is eaten; sending it again would buy the week twice.
+
+    Refused here rather than only in the UI, because the cart is real and shared
+    with the rest of your shopping — a stray push is not a display bug.
+    """
+    client, recipe_id, cart = stock_client
+    _shelves(monkeypatch)
+    last_week = sched.format_date(sched.upcoming_week_start() - timedelta(weeks=1))
+
+    response = client.post(
+        "/api/ocado/basket/push",
+        json={**_selections(recipe_id), "week_start": last_week},
+    )
+
+    assert response.status_code == 409
+    assert cart.applied == [], "the cart was not touched"
+    assert _ledger() == {}
 
 
 def test_a_push_names_your_items_from_the_catalogue_where_it_can(stock_client, monkeypatch):

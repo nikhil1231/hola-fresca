@@ -33,8 +33,9 @@ import {
   useRecipes,
   useRecipeSuggestions,
 } from '../hooks/useRecipeQueries.js'
-import {
+  formatWeekRange,
   formatWeekStart,
+  isPastWeekStart,
   resolveTargetWeek,
   useSchedule,
   useSetWeekSkipped,
@@ -129,7 +130,14 @@ export default function BrowsePage() {
   } = useWeeklyPlan()
   const { data: schedule } = useSchedule()
   const setSkipped = useSetWeekSkipped()
-  const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
+  const requestedWeek = searchParams.get('week')
+  // Browse fills a week, so a stale link naming one that has been and gone is
+  // ignored rather than honoured — the shop is done, and every add would be
+  // refused. Pages that only *show* a week resolve the old one instead.
+  const targetWeek = resolveTargetWeek(
+    schedule,
+    isPastWeekStart(requestedWeek) ? null : requestedWeek,
+  )
   // Before the schedule loads, fall back to the same week the plan has always
   // defaulted to, so the page is never briefly editing nothing.
   const weekStart = targetWeek?.week_start ?? upcomingWeekStart

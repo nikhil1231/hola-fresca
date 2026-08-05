@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { AppShell, Container, Text } from '@mantine/core'
 
 import Header from './components/Header.jsx'
+import { useLocalPlanImport } from './hooks/useLocalPlanImport.js'
 
 const PAGE_LAST_UPDATED =
   typeof __PAGE_LAST_UPDATED__ === 'undefined' ? {} : __PAGE_LAST_UPDATED__
@@ -54,6 +55,10 @@ function LastUpdatedFooter() {
 }
 
 function App() {
+  // A one-off carry-over of any plan still living in this browser's
+  // localStorage. Runs once per browser and then never again; see the hook.
+  useLocalPlanImport()
+
   return (
     <AppShell header={{ height: 64 }} padding={0}>
       <AppShell.Header>

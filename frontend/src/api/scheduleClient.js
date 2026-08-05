@@ -29,8 +29,9 @@ async function putJSON(path, body = {}) {
   return res.json()
 }
 
-export function fetchSchedule() {
-  return getJSON('/api/schedule')
+// `pastWeeks` asks for that many finished shops alongside the planning window.
+export function fetchSchedule(pastWeeks = 0) {
+  return getJSON(`/api/schedule?past_weeks=${pastWeeks}`)
 }
 
 // A partial update: only the fields passed are changed.

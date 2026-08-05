@@ -22,7 +22,11 @@ import {
   IconTrash,
 } from '@tabler/icons-react'
 
-import { MAX_PORTIONS, MIN_PORTIONS } from '../hooks/useWeeklyPlan.js'
+import {
+  formatProteinModifier,
+  MAX_PORTIONS,
+  MIN_PORTIONS,
+} from '../hooks/useWeeklyPlan.js'
 import { useProteinPreview } from '../hooks/useRecipeQueries.js'
 import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import classes from './RecipeCard.module.css'
@@ -52,30 +56,6 @@ function formatBasketBadge(marginalScore, unpricedGapCount, basketAvailable) {
   const marginal = formatMarginalScore(marginalScore)
   if (!marginal) return null
   return marginal
-}
-
-const PROTEIN_SWAP_LABELS = {
-  chicken_breast: 'Chicken breast',
-  chicken_thigh: 'Chicken thigh',
-  beef: 'Beef mince',
-  pork: 'Pork mince',
-  lamb: 'Lamb mince',
-  salmon: 'Salmon',
-  basa: 'Basa',
-  tofu: 'Tofu',
-  halloumi: 'Halloumi',
-}
-
-// How the week's protein modifier reads on a card: the swap if there is one,
-// otherwise what the scaling is doing.
-function formatProteinModifier(protein) {
-  if (!protein) return null
-  const parts = []
-  if (protein.swap_to) parts.push(PROTEIN_SWAP_LABELS[protein.swap_to] ?? protein.swap_to)
-  if (protein.scale) parts.push(`${protein.scale}x protein`)
-  else if (protein.target_mode === 'protein_g') parts.push(`${protein.target_value}g protein pp`)
-  else if (protein.target_mode === 'energy_kcal') parts.push(`${protein.target_value} kcal pp`)
-  return parts.join(' · ') || null
 }
 
 function proteinDensityLevel(value) {
@@ -133,8 +113,27 @@ function stopCardNavigation(event) {
   event.stopPropagation()
 }
 
-function PlannerControls({ disabled, entry, onAdd, onPortionsChange, onRemove }) {
+function PlannerControls({ disabled, entry, readOnly = false, onAdd, onPortionsChange, onRemove }) {
   if (!entry && !onAdd) return null
+
+  // A shop that has been and gone still shows what was cooked, and nothing that
+  // offers to change it. The count is the record, so it stays; the buttons that
+  // would rewrite it do not.
+  if (readOnly) {
+    if (!entry) return null
+    return (
+      <div className={classes.plannerControlGroup}>
+        <div
+          className={classes.portionStepper}
+          aria-label={`${entry.portions} portions, as shopped for`}
+        >
+          <Text span fw={700} size="sm" className={classes.portionCount}>
+            {entry.portions}
+          </Text>
+        </div>
+      </div>
+    )
+  }
 
   if (!entry) {
     return (
@@ -241,6 +240,7 @@ export default function RecipeCard({
   plannerEntry = null,
   plannerControlsVisible = false,
   plannerDisabled = false,
+  plannerReadOnly = false,
   onAddToPlan,
   onPortionsChange,
   onRemoveFromPlan,
@@ -432,6 +432,7 @@ export default function RecipeCard({
       <div className={controlClass}>
         <PlannerControls
           disabled={plannerDisabled}
+          readOnly={plannerReadOnly}
           entry={plannerEntry}
           onAdd={onAddToPlan}
           onPortionsChange={onPortionsChange}

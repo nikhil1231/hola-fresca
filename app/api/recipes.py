@@ -13,7 +13,13 @@ from sqlalchemy import Select, and_, func, nullslast, or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api import facets as facet_cfg
-from app.api.deps import get_planner_csv_path, get_session, get_session_factory
+from app.api.deps import (
+    get_current_user,
+    get_planner_csv_path,
+    get_session,
+    get_session_factory,
+    require_admin,
+)
 from app.api.schemas import (
     AuditJobOut,
     FacetCount,
@@ -43,6 +49,8 @@ from app.db.models import (
     RecipeCuisine,
     RecipeIngredient,
     RecipeTag,
+    User,
+    UserRecipeHide,
 )
 from app import classify, measures
 from app import protein as protein_mod
@@ -71,9 +79,45 @@ def _main_protein_match(keywords: list[str]):
     return Recipe.ingredients.any(and_(protein_names, ~non_main_names))
 
 
-def _visible_recipe_condition():
-    """The human-facing library: curated by rules, not manually suppressed."""
+def _library_condition():
+    """The shared library: curated by rules, and not a broken source row.
+
+    This is what exists for everybody. It deliberately ignores personal hides —
+    a recipe you have hidden is still in the library, still priced, and still
+    valid in a plan you already made.
+    """
     return Recipe.curated == 1, Recipe.manually_excluded == 0
+
+
+def _visible_recipe_condition(user_id: int):
+    """The library as one user sees it: shared, minus what they have hidden.
+
+    Applied here rather than in the planner index because the index is built once
+    and shared by every user; a hide is the sort of thing that has to be a
+    condition on the query, not a property of the snapshot.
+    """
+    return (
+        *_library_condition(),
+        ~select(UserRecipeHide.recipe_id)
+        .where(
+            UserRecipeHide.user_id == user_id,
+            UserRecipeHide.recipe_id == Recipe.id,
+        )
+        .exists(),
+    )
+
+def _require_library_recipe(session: Session, recipe_id: int) -> Recipe:
+    """Load a recipe that is in the shared library, or 404.
+
+    Personal hides are not consulted: hiding a recipe takes it out of your
+    browse, not out of existence, and a plan or a rating that already refers to
+    it has to keep working.
+    """
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or not recipe.curated or recipe.manually_excluded:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return recipe
+
 
 router = APIRouter(prefix="/api", tags=["recipes"])
 
@@ -182,7 +226,7 @@ def _fuzzy_search_match(query: str, name: str | None, headline: str | None) -> b
     return _relevance(query, name, headline) is not None
 
 
-def _ranked_recipe_ids(session: Session, filters: dict) -> list[int]:
+def _ranked_recipe_ids(session: Session, filters: dict, user_id: int) -> list[int]:
     """Ids matching the filters, most relevant first when a query is given."""
     q = (filters.get("q") or "").strip()
     stmt = _apply_filters(
@@ -193,6 +237,7 @@ def _ranked_recipe_ids(session: Session, filters: dict) -> list[int]:
             func.coalesce(Recipe.effective_ratings_count, Recipe.ratings_count),
         ),
         **filters,
+        user_id=user_id,
     )
     rows = session.execute(stmt).all()
     if not q:
@@ -208,8 +253,8 @@ def _ranked_recipe_ids(session: Session, filters: dict) -> list[int]:
     return [recipe_id for _, _, recipe_id in scored]
 
 
-def _filtered_recipe_ids(session: Session, filters: dict) -> list[int]:
-    return _ranked_recipe_ids(session, filters)
+def _filtered_recipe_ids(session: Session, filters: dict, user_id: int) -> list[int]:
+    return _ranked_recipe_ids(session, filters, user_id)
 
 
 def _rows_in_id_order(session: Session, page_ids: list[int]) -> list[Recipe]:
@@ -275,8 +320,9 @@ def _apply_filters(
     rated: bool = False,
     wishlisted: bool = False,
     course: list[str] | None = None,
+    user_id: int,
 ) -> Select:
-    stmt = stmt.where(*_visible_recipe_condition())
+    stmt = stmt.where(*_visible_recipe_condition(user_id))
     stmt = _apply_course(stmt, course)
     if cuisine:
         stmt = stmt.where(Recipe.cuisines.any(RecipeCuisine.name.in_(cuisine)))
@@ -319,35 +365,37 @@ def _apply_filters(
     if difficulty is not None:
         stmt = stmt.where(Recipe.difficulty == difficulty)
     if rated:
-        stmt = stmt.where(Recipe.personal_rating.has())
+        stmt = stmt.where(
+            Recipe.personal_ratings.any(PersonalRecipeRating.user_id == user_id)
+        )
     if wishlisted:
-        stmt = stmt.where(Recipe.wishlist_entry.has())
+        stmt = stmt.where(
+            Recipe.wishlist_entries.any(PersonalRecipeWishlist.user_id == user_id)
+        )
     return stmt
 
 
-def _personal_rating_value(r: Recipe) -> int | None:
-    return r.personal_rating.rating if r.personal_rating is not None else None
-
-
-def _personal_rating_map(session: Session, recipe_ids: list[int]) -> dict[int, int]:
+def _personal_rating_map(
+    session: Session, user_id: int, recipe_ids: list[int]
+) -> dict[int, int]:
     if not recipe_ids:
         return {}
     rows = session.scalars(
-        select(PersonalRecipeRating).where(PersonalRecipeRating.recipe_id.in_(recipe_ids))
+        select(PersonalRecipeRating).where(
+            PersonalRecipeRating.user_id == user_id,
+            PersonalRecipeRating.recipe_id.in_(recipe_ids),
+        )
     ).all()
     return {row.recipe_id: row.rating for row in rows}
 
 
-def _wishlisted_value(r: Recipe) -> bool:
-    return r.wishlist_entry is not None
-
-
-def _wishlist_map(session: Session, recipe_ids: list[int]) -> dict[int, bool]:
+def _wishlist_map(session: Session, user_id: int, recipe_ids: list[int]) -> dict[int, bool]:
     if not recipe_ids:
         return {}
     rows = session.scalars(
         select(PersonalRecipeWishlist.recipe_id).where(
-            PersonalRecipeWishlist.recipe_id.in_(recipe_ids)
+            PersonalRecipeWishlist.user_id == user_id,
+            PersonalRecipeWishlist.recipe_id.in_(recipe_ids),
         )
     ).all()
     return {recipe_id: True for recipe_id in rows}
@@ -386,8 +434,8 @@ def _to_card(
         avg_rating=_shown_rating(r),
         ratings_count=_shown_ratings_count(r),
         course=r.course or facet_cfg.MAIN,
-        personal_rating=personal_rating if personal_rating is not None else _personal_rating_value(r),
-        wishlisted=wishlisted if wishlisted is not None else _wishlisted_value(r),
+        personal_rating=personal_rating,
+        wishlisted=bool(wishlisted),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in r.cuisines],
         tags=list(dict.fromkeys(chips)),  # dedupe, preserve order
         intrinsic_score=intrinsic_score,
@@ -521,7 +569,7 @@ def _unmapped_recipe_ids(session: Session, csv_path: Path | None) -> set[int]:
             select(RecipeIngredient.recipe_id)
             .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
             .where(
-                *_visible_recipe_condition(),
+                *_library_condition(),
                 or_(
                     RecipeIngredient.source_ingredient_id.is_(None),
                     RecipeIngredient.source_ingredient_id.not_in(approved_source_ids),
@@ -558,6 +606,7 @@ def list_recipes(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> PaginatedRecipes:
     filters = dict(
         q=q, cuisine=cuisine, diet=diet, tag=tag, protein=protein, max_time=max_time,
@@ -569,7 +618,7 @@ def list_recipes(
     excluded_recipe_ids = set(exclude_id)
     candidate_ids: list[int] | None = None
     if q or exclude_unmapped:
-        filtered_candidate_ids = _filtered_recipe_ids(session, filters)
+        filtered_candidate_ids = _filtered_recipe_ids(session, filters, user.id)
         if exclude_unmapped:
             excluded_recipe_ids.update(
                 _recipe_ids_with_pricing_gaps(filtered_candidate_ids, factory, csv_path)
@@ -581,7 +630,7 @@ def list_recipes(
         ]
         total = len(candidate_ids)
     else:
-        total_stmt = _apply_filters(select(func.count(Recipe.id)), **filters)
+        total_stmt = _apply_filters(select(func.count(Recipe.id)), **filters, user_id=user.id)
         if excluded_recipe_ids:
             total_stmt = total_stmt.where(Recipe.id.not_in(excluded_recipe_ids))
         total = session.scalar(total_stmt) or 0
@@ -597,7 +646,7 @@ def list_recipes(
         intrinsic = _intrinsic_prices(rows, factory, csv_path)
     elif sort in {"price_low", "price_high"}:
         if candidate_ids is None:
-            id_stmt = _apply_filters(select(Recipe.id), **filters)
+            id_stmt = _apply_filters(select(Recipe.id), **filters, user_id=user.id)
             if excluded_recipe_ids:
                 id_stmt = id_stmt.where(Recipe.id.not_in(excluded_recipe_ids))
             candidate_ids = list(session.scalars(id_stmt).all())
@@ -630,7 +679,7 @@ def list_recipes(
                 rows = []
         else:
             stmt = (
-                _apply_filters(select(Recipe), **filters)
+                _apply_filters(select(Recipe), **filters, user_id=user.id)
                 .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
             )
             if excluded_recipe_ids:
@@ -643,9 +692,14 @@ def list_recipes(
             )
             rows = session.scalars(stmt).all()
         intrinsic = _intrinsic_prices(rows, factory, csv_path)
+    page_ids = [r.id for r in rows]
+    personal_ratings = _personal_rating_map(session, user.id, page_ids)
+    wishlist = _wishlist_map(session, user.id, page_ids)
     items = [
         _to_card(
             r,
+            personal_rating=personal_ratings.get(r.id),
+            wishlisted=wishlist.get(r.id, False),
             intrinsic_score=intrinsic.get(r.id, (None, None, 0))[0],
             intrinsic_cost=intrinsic.get(r.id, (None, None, 0))[1],
             intrinsic_gap_count=intrinsic.get(r.id, (None, None, 0))[2],
@@ -670,10 +724,9 @@ def get_recipe(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> RecipeDetail:
-    recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated or recipe.manually_excluded:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe = _require_library_recipe(session, recipe_id)
 
     steps = sorted(recipe.steps, key=lambda s: s.index)
     ingredients = [
@@ -706,8 +759,8 @@ def get_recipe(
         protein_energy_ratio=recipe.protein_energy_ratio,
         avg_rating=_shown_rating(recipe),
         ratings_count=_shown_ratings_count(recipe),
-        personal_rating=_personal_rating_value(recipe),
-        wishlisted=_wishlisted_value(recipe),
+        personal_rating=_personal_rating_map(session, user.id, [recipe_id]).get(recipe_id),
+        wishlisted=_wishlist_map(session, user.id, [recipe_id]).get(recipe_id, False),
         cuisines=[facet_cfg.clean_cuisine(c.name) for c in recipe.cuisines],
         tags=list(dict.fromkeys(
             _CHIP_LABELS[t.type] for t in recipe.tags if t.type in _CHIP_LABELS
@@ -873,6 +926,7 @@ def preview_protein(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    _user: User = Depends(get_current_user),
 ) -> ProteinPreviewOut:
     """The recipe as it would be with this protein modifier applied.
 
@@ -881,9 +935,7 @@ def preview_protein(
     which is why this is a POST that writes nothing — the request body is a
     description of a hypothetical, not an edit.
     """
-    recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated or recipe.manually_excluded:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe = _require_library_recipe(session, recipe_id)
 
     index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path)
     if plan_recipe is None or plan_recipe.protein is None:
@@ -996,21 +1048,22 @@ def set_personal_rating(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> RecipeDetail:
-    recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated or recipe.manually_excluded:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    _require_library_recipe(session, recipe_id)
 
-    existing = session.get(PersonalRecipeRating, recipe_id)
+    existing = session.get(PersonalRecipeRating, (user.id, recipe_id))
     if body.rating is None:
         if existing is not None:
             session.delete(existing)
     elif existing is None:
-        session.add(PersonalRecipeRating(recipe_id=recipe_id, rating=body.rating))
+        session.add(
+            PersonalRecipeRating(user_id=user.id, recipe_id=recipe_id, rating=body.rating)
+        )
     else:
         existing.rating = body.rating
     session.commit()
-    return get_recipe(recipe_id, session, factory, csv_path)
+    return get_recipe(recipe_id, session, factory, csv_path, user)
 
 
 @router.put("/recipes/{recipe_id}/wishlist", response_model=RecipeDetail)
@@ -1020,36 +1073,67 @@ def set_wishlist(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> RecipeDetail:
-    recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated or recipe.manually_excluded:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    _require_library_recipe(session, recipe_id)
 
-    existing = session.get(PersonalRecipeWishlist, recipe_id)
+    existing = session.get(PersonalRecipeWishlist, (user.id, recipe_id))
     if body.wishlisted and existing is None:
-        session.add(PersonalRecipeWishlist(recipe_id=recipe_id))
+        session.add(PersonalRecipeWishlist(user_id=user.id, recipe_id=recipe_id))
     elif not body.wishlisted and existing is not None:
         session.delete(existing)
     session.commit()
-    return get_recipe(recipe_id, session, factory, csv_path)
+    return get_recipe(recipe_id, session, factory, csv_path, user)
 
 
 @router.post("/recipes/{recipe_id}/hide")
-def hide_recipe(recipe_id: int, session: Session = Depends(get_session)) -> dict[str, int | bool]:
-    """Remove a bad source recipe from the active local library."""
-    recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated or recipe.manually_excluded:
-        raise HTTPException(status_code=404, detail="Recipe not found")
-    recipe.manually_excluded = 1
-    session.commit()
-    return {"id": recipe_id, "manually_excluded": True}
+def hide_recipe(
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict[str, int | bool]:
+    """Stop showing this recipe to the current user.
+
+    A personal filter, not a verdict on the recipe: it stays in the library, and
+    a plan or a rating that already refers to it is untouched. Taking a genuinely
+    broken source row out for everybody is a different, admin-level act — see
+    ``Recipe.manually_excluded``.
+    """
+    _require_library_recipe(session, recipe_id)
+    if session.get(UserRecipeHide, (user.id, recipe_id)) is None:
+        session.add(UserRecipeHide(user_id=user.id, recipe_id=recipe_id))
+        session.commit()
+    return {"id": recipe_id, "hidden": True}
+
+
+@router.delete("/recipes/{recipe_id}/hide")
+def unhide_recipe(
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict[str, int | bool]:
+    """Put a personally hidden recipe back.
+
+    There was no way to undo a hide when it meant editing the library — the fix
+    was a SQL statement. Now that it is one row belonging to one person, it can
+    just be deleted.
+    """
+    existing = session.get(UserRecipeHide, (user.id, recipe_id))
+    if existing is not None:
+        session.delete(existing)
+        session.commit()
+    return {"id": recipe_id, "hidden": False}
 
 # --------------------------------------------------------------------------
 # Macro audit
 # --------------------------------------------------------------------------
 
 @router.post("/recipes/{recipe_id}/flag", response_model=AuditJobOut)
-def flag_recipe(recipe_id: int, session: Session = Depends(get_session)) -> AuditJobOut:
+def flag_recipe(
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+) -> AuditJobOut:
     """Flag the numbers as suspicious and start a background audit.
 
     Returns a job handle to poll: the arithmetic checks are instant but the
@@ -1058,9 +1142,7 @@ def flag_recipe(recipe_id: int, session: Session = Depends(get_session)) -> Audi
     from app.api.deps import _session_factory
     from app import audit as audit_mod
 
-    recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated or recipe.manually_excluded:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe = _require_library_recipe(session, recipe_id)
     audit_mod.flag_recipe(session, recipe_id)
     job = audit_mod.start_background(_session_factory(), recipe_id)
     return AuditJobOut(**job.as_dict())
@@ -1082,23 +1164,32 @@ def revert_recipe_edits(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
+    _admin: User = Depends(require_admin),
 ) -> RecipeDetail:
-    """Put the source's original numbers back and mark the edits reverted."""
+    """Put the source's original numbers back and mark the edits reverted.
+
+    A catalogue write: the corrected macros are what every user's browse filters
+    and basket scoring read, so undoing them is not a personal act.
+    """
     from app import audit as audit_mod
 
     try:
         audit_mod.revert_recipe(session, recipe_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return get_recipe(recipe_id, session, factory, csv_path)
+    return get_recipe(recipe_id, session, factory, csv_path, user)
 
 
 @router.get("/facets", response_model=FacetsOut)
 def get_facets(
     session: Session = Depends(get_session),
     csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
 ) -> FacetsOut:
-    curated = and_(*_visible_recipe_condition())
+    # Counted over what this user can actually see, so a facet never promises
+    # results that a personal hide has already taken off the page.
+    curated = and_(*_visible_recipe_condition(user.id))
 
     # Cuisines above the noise threshold, cleaned for display.
     cuisine_rows = session.execute(
@@ -1183,7 +1274,7 @@ def get_facets(
     course_counts = dict(
         session.execute(
             select(func.coalesce(Recipe.course, facet_cfg.MAIN), func.count())
-            .where(*_visible_recipe_condition())
+            .where(*_visible_recipe_condition(user.id))
             .group_by(func.coalesce(Recipe.course, facet_cfg.MAIN))
         ).all()
     )

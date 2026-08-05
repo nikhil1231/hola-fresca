@@ -1,21 +1,42 @@
-"""Engine and session management.
+"""Engine, session management and schema upkeep.
 
-Phase 1 creates the schema directly with ``Base.metadata.create_all``. The
-database is a disposable derivative of the raw payload store — it can be dropped
-and rebuilt by re-running the normalize stage — so migrations are deferred until
-the schema stabilises with the planner/pantry work.
+The schema is built two different ways, on purpose. A **fresh** database — every
+test, and a rebuild from the raw payload store — is created by
+``Base.metadata.create_all`` and stamped at alembic head: it is a derivative that
+can be thrown away, and replaying two years of migrations to reach a schema the
+models already describe would only be slower and less faithful. An **existing**
+database is migrated by alembic, because it holds the one thing that is not
+derivable — what its user planned, rated and chose.
+
+Before accounts, existing databases were kept up to date by ``_RUNTIME_COLUMNS``
+below, which can only bolt a nullable column onto a table. That was enough while
+every change was additive and stopped being enough with user ownership, which
+changes primary keys and drops columns. Those columns stay listed because
+databases predating alembic still need them; anything new belongs in a migration.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import config
 from app.db.base import Base
 from app.db import models  # noqa: F401  (register models on Base.metadata)
+from app.db.models import User
+
+log = logging.getLogger(__name__)
+
+#: Where alembic's scripts live, found from this file so the CLI's working
+#: directory does not decide whether migrations can be run.
+ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
+
+#: The revision an existing pre-accounts database is stamped with before it is
+#: upgraded. See alembic/versions/0001_baseline.py.
+BASELINE_REVISION = "0001_baseline"
 
 
 def make_engine(db_path: Path | None = None) -> Engine:
@@ -30,7 +51,10 @@ def make_engine(db_path: Path | None = None) -> Engine:
 _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
     "recipe_ingredients": {"position": "INTEGER"},
     "recipe_steps": {"image_path": "TEXT"},
-    "ingredient_mappings": {"unit_kind": "TEXT DEFAULT 'mass'", "preferred_sku": "VARCHAR(128)"},
+    # ``preferred_sku`` was here until 0002_accounts moved it to
+    # user_pack_preferences. It must not come back: this dict runs after the
+    # migrations, so listing it would re-add the column the migration dropped.
+    "ingredient_mappings": {"unit_kind": "TEXT DEFAULT 'mass'"},
     "products": {"stock_checked_at": "DATETIME"},
     "plan_settings": {"pack_shortfall_tolerance_pct": "REAL DEFAULT 10"},
     "ocado_cart_sync": {"account_id": "VARCHAR(64)"},
@@ -53,8 +77,95 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
 }
 
 
+def _alembic_config(connection: Connection):
+    """An alembic Config bound to an open connection.
+
+    Imported lazily: the scraper and analysis CLIs open the database too, and
+    they should not pay for alembic's import to do it.
+    """
+    from alembic.config import Config
+
+    cfg = Config(str(ALEMBIC_DIR.parent / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ALEMBIC_DIR))
+    cfg.attributes["connection"] = connection
+    # The app configures logging in main.py; alembic's fileConfig would replace
+    # those handlers and silence everything the app logs after startup.
+    cfg.attributes["configure_logger"] = False
+    return cfg
+
+
+def _is_fresh(conn: Connection) -> bool:
+    """True when nothing has been built here yet.
+
+    ``recipes`` is the marker rather than ``alembic_version``: a database created
+    before alembic existed has no version table either, and the two cases need
+    opposite treatment.
+    """
+    from sqlalchemy import inspect
+
+    return not inspect(conn).has_table("recipes")
+
+
+def _run_migrations(conn: Connection) -> None:
+    from alembic import command
+    from alembic.runtime.migration import MigrationContext
+
+    cfg = _alembic_config(conn)
+    current = MigrationContext.configure(conn).get_current_revision()
+    if current is None:
+        # An existing database from before alembic: its schema is the baseline by
+        # definition, so record that rather than trying to replay it.
+        log.info("database predates migrations; stamping %s", BASELINE_REVISION)
+        command.stamp(cfg, BASELINE_REVISION)
+    command.upgrade(cfg, "head")
+
+
+def ensure_bootstrap_user(engine: Engine) -> int:
+    """Make sure an account exists, and return the id of the first one.
+
+    There is no sign-up yet, so the account is created by the app the first time
+    it opens a database rather than by anyone asking for it. Once Google sign-in
+    lands this stays as the fallback for an empty ``users`` table — the first
+    person through the door — rather than the only way a user is ever made.
+    """
+    with Session(engine) as session:
+        user_id = session.scalar(select(User.id).order_by(User.id).limit(1))
+        if user_id is not None:
+            return user_id
+        user = User(is_admin=1)
+        session.add(user)
+        session.commit()
+        return user.id
+
+
 def init_db(engine: Engine) -> None:
-    Base.metadata.create_all(engine)
+    """Bring the database at ``engine`` up to the current schema.
+
+    A fresh database is built from the models; an existing one is migrated. Note
+    what that means for anything added from here on: ``create_all`` never touches
+    a database that already has a ``recipes`` table, so a new model without a
+    migration will exist in tests and be missing in production. Write the
+    migration.
+    """
+    with engine.begin() as conn:
+        fresh = _is_fresh(conn)
+
+    if fresh:
+        Base.metadata.create_all(engine)
+
+    with engine.begin() as conn:
+        if fresh:
+            # Nothing to migrate — the schema was just built at head — but the
+            # version has to be recorded, or the next startup would try to apply
+            # every migration to a database that already has their effect.
+            from alembic import command
+
+            command.stamp(_alembic_config(conn), "head")
+        else:
+            _run_migrations(conn)
+
+    ensure_bootstrap_user(engine)
+
     with engine.begin() as conn:
         for table, columns in _RUNTIME_COLUMNS.items():
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
