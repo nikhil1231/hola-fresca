@@ -1,12 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ActionIcon, Alert, Badge, Button, Group, Image, Skeleton, Text, Title } from '@mantine/core'
-import { IconArrowLeft, IconArrowRight, IconCheck, IconX } from '@tabler/icons-react'
+import { ActionIcon, Alert, Badge, Button, Group, Image, Loader, Popover, Skeleton, Text, Title } from '@mantine/core'
+import {
+  IconAlertTriangle,
+  IconArrowLeft,
+  IconArrowRight,
+  IconBinaryTree,
+  IconCheck,
+  IconListNumbers,
+  IconX,
+} from '@tabler/icons-react'
 
-import { useProteinPreview, useRecipe } from '../hooks/useRecipeQueries.js'
+import { useCookMap, useProteinPreview, useRecipe } from '../hooks/useRecipeQueries.js'
 import { usePreloadStepImages } from '../hooks/usePreloadStepImages.js'
 import { formatProteinModifier, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
 import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
+import CookMapView from './CookMapView.jsx'
 import classes from './CookingPage.module.css'
 
 export default function CookingPage() {
@@ -23,10 +32,17 @@ export default function CookingPage() {
   const { data: proteinPreview } = useProteinPreview(id, entry?.protein, {
     enabled: Boolean(entry?.protein),
   })
+  const cookMap = useCookMap(id, entry?.protein)
   const modified = proteinPreview?.changed ? proteinPreview : null
   const modifierLabel = formatProteinModifier(entry?.protein)
   const [stepPosition, setStepPosition] = useState(0)
+  const [viewMode, setViewMode] = useState('steps')
+  const [mapFailureOpen, setMapFailureOpen] = useState(false)
   usePreloadStepImages(modified?.steps ?? recipe?.steps)
+
+  useEffect(() => {
+    if (viewMode === 'map' && cookMap.status !== 'ready') setViewMode('steps')
+  }, [cookMap.status, viewMode])
 
   if (isLoading) {
     return (
@@ -108,61 +124,135 @@ export default function CookingPage() {
             </Group>
           )}
         </div>
-        <ActionIcon
-          component={Link}
-          to={detailHref}
-          replace
-          variant="subtle"
-          color="gray"
-          size="lg"
-          radius="xl"
-          aria-label="Exit cooking mode"
-        >
-          <IconX size={21} />
-        </ActionIcon>
+        <Group gap={4} wrap="nowrap">
+          {(cookMap.status === 'processing' || cookMap.retrying) && (
+            <div className={classes.mapStatus} role="status" aria-label="Preparing cook map" title="Preparing cook map">
+              <Loader size={20} color="fresh" />
+            </div>
+          )}
+          {cookMap.status === 'ready' && cookMap.data?.graph && (
+            <ActionIcon
+              variant={viewMode === 'map' ? 'filled' : 'subtle'}
+              color="fresh"
+              size="lg"
+              radius="xl"
+              aria-label={viewMode === 'map' ? 'Show recipe steps' : 'Show cook map'}
+              title={viewMode === 'map' ? 'Show recipe steps' : 'Show cook map'}
+              onClick={() => setViewMode((current) => current === 'map' ? 'steps' : 'map')}
+            >
+              {viewMode === 'map' ? <IconListNumbers size={21} /> : <IconBinaryTree size={21} />}
+            </ActionIcon>
+          )}
+          {cookMap.status === 'failed' && !cookMap.retrying && (
+            <Popover
+              opened={mapFailureOpen}
+              onChange={setMapFailureOpen}
+              position="bottom-end"
+              width={300}
+              shadow="md"
+              withinPortal
+            >
+              <Popover.Target>
+                <ActionIcon
+                  variant="light"
+                  color="orange"
+                  size="lg"
+                  radius="xl"
+                  aria-label="Cook map unavailable. Show details and retry"
+                  aria-expanded={mapFailureOpen}
+                  title="Cook map unavailable · show details"
+                  onClick={() => setMapFailureOpen((open) => !open)}
+                >
+                  <IconAlertTriangle size={20} />
+                </ActionIcon>
+              </Popover.Target>
+              <Popover.Dropdown role="alert" className={classes.mapFailure}>
+                <Text fw={700} size="sm">Cook map unavailable</Text>
+                <Text size="sm" c="dimmed">
+                  {cookMap.error?.includes('OPENAI_API_KEY')
+                    ? 'Map generation is not configured. Add OPENAI_API_KEY to the repo-root .env, then restart the backend.'
+                    : cookMap.error || 'The map could not be generated. Linear cooking is still available.'}
+                </Text>
+                <Button
+                  color="orange"
+                  variant="light"
+                  size="xs"
+                  loading={cookMap.retrying}
+                  onClick={() => cookMap.retry()}
+                >
+                  Retry map generation
+                </Button>
+              </Popover.Dropdown>
+            </Popover>
+          )}
+          <ActionIcon
+            component={Link}
+            to={detailHref}
+            replace
+            variant="subtle"
+            color="gray"
+            size="lg"
+            radius="xl"
+            aria-label="Exit cooking mode"
+          >
+            <IconX size={21} />
+          </ActionIcon>
+        </Group>
       </header>
 
-      <section className={classes.stepArea} aria-live="polite">
-        <Image
-          src={image}
-          fallbackSrc={RECIPE_PLACEHOLDER_IMAGE}
-          alt={`Step ${currentStep.index}: ${recipe.name}`}
-          className={classes.stepImage}
+      {viewMode === 'map' && cookMap.data?.graph ? (
+        <CookMapView
+          graph={{ ...cookMap.data.graph, source_fingerprint: cookMap.data.source_fingerprint }}
+          recipe={recipe}
+          ingredients={modified?.ingredients ?? recipe.ingredients ?? []}
+          servings={entry?.portions ?? recipe.base_yield ?? 2}
+          modifierKey={JSON.stringify(entry?.protein ?? {})}
         />
-        <article className={classes.instructions} tabIndex="-1">
-          <Text size="sm" c="fresh.7" fw={700} tt="uppercase" className={classes.stepLabel}>
-            Step {currentStep.index}
-          </Text>
-          <Text className={classes.stepText}>{currentStep.text || 'No instructions provided.'}</Text>
-        </article>
-      </section>
+      ) : (
+        <>
+          <section className={classes.stepArea} aria-live="polite">
+            <Image
+              src={image}
+              fallbackSrc={RECIPE_PLACEHOLDER_IMAGE}
+              alt={`Step ${currentStep.index}: ${recipe.name}`}
+              className={classes.stepImage}
+            />
+            <article className={classes.instructions} tabIndex="-1">
+              <Text size="sm" c="fresh.7" fw={700} tt="uppercase" className={classes.stepLabel}>
+                Step {currentStep.index}
+              </Text>
+              <Text className={classes.stepText}>{currentStep.text || 'No instructions provided.'}</Text>
+            </article>
+          </section>
 
-      <nav className={classes.navigation} aria-label="Cooking steps">
-        <ActionIcon
-          variant="light"
-          color="fresh"
-          size="xl"
-          radius="xl"
-          disabled={isFirst}
-          aria-label="Previous step"
-          onClick={() => setStepPosition(position - 1)}
-        >
-          <IconArrowLeft size={22} />
-        </ActionIcon>
-        <Text fw={700} size="sm" ta="center">
-          Step {position + 1} of {steps.length}
-        </Text>
-        <ActionIcon
-          variant="filled"
-          color="fresh"
-          size="xl"
-          radius="xl"
-          aria-label={isLast ? 'Finish cooking' : 'Next step'}
-          onClick={isLast ? finish : () => setStepPosition(position + 1)}
-        >
-          {isLast ? <IconCheck size={22} /> : <IconArrowRight size={22} />}
-        </ActionIcon>
-      </nav>
+          <nav className={classes.navigation} aria-label="Cooking steps">
+            <ActionIcon
+              variant="light"
+              color="fresh"
+              size="xl"
+              radius="xl"
+              disabled={isFirst}
+              aria-label="Previous step"
+              onClick={() => setStepPosition(position - 1)}
+            >
+              <IconArrowLeft size={22} />
+            </ActionIcon>
+            <Text fw={700} size="sm" ta="center">
+              Step {position + 1} of {steps.length}
+            </Text>
+            <ActionIcon
+              variant="filled"
+              color="fresh"
+              size="xl"
+              radius="xl"
+              aria-label={isLast ? 'Finish cooking' : 'Next step'}
+              onClick={isLast ? finish : () => setStepPosition(position + 1)}
+            >
+              {isLast ? <IconCheck size={22} /> : <IconArrowRight size={22} />}
+            </ActionIcon>
+          </nav>
+        </>
+      )}
     </main>
   )
 }

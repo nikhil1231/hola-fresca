@@ -55,6 +55,7 @@ class PaginatedRecipes(BaseModel):
 
 
 class IngredientOut(BaseModel):
+    recipe_ingredient_id: int | None = None
     ingredient_key: str | None = None
     name: str
     amount: float | None = None
@@ -82,6 +83,52 @@ class StepOut(BaseModel):
     index: int
     text: str | None = None
     image_url: str | None = None
+
+
+class CookMapLaneOut(BaseModel):
+    id: str
+    name: str
+
+
+class CookMapNodeOut(BaseModel):
+    id: str
+    ref: str
+    source_step_index: int
+    lane_id: str
+    title: str
+    detail: str
+    kind: Literal["active", "passive"]
+    duration_seconds: int | None = None
+    ingredient_ids: list[int] = Field(default_factory=list)
+    row: int
+    col: int
+    collapsed: bool = False
+    chip_index: int = 0
+    image_url: str | None = None
+
+
+class CookMapEdgeOut(BaseModel):
+    source: str
+    target: str
+    style: Literal["lane", "hold"] = "lane"
+
+
+class CookMapGraphOut(BaseModel):
+    columns: int = 4
+    row_count: int
+    lanes: list[CookMapLaneOut] = Field(default_factory=list)
+    nodes: list[CookMapNodeOut] = Field(default_factory=list)
+    edges: list[CookMapEdgeOut] = Field(default_factory=list)
+
+
+class CookMapOut(BaseModel):
+    status: Literal["not_started", "processing", "ready", "failed"]
+    source_fingerprint: str | None = None
+    schema_version: int = 1
+    prompt_version: int = 1
+    model: str | None = None
+    error: str | None = None
+    graph: CookMapGraphOut | None = None
 
 
 class NutritionOut(BaseModel):

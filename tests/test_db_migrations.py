@@ -129,9 +129,20 @@ def test_an_old_database_is_migrated_rather_than_rebuilt(tmp_path):
     init_db(engine)
 
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002_accounts"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004_planner_cache_revisions"
         # Nothing was dropped on the way through.
         assert conn.execute(text("SELECT COUNT(*) FROM recipes")).scalar() == 2
+        assert conn.execute(
+            text("SELECT COUNT(*) FROM recipe_cook_maps")
+        ).scalar() == 0
+        assert conn.execute(
+            text("SELECT recipe_revision, ingredient_revision FROM planner_cache_state")
+        ).one() == (1, 1)
+        trigger_names = set(
+            conn.scalars(text("SELECT name FROM sqlite_master WHERE type = 'trigger'"))
+        )
+        assert "trg_planner_cache_recipes_update" in trigger_names
+        assert "trg_planner_cache_products_update" in trigger_names
 
 
 def test_everything_personal_is_handed_to_the_existing_user(tmp_path):
@@ -201,5 +212,8 @@ def test_a_fresh_database_is_stamped_at_head(tmp_path):
     init_db(engine)
 
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002_accounts"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004_planner_cache_revisions"
         assert conn.execute(text("SELECT COUNT(*) FROM users")).scalar() == 1
+        assert conn.execute(
+            text("SELECT COUNT(*) FROM recipe_cook_maps")
+        ).scalar() == 0

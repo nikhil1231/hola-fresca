@@ -21,6 +21,20 @@
   flex: 1;
 }
 
+.mapStatus {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+.mapFailure {
+  display: grid;
+  gap: 10px;
+  border-color: color-mix(in srgb, var(--mantine-color-orange-6) 35%, var(--hf-border));
+  background: var(--hf-surface);
+}
+
 .title {
   font-size: 1.05rem;
   line-height: 1.25;

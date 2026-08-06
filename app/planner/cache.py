@@ -1,45 +1,30 @@
-"""Process-wide cache of the planner index and everything derived from it.
-
-Building a :class:`~app.planner.index.PlanIndex` reads the whole mapping and the
-whole recipe library — several seconds against the real database — but nothing it
-reads changes between edits. Every browse request was paying for a snapshot
-identical to the one the previous request had just thrown away, and the browse
-page issues three such requests at once.
-
-The same argument applies twice over to what is computed *from* the index. A
-recipe's standalone price and its standing against a pinned week are fixed by the
-library, not by the request: filtering and paging change which of those figures
-are shown, never what any of them is. So they are computed once per edit and held
-here beside the index that produced them, and are dropped together with it.
-
-Staleness is decided by stat-ing the files the index is derived from rather than
-by calling ``invalidate()`` at each write site. The SQLite file is written by the
-scraper and the mapping CLI as well as by the API, and those writes have to count
-too; a stat costs microseconds, so it is affordable on the way in to every
-request. (There is no long-lived rollback journal in SQLite's default mode, so a
-commit always moves the main file's mtime.)
-"""
+"""Revision-aware, incrementally hydrated planner snapshots."""
 from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import config
 from app.planner.basket import Selection, score_basket
-from app.planner.index import DEFAULT_STATUSES, RETAILER, PlanIndex, load_index
+from app.planner.index import (
+    DEFAULT_STATUSES,
+    RETAILER,
+    PlanIndex,
+    PlannerCatalogue,
+    hydrate_recipes,
+    load_catalogue,
+)
 from app.planner.ranking import RankedCandidate, rank_candidates
 
 log = logging.getLogger(__name__)
 
-# How many pinned-week rankings to keep. Each is a few hundred kilobytes and the
-# week grows one recipe at a time, so a handful covers adding a recipe, changing
-# your mind, and going back — without holding every week ever planned.
 MAX_RANKINGS = 6
-
 _LOCK = threading.Lock()
 _CACHE: dict[tuple, "_Entry"] = {}
 
@@ -54,22 +39,21 @@ class StandalonePrice:
 
     @property
     def has_gap(self) -> bool:
-        """Something in this recipe cannot be priced, so its total understates."""
         return self.gap_count > 0
 
 
 @dataclass
 class _Entry:
-    fingerprint: tuple
+    signature: tuple[int, int, tuple]
+    catalogue: PlannerCatalogue
     index: PlanIndex
-    # Both keyed partly by the asking user's pack preferences — see
-    # _preferences_key. The index above is shared; these are not.
+    loaded_recipe_ids: set[int] = field(default_factory=set)
+    full_recipe_ids: set[int] | None = None
     standalone: dict[tuple, dict[int, StandalonePrice]] = field(default_factory=dict)
     rankings: dict[tuple, list[RankedCandidate]] = field(default_factory=dict)
 
 
 def _db_path(factory: sessionmaker[Session]) -> Path | None:
-    """The SQLite file a session factory is bound to, if it is one."""
     bind = getattr(factory, "kw", {}).get("bind")
     database = getattr(getattr(bind, "url", None), "database", None)
     return Path(database) if database else None
@@ -79,15 +63,63 @@ def _stat(path: Path | None) -> tuple:
     if path is None:
         return ()
     try:
-        st = path.stat()
+        value = path.stat()
     except OSError:
         return ()
-    return (st.st_mtime_ns, st.st_size)
+    return value.st_mtime_ns, value.st_size
 
 
-def _fingerprint(db: Path | None, csv_path: Path | None) -> tuple:
+def _signature(
+    factory: sessionmaker[Session], csv_path: Path | None
+) -> tuple[int, int, tuple] | None:
+    """Catalogue generations plus the one planner input outside SQLite."""
+    bind = getattr(factory, "kw", {}).get("bind")
+    if bind is None or _db_path(factory) is None:
+        return None
+    try:
+        with bind.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT recipe_revision, ingredient_revision "
+                    "FROM planner_cache_state WHERE id = 1"
+                )
+            ).one()
+    except Exception:
+        log.exception("planner cache revision state is unavailable; bypassing cache")
+        return None
     csv = csv_path or (config.DATA_DIR / "ingredient_frequency.csv")
-    return (_stat(db), _stat(csv))
+    return int(row[0]), int(row[1]), _stat(csv)
+
+
+def _cache_key(
+    factory: sessionmaker[Session],
+    statuses: tuple[str, ...],
+    retailer: str,
+    csv_path: Path | None,
+) -> tuple:
+    return (
+        str(_db_path(factory)),
+        statuses,
+        retailer,
+        str(csv_path) if csv_path else None,
+    )
+
+
+def _fresh_entry(
+    factory: sessionmaker[Session],
+    statuses: tuple[str, ...],
+    retailer: str,
+    csv_path: Path | None,
+    signature: tuple[int, int, tuple],
+) -> _Entry:
+    catalogue = load_catalogue(
+        factory, statuses=statuses, retailer=retailer, csv_path=csv_path
+    )
+    return _Entry(
+        signature=signature,
+        catalogue=catalogue,
+        index=PlanIndex(ingredients=catalogue.ingredients, statuses=statuses),
+    )
 
 
 def _entry(
@@ -95,120 +127,161 @@ def _entry(
     statuses: tuple[str, ...],
     retailer: str,
     csv_path: Path | None,
-) -> _Entry:
-    """The cache entry for this database, rebuilt if the files moved under it.
+) -> tuple[tuple, _Entry, bool]:
+    """Return a current base snapshot; expensive loading happens unlocked."""
+    key = _cache_key(factory, statuses, retailer, csv_path)
+    for attempt in range(2):
+        before = _signature(factory, csv_path)
+        if before is None:
+            catalogue = load_catalogue(
+                factory, statuses=statuses, retailer=retailer, csv_path=csv_path
+            )
+            transient = _Entry(
+                signature=(0, 0, ()),
+                catalogue=catalogue,
+                index=PlanIndex(ingredients=catalogue.ingredients, statuses=statuses),
+            )
+            return key, transient, False
 
-    Callers hold ``_LOCK``. Returning the entry rather than the index lets the
-    derived tables live and die with the snapshot they were computed from.
-    """
-    db = _db_path(factory)
-    # Keyed on the database's path, not the factory's identity: tests build a new
-    # factory per temp database, and a freed object's id can be handed straight
-    # back to its successor.
-    key = (str(db), statuses, retailer, str(csv_path) if csv_path else None)
-    before = _fingerprint(db, csv_path)
+        with _LOCK:
+            cached = _CACHE.get(key)
+            if cached is not None and cached.signature == before:
+                return key, cached, True
 
-    cached = _CACHE.get(key)
-    if cached is not None and cached.fingerprint == before and before[0]:
-        return cached
+            # A recipe-only edit does not make the 697-item ingredient catalogue
+            # or its pure covering results stale. Start a new recipe generation
+            # around those shared objects and discard recipe-derived data.
+            if (
+                cached is not None
+                and cached.signature[1:] == before[1:]
+                and cached.signature[0] != before[0]
+            ):
+                replacement = _Entry(
+                    signature=before,
+                    catalogue=cached.catalogue,
+                    index=PlanIndex(
+                        ingredients=cached.index.ingredients,
+                        statuses=statuses,
+                        cover_cache=cached.index.cover_cache,
+                    ),
+                )
+                _CACHE[key] = replacement
+                return key, replacement, True
 
-    index = load_index(
-        factory, statuses=statuses, retailer=retailer, csv_path=csv_path, curated_only=True
-    )
-    entry = _Entry(fingerprint=before, index=index)
+        built = _fresh_entry(factory, statuses, retailer, csv_path, before)
+        after = _signature(factory, csv_path)
+        if after != before:
+            if attempt == 0:
+                continue
+            log.warning("planner catalogue changed twice while its snapshot was loading")
+            return key, built, False
 
-    if not before[0]:
-        # Nothing to watch for staleness — an in-memory database, or a bind that
-        # is not a file. Serving a stale index would be unfixable, so this one is
-        # never cached.
-        return entry
+        with _LOCK:
+            current = _CACHE.get(key)
+            if current is not None and current.signature == before:
+                return key, current, True
+            _CACHE[key] = built
+            return key, built, True
 
-    # If the database moved while we were reading it, the snapshot may be torn
-    # across the write. Hand it back but do not cache it, so the next caller
-    # rebuilds against a settled file.
-    after = _fingerprint(db, csv_path)
-    if after == before:
-        _CACHE[key] = entry
-    else:
-        _CACHE.pop(key, None)
-        log.info("planner index: rebuilt during a write, not caching this snapshot")
-    return entry
+    raise AssertionError("unreachable")
+
+
+def _index_entry(
+    factory: sessionmaker[Session],
+    *,
+    recipe_ids: Collection[int] | None,
+    statuses: tuple[str, ...],
+    retailer: str,
+    csv_path: Path | None,
+) -> tuple[_Entry, bool]:
+    """Hydrate only the missing recipes, retrying one catalogue race."""
+    requested = None if recipe_ids is None else set(recipe_ids)
+    for attempt in range(2):
+        key, entry, cacheable = _entry(factory, statuses, retailer, csv_path)
+        with _LOCK:
+            if requested is None:
+                if entry.full_recipe_ids is not None:
+                    return entry, cacheable
+                missing: set[int] | None = None
+            else:
+                missing = requested - entry.loaded_recipe_ids
+                if not missing:
+                    return entry, cacheable
+
+        loaded = hydrate_recipes(
+            factory, entry.catalogue, recipe_ids=missing, curated_only=True
+        )
+        after = _signature(factory, csv_path)
+        stable = (
+            after is None
+            if entry.signature == (0, 0, ())
+            else after == entry.signature
+        )
+        if not stable:
+            if attempt == 0:
+                continue
+            log.warning("planner catalogue changed twice while recipes were hydrating")
+            latest = after or entry.signature
+            fallback = _fresh_entry(factory, statuses, retailer, csv_path, latest)
+            current = hydrate_recipes(
+                factory, fallback.catalogue, recipe_ids=requested, curated_only=True
+            )
+            fallback.index.recipes.update(current)
+            fallback.loaded_recipe_ids.update(requested or current)
+            if requested is None:
+                fallback.full_recipe_ids = set(current)
+            return fallback, False
+
+        with _LOCK:
+            target = entry
+            if cacheable:
+                current = _CACHE.get(key)
+                if current is not None and current.signature == entry.signature:
+                    target = current
+            if requested is None:
+                # Record the curated set separately. Explicit detail requests may
+                # also place non-curated recipes in the same targeted view, but a
+                # catalogue ranking must never treat those as candidates.
+                target.full_recipe_ids = set(loaded)
+                target.loaded_recipe_ids.update(loaded)
+            else:
+                target.loaded_recipe_ids.update(missing or ())
+            target.index.recipes.update(loaded)
+            return target, cacheable
+
+    raise AssertionError("unreachable")
 
 
 def get_index(
     factory: sessionmaker[Session],
     *,
+    recipe_ids: Collection[int] | None = None,
     statuses: tuple[str, ...] = DEFAULT_STATUSES,
     retailer: str = RETAILER,
     csv_path: Path | None = None,
 ) -> PlanIndex:
-    """The whole curated library's planner index, built at most once per edit.
-
-    Always the full library rather than a subset: loading the ingredient table
-    costs the same either way, so asking for twenty-four recipes was never
-    cheaper than asking for all of them — it just meant the answer could not be
-    reused.
-
-    The returned index is shared, and callers mutate its ``cover_cache``. That is
-    deliberate — the covering results are pure functions of the pack list, so a
-    racing duplicate computation is harmless and the shared cache is what makes
-    scoring the library cheap.
-    """
-    with _LOCK:
-        return _entry(factory, statuses, retailer, csv_path).index
+    """Return a shared index, hydrating one view or the full curated library."""
+    entry, _ = _index_entry(
+        factory,
+        recipe_ids=recipe_ids,
+        statuses=statuses,
+        retailer=retailer,
+        csv_path=csv_path,
+    )
+    return entry.index
 
 
 def note_pack_preference(factory: sessionmaker[Session]) -> None:
-    """Keep the cached index after a pack preference was just written.
-
-    Staleness is normally decided by stat-ing the database, which is right for
-    writes this process cannot see — but a preference it just made itself is not
-    one of those. Left to the stat, one click cost a full index rebuild and a
-    re-rank of the library: several seconds of staring at an unchanged page for a
-    write that does not change the index at all, since preferences moved off it
-    and onto the user. So the fingerprint is moved on and the index kept.
-
-    What *is* dropped is everything derived under the old preferences. They are
-    keyed by the preference map, so in principle only the writer's entries are
-    now wrong — but the map is the caller's to know, not this module's, and these
-    are cheap to recompute lazily and expensive to get subtly wrong.
-    """
-    db = _db_path(factory)
+    """Prune only results derived from the changed user's pack preferences."""
+    db = str(_db_path(factory))
     with _LOCK:
-        for key, entry in list(_CACHE.items()):
-            if key[0] != str(db):
-                continue
-            entry.standalone.clear()
-            entry.rankings.clear()
-            entry.fingerprint = _fingerprint(db, Path(key[3]) if key[3] else None)
-
-
-def note_personal_recipe_metadata(factory: sessionmaker[Session]) -> None:
-    """Keep planner caches after a rating or wishlist write.
-
-    Ratings and wishlist membership live in the same SQLite file as the shared
-    catalogue, so committing either moves the file's mtime. Neither value is an
-    input to the planner index, standalone prices or suggestion rankings,
-    though, and treating that mtime change as a catalogue edit makes the detail
-    response rebuild the whole index for no reason.
-    """
-    db = _db_path(factory)
-    with _LOCK:
-        for key, entry in list(_CACHE.items()):
-            if key[0] != str(db):
-                continue
-            entry.fingerprint = _fingerprint(db, Path(key[3]) if key[3] else None)
+        for key, entry in _CACHE.items():
+            if key[0] == db:
+                entry.standalone.clear()
+                entry.rankings.clear()
 
 
 def _preferences_key(pack_preferences: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
-    """A hashable, order-independent identity for one user's standing packs.
-
-    The index is shared but everything scored from it is not: two users who buy
-    rice in different bags get different prices for the same recipe. So the
-    preference map joins the key of every derived table rather than the entries
-    being per-user, which keeps the common case — identical (usually empty)
-    preferences — sharing one entry instead of one per account.
-    """
     return tuple(sorted((pack_preferences or {}).items()))
 
 
@@ -216,39 +289,48 @@ def get_standalone_prices(
     factory: sessionmaker[Session],
     *,
     servings: int,
+    recipe_ids: Collection[int] | None = None,
     statuses: tuple[str, ...] = DEFAULT_STATUSES,
     retailer: str = RETAILER,
     csv_path: Path | None = None,
     pack_preferences: dict[str, str] | None = None,
 ) -> dict[int, StandalonePrice]:
-    """Every curated recipe's own price, priced once per edit.
-
-    Sorting the library by price needs all of these before it can show the first
-    twenty-four, which is why that sort used to cost seconds a page. Computed in
-    one pass over a warm cover cache, the whole table is cheaper than the index
-    load that precedes it.
-    """
+    """Price requested recipes, reusing every individual price already known."""
+    requested = None if recipe_ids is None else set(recipe_ids)
+    entry, cacheable = _index_entry(
+        factory,
+        recipe_ids=requested,
+        statuses=statuses,
+        retailer=retailer,
+        csv_path=csv_path,
+    )
+    ids = set(entry.full_recipe_ids or ()) if requested is None else requested
+    ids.intersection_update(entry.index.recipes)
     prefs = pack_preferences or {}
+    key = servings, _preferences_key(prefs)
     with _LOCK:
-        entry = _entry(factory, statuses, retailer, csv_path)
-        key = (servings, _preferences_key(prefs))
-        table = entry.standalone.get(key)
-        if table is None:
-            index = entry.index
-            table = {}
-            for recipe_id in index.recipes:
-                scored = score_basket(
-                    index,
-                    [Selection(recipe_id=recipe_id, servings=servings)],
-                    pack_preferences=prefs,
-                )
-                table[recipe_id] = StandalonePrice(
-                    score=scored.score,
-                    consumed_cost=scored.consumed_cost,
-                    gap_count=scored.gap_count,
-                )
-            entry.standalone[key] = table
-        return table
+        table = entry.standalone.setdefault(key, {})
+        missing = ids - table.keys()
+    computed: dict[int, StandalonePrice] = {}
+    for recipe_id in missing:
+        scored = score_basket(
+            entry.index,
+            [Selection(recipe_id=recipe_id, servings=servings)],
+            pack_preferences=prefs,
+        )
+        computed[recipe_id] = StandalonePrice(
+            score=scored.score,
+            consumed_cost=scored.consumed_cost,
+            gap_count=scored.gap_count,
+        )
+    if computed:
+        stable = cacheable and _signature(factory, csv_path) == entry.signature
+        if stable:
+            with _LOCK:
+                table.update(computed)
+        else:
+            table = {**table, **computed}
+    return {recipe_id: table[recipe_id] for recipe_id in ids if recipe_id in table}
 
 
 def get_ranking(
@@ -261,30 +343,37 @@ def get_ranking(
     csv_path: Path | None = None,
     pack_preferences: dict[str, str] | None = None,
 ) -> list[RankedCandidate]:
-    """The whole library ranked against a pinned week, best fit first.
-
-    Ranked over every curated recipe rather than over the filtered subset,
-    because the ranking does not depend on the filters — so narrowing by cuisine,
-    or turning to page two, reuses this instead of recomputing it. It does depend
-    on who is asking, though, hence ``pack_preferences`` in the key.
-    """
+    """Rank the deliberately full curated library against a pinned week."""
+    entry, cacheable = _index_entry(
+        factory,
+        recipe_ids=None,
+        statuses=statuses,
+        retailer=retailer,
+        csv_path=csv_path,
+    )
     prefs = pack_preferences or {}
     pinned_key = tuple(sorted((s.recipe_id, s.servings) for s in pinned))
+    key = pinned_key, candidate_portions, _preferences_key(prefs)
     with _LOCK:
-        entry = _entry(factory, statuses, retailer, csv_path)
-        key = (pinned_key, candidate_portions, _preferences_key(prefs))
-        ranked = entry.rankings.get(key)
-        if ranked is None:
-            pinned_ids = {s.recipe_id for s in pinned}
-            candidate_ids = [r for r in entry.index.recipes if r not in pinned_ids]
-            ranked = rank_candidates(
-                entry.index,
-                pinned,
-                candidate_ids,
-                candidate_portions=candidate_portions,
-                pack_preferences=prefs,
-            )
+        cached = entry.rankings.get(key)
+    if cached is not None:
+        return cached
+    pinned_ids = {selection.recipe_id for selection in pinned}
+    candidate_ids = [
+        recipe_id
+        for recipe_id in (entry.full_recipe_ids or ())
+        if recipe_id not in pinned_ids
+    ]
+    ranked = rank_candidates(
+        entry.index,
+        pinned,
+        candidate_ids,
+        candidate_portions=candidate_portions,
+        pack_preferences=prefs,
+    )
+    if cacheable and _signature(factory, csv_path) == entry.signature:
+        with _LOCK:
             entry.rankings[key] = ranked
             while len(entry.rankings) > MAX_RANKINGS:
                 entry.rankings.pop(next(iter(entry.rankings)))
-        return ranked
+    return ranked

@@ -33,6 +33,7 @@ HELLOFRESH_IMAGE_BASE = "https://img.hellofresh.com/hellofresh_s3"
 # a different id can be used without a code change.
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENAI_MODEL = os.environ.get("HOLAFRESCA_OPENAI_MODEL", "gpt-5.6-luna")
+COOK_MAP_MODEL = os.environ.get("HOLAFRESCA_COOK_MAP_MODEL", OPENAI_MODEL)
 # The recipe audit asks one narrow question — per-100g composition for a short
 # ingredient list — and does the arithmetic itself, so a small model is enough.
 AUDIT_MODEL = os.environ.get("HOLAFRESCA_AUDIT_MODEL", "gpt-5.4-mini")

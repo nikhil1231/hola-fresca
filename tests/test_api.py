@@ -6,16 +6,20 @@ it. No network and no dependency on the real catalogue.
 """
 from __future__ import annotations
 
+import json
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
+from app.api import recipes as recipes_api
+from app import cook_map as cook_map_mod
 from app.db.models import (
     Recipe,
     RecipeAllergen,
     RecipeCuisine,
     RecipeIngredient,
     RecipeNutrition,
+    RecipeCookMap,
     RecipeStep,
     RecipeTag,
 )
@@ -172,6 +176,71 @@ def test_list_returns_only_curated(client):
     assert data["total"] == 3
     names = {i["name"] for i in data["items"]}
     assert "Hidden" not in names
+
+
+def test_cook_map_start_poll_and_retry(client, monkeypatch):
+    rid = client.get("/api/recipes", params={"q": "creamy"}).json()["items"][0]["id"]
+    calls = []
+
+    def complete_immediately(session, factory, recipe, *, force=False, completer_factory=None):
+        calls.append(force)
+        ingredient_id = sorted(recipe.ingredients, key=lambda line: line.id)[0].id
+        graph = {
+            "columns": 4,
+            "row_count": 1,
+            "lanes": [{"id": "pan", "name": "Pan"}],
+            "nodes": [{
+                "id": "boil",
+                "ref": "1a",
+                "source_step_index": 1,
+                "lane_id": "pan",
+                "title": "Boil pasta",
+                "detail": "Boil the pasta.",
+                "kind": "active",
+                "duration_seconds": None,
+                "ingredient_ids": [ingredient_id],
+                "row": 0,
+                "col": 0,
+                "collapsed": False,
+                "chip_index": 0,
+            }],
+            "edges": [],
+        }
+        row = session.get(RecipeCookMap, recipe.id)
+        if row is None:
+            row = RecipeCookMap(
+                recipe_id=recipe.id,
+                source_fingerprint=cook_map_mod.source_fingerprint(recipe),
+            )
+            session.add(row)
+        row.status = "ready"
+        row.schema_version = cook_map_mod.SCHEMA_VERSION
+        row.prompt_version = cook_map_mod.PROMPT_VERSION
+        row.model = "fake-map-model"
+        row.graph_json = json.dumps(graph)
+        session.commit()
+        return row, True
+
+    monkeypatch.setattr(cook_map_mod, "ensure_background", complete_immediately)
+
+    started = client.post(f"/api/recipes/{rid}/cook-map")
+    assert started.status_code == 200
+    assert started.json()["status"] == "ready"
+    assert started.json()["graph"]["nodes"][0]["image_url"].endswith("/steps/boil-pasta.jpg")
+
+    polled = client.get(f"/api/recipes/{rid}/cook-map")
+    assert polled.status_code == 200
+    assert polled.json()["graph"]["nodes"][0]["ingredient_ids"]
+
+    retried = client.post(f"/api/recipes/{rid}/cook-map/retry")
+    assert retried.status_code == 200
+    assert calls == [False, True]
+
+
+def test_cook_map_rejects_unknown_recipe(client):
+    assert client.post("/api/recipes/999/cook-map").status_code == 404
+    assert client.get("/api/recipes/999/cook-map").status_code == 404
+    assert client.post("/api/recipes/999/cook-map/retry").status_code == 404
 
 
 def test_hide_recipe_takes_it_off_this_users_browse(client):
@@ -423,6 +492,52 @@ def test_personal_recipe_metadata_write_keeps_cached_planner_index(
 
     assert response.status_code == 200
     assert get_index(factory, csv_path=csv_path) is before, "kept, not rebuilt"
+
+
+def test_recipe_scoped_endpoints_request_only_their_recipe(client, monkeypatch):
+    rid = client.get("/api/recipes", params={"page_size": 1}).json()["items"][0]["id"]
+    requested = []
+    real_get_index = recipes_api.get_index
+
+    def tracked_get_index(*args, **kwargs):
+        requested.append(kwargs.get("recipe_ids"))
+        return real_get_index(*args, **kwargs)
+
+    monkeypatch.setattr(recipes_api, "get_index", tracked_get_index)
+
+    assert client.get(f"/api/recipes/{rid}").status_code == 200
+    # A recipe without a recognised protein may reject the hypothetical, but it
+    # still has to build precisely the same one-recipe planner view to decide.
+    assert client.post(
+        f"/api/recipes/{rid}/protein/preview", json={"scale": 2}
+    ).status_code in {200, 400}
+    assert client.get(
+        f"/api/recipes/{rid}/cook-map", params={"scale": 2}
+    ).status_code == 200
+
+    assert requested == [[rid], [rid], [rid]]
+
+
+def test_browse_prices_the_page_but_price_sort_prices_candidates(client, monkeypatch):
+    requested: list[set[int]] = []
+    real_prices = recipes_api.get_standalone_prices
+
+    def tracked_prices(*args, **kwargs):
+        requested.append(set(kwargs["recipe_ids"]))
+        return real_prices(*args, **kwargs)
+
+    monkeypatch.setattr(recipes_api, "get_standalone_prices", tracked_prices)
+
+    page = client.get("/api/recipes", params={"page_size": 1})
+    assert page.status_code == 200
+    candidates = client.get(
+        "/api/recipes", params={"page_size": 1, "sort": "price_low"}
+    )
+    assert candidates.status_code == 200
+
+    assert len(requested[0]) == 1
+    assert len(requested[1]) == candidates.json()["total"]
+    assert len(requested[1]) > len(requested[0])
 
 
 def test_personal_rating_filter_returns_only_rated(client):

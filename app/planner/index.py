@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -174,6 +175,18 @@ class PlanIndex:
 
     def ingredient(self, key: str) -> Ingredient | None:
         return self.ingredients.get(key)
+
+
+@dataclass(frozen=True, slots=True)
+class PlannerCatalogue:
+    """Ingredient-side state shared by every targeted recipe view."""
+
+    ingredients: dict[str, Ingredient]
+    roots: dict[str, str]
+    each_by_key: dict[str, float]
+    unit_kind_by_key: dict[str, str]
+    sid_index: dict[str, str]
+    statuses: tuple[str, ...]
 
 
 def resolve_protein(
@@ -633,6 +646,51 @@ def _load_recipes(
     return recipes
 
 
+def load_catalogue(
+    session_factory: sessionmaker[Session],
+    *,
+    statuses: tuple[str, ...] = DEFAULT_STATUSES,
+    retailer: str = RETAILER,
+    csv_path: Path | None = None,
+) -> PlannerCatalogue:
+    """Load the ingredient/product half of the planner snapshot once."""
+    sid_index = load_source_id_index(csv_path)
+    recipe_pct = load_recipe_pct_index(csv_path)
+    with session_factory() as session:
+        ingredients, roots, each_by_key, unit_kind_by_key = _load_ingredients(
+            session, statuses, retailer, recipe_pct
+        )
+    return PlannerCatalogue(
+        ingredients=ingredients,
+        roots=roots,
+        each_by_key=each_by_key,
+        unit_kind_by_key=unit_kind_by_key,
+        sid_index=sid_index,
+        statuses=statuses,
+    )
+
+
+def hydrate_recipes(
+    session_factory: sessionmaker[Session],
+    catalogue: PlannerCatalogue,
+    *,
+    recipe_ids: Collection[int] | None,
+    curated_only: bool = True,
+) -> dict[int, PlanRecipe]:
+    """Hydrate requested recipe graphs against an already-loaded catalogue."""
+    requested = None if recipe_ids is None else list(dict.fromkeys(recipe_ids))
+    with session_factory() as session:
+        return _load_recipes(
+            session,
+            roots=catalogue.roots,
+            each_by_key=catalogue.each_by_key,
+            unit_kind_by_key=catalogue.unit_kind_by_key,
+            sid_index=catalogue.sid_index,
+            recipe_ids=requested,
+            curated_only=curated_only,
+        )
+
+
 def load_index(
     session_factory: sessionmaker[Session],
     *,
@@ -643,27 +701,20 @@ def load_index(
     csv_path: Path | None = None,
 ) -> PlanIndex:
     """Read the mapping and recipe library into a self-contained planner index."""
-    sid_index = load_source_id_index(csv_path)
-    recipe_pct = load_recipe_pct_index(csv_path)
-    with session_factory() as session:
-        ingredients, roots, each_by_key, unit_kind_by_key = _load_ingredients(
-            session, statuses, retailer, recipe_pct
-        )
-        recipes = _load_recipes(
-            session,
-            roots=roots,
-            each_by_key=each_by_key,
-            unit_kind_by_key=unit_kind_by_key,
-            sid_index=sid_index,
-            recipe_ids=recipe_ids,
-            curated_only=curated_only,
-        )
-    shoppable = sum(1 for i in ingredients.values() if i.shoppable)
+    catalogue = load_catalogue(
+        session_factory, statuses=statuses, retailer=retailer, csv_path=csv_path
+    )
+    recipes = hydrate_recipes(
+        session_factory, catalogue, recipe_ids=recipe_ids, curated_only=curated_only
+    )
+    shoppable = sum(1 for i in catalogue.ingredients.values() if i.shoppable)
     log.info(
         "planner index: %d recipes, %d ingredients (%d shoppable, %d staples)",
         len(recipes),
-        len(ingredients),
+        len(catalogue.ingredients),
         shoppable,
-        sum(1 for i in ingredients.values() if i.pantry_staple),
+        sum(1 for i in catalogue.ingredients.values() if i.pantry_staple),
     )
-    return PlanIndex(ingredients=ingredients, recipes=recipes, statuses=statuses)
+    return PlanIndex(
+        ingredients=catalogue.ingredients, recipes=recipes, statuses=statuses
+    )

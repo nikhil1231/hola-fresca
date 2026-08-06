@@ -252,12 +252,8 @@ def _load_planner_index(
     recipe_ids: list[int],
     csv_path: Path | None,
 ) -> PlanIndex:
-    """The shared curated index; ``recipe_ids`` is only ever a subset of it.
-
-    Every recipe id reaching this module has been through ``_require_curated`` or
-    ``_apply_filters``, both of which insist on the curated library.
-    """
-    return get_index(factory, csv_path=csv_path)
+    """Hydrate exactly the recipes the basket is about to use."""
+    return get_index(factory, recipe_ids=recipe_ids, csv_path=csv_path)
 
 
 @router.post("/basket", response_model=BasketOut)
