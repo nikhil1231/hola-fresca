@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    DDL,
     Float,
     ForeignKey,
     Index,
@@ -29,10 +30,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.planner_revision import create_trigger_statements
 
 
 def _utcnow() -> datetime:
@@ -62,8 +65,18 @@ class User(Base):
     # Catalogue writes — mapping review, manual products, the recipe audit,
     # curation — are admin-only, because they change what everyone else sees.
     is_admin: Mapped[bool] = mapped_column(Integer, default=0)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PlannerCacheState(Base):
+    """Singleton generations for the two halves of the planner snapshot."""
+
+    __tablename__ = "planner_cache_state"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_planner_cache_state_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    recipe_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    ingredient_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class ScrapeState(Base):
@@ -225,6 +238,34 @@ class Recipe(Base):
     wishlist_entries: Mapped[list["PersonalRecipeWishlist"]] = relationship(
         back_populates="recipe", cascade="all, delete-orphan"
     )
+    cook_map: Mapped["RecipeCookMap | None"] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class RecipeCookMap(Base):
+    """One cached, shared cooking graph for a canonical recipe."""
+
+    __tablename__ = "recipe_cook_maps"
+
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), primary_key=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default="processing", index=True)
+    graph_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    generation_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    recipe: Mapped[Recipe] = relationship(back_populates="cook_map")
 
 
 class PersonalRecipeRating(Base):
@@ -917,3 +958,10 @@ class IngredientMappingProduct(Base):
 
     mapping: Mapped[IngredientMapping] = relationship(back_populates="products")
     product: Mapped[Product | None] = relationship()
+
+
+# ``create_all`` is the fresh-database path and therefore never executes the
+# Alembic migration that installs these triggers.  Register the same DDL on the
+# metadata so fresh and upgraded databases have identical cache semantics.
+for _planner_revision_ddl in create_trigger_statements():
+    event.listen(Base.metadata, "after_create", DDL(_planner_revision_ddl))

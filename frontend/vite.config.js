@@ -8,9 +8,8 @@ import react from '@vitejs/plugin-react'
 const frontendRoot = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(frontendRoot, '..')
 
-// The backend port is overridable via VITE_API_TARGET so the dev server can
-// point at a non-default port when 8000 is taken.
-const apiTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:8000'
+// Keep the development proxy aligned with run.py's default backend port.
+const apiTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:8101'
 
 const sharedPageFiles = [
   'frontend/src/App.jsx',
@@ -146,6 +145,7 @@ export default defineConfig({
   },
   plugins: [react()],
   server: {
+    host: '0.0.0.0',
     proxy: {
       '/api': apiTarget,
     },

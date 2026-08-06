@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 
 import {
   fetchAuditJob,
+  fetchCookMap,
   fetchFacets,
   fetchPlannerBasket,
   fetchPlannerSuggestions,
@@ -12,9 +13,11 @@ import {
   flagRecipe,
   hideRecipe,
   revertRecipeEdits,
+  retryCookMap,
   setPackPreference,
   setPersonalRecipeRating,
   setRecipeWishlist,
+  startCookMap,
 } from '../api/client.js'
 
 const PAGE_SIZE = 24
@@ -99,6 +102,45 @@ export function useRecipe(id) {
     queryFn: () => fetchRecipe(id),
     enabled: id != null,
   })
+}
+
+export function useCookMap(id, modifier) {
+  const qc = useQueryClient()
+  const start = useQuery({
+    queryKey: ['cook-map-start', id],
+    queryFn: () => startCookMap(id),
+    enabled: id != null,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  })
+  const poll = useQuery({
+    queryKey: ['cook-map', id, modifier],
+    queryFn: () => fetchCookMap(id, modifier),
+    enabled: id != null && start.isSuccess,
+    refetchInterval: (query) => (
+      query.state.data?.status === 'processing' ? 1000 : false
+    ),
+  })
+  const retry = useMutation({
+    mutationFn: () => retryCookMap(id),
+    onSuccess: (data) => {
+      qc.setQueryData(['cook-map-start', id], data)
+      qc.setQueryData(['cook-map', id, modifier], data)
+      qc.invalidateQueries({ queryKey: ['cook-map', id] })
+    },
+  })
+  const current = (
+    poll.isFetching && start.data?.status === 'processing'
+      ? start.data
+      : poll.data ?? start.data
+  )
+  return {
+    data: current,
+    status: current?.status ?? (start.isError ? 'failed' : 'processing'),
+    error: retry.error?.message ?? current?.error ?? start.error?.message ?? poll.error?.message,
+    retry: () => retry.mutateAsync(),
+    retrying: retry.isPending,
+  }
 }
 
 // The recipe rewritten for a protein modifier. Only asked for when there is a

@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api import planner as planner_api
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
 from app.db.models import Recipe, RecipeIngredient
 from app.db.session import init_db, make_engine, make_session_factory
@@ -26,6 +27,19 @@ SID_MYSTERY = "sid-mystery"
 SID_SAFFRON = "sid-saffron"
 SID_BEANS = "sid-beans"
 SID_MACARONI = "sid-macaroni"
+
+
+def test_planner_index_loader_honours_recipe_subset(monkeypatch):
+    requested = []
+    sentinel = object()
+
+    def get_index(*args, **kwargs):
+        requested.append(kwargs["recipe_ids"])
+        return sentinel
+
+    monkeypatch.setattr(planner_api, "get_index", get_index)
+    assert planner_api._load_planner_index(object(), [11, 22], None) is sentinel
+    assert requested == [[11, 22]]
 
 
 def _recipe(name: str, ingredients: list[RecipeIngredient], *, curated: int = 1) -> Recipe:

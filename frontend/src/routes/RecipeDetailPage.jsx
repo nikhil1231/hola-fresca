@@ -840,6 +840,7 @@ export default function RecipeDetailPage() {
   const [ingredientsExpanded, setIngredientsExpanded] = useState(false)
   const [methodOpen, setMethodOpen] = useState(false)
   const [adjustmentsOpen, setAdjustmentsOpen] = useState(false)
+  const [settledHeroUrl, setSettledHeroUrl] = useState(null)
   const {
     upcomingWeekStart,
     getWeekRecipes,
@@ -911,7 +912,8 @@ export default function RecipeDetailPage() {
   const personalRating = usePersonalRecipeRating(id)
   const wishlist = useRecipeWishlist(id)
   const hideRecipe = useHideRecipe(id)
-  usePreloadStepImages(recipe?.steps)
+  const heroUrl = recipe?.image_url || RECIPE_PLACEHOLDER_IMAGE
+  usePreloadStepImages(recipe?.steps, { enabled: settledHeroUrl === heroUrl })
 
   if (isLoading) {
     return (
@@ -992,11 +994,14 @@ export default function RecipeDetailPage() {
     <main className={classes.detailPage}>
       <section className={classes.heroShell}>
         <Image
-          src={recipe.image_url || RECIPE_PLACEHOLDER_IMAGE}
+          src={heroUrl}
           fallbackSrc={RECIPE_PLACEHOLDER_IMAGE}
           alt={recipe.name}
           className={classes.hero}
           loading="eager"
+          fetchPriority="high"
+          onLoad={() => setSettledHeroUrl(heroUrl)}
+          onError={() => setSettledHeroUrl(heroUrl)}
         />
         <div className={classes.heroOverlay} />
         <div className={classes.heroTopControls}>

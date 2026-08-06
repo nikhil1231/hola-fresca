@@ -95,6 +95,24 @@ export function fetchRecipe(id) {
   return getJSON(`/api/recipes/${id}`)
 }
 
+export function startCookMap(id) {
+  return postJSON(`/api/recipes/${id}/cook-map`, {})
+}
+
+export function fetchCookMap(id, modifier) {
+  const params = new URLSearchParams()
+  for (const key of ['swap_to', 'scale', 'target_mode', 'target_value']) {
+    const value = modifier?.[key]
+    if (value != null && value !== '') params.set(key, String(value))
+  }
+  const query = params.size ? `?${params.toString()}` : ''
+  return getJSON(`/api/recipes/${id}/cook-map${query}`)
+}
+
+export function retryCookMap(id) {
+  return postJSON(`/api/recipes/${id}/cook-map/retry`, {})
+}
+
 // The recipe as it would be with a protein swap/scale applied. A POST that
 // writes nothing: the body describes a hypothetical, and the recipe is untouched.
 export function fetchProteinPreview(id, modifier) {

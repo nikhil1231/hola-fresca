@@ -4,6 +4,7 @@ Every endpoint is scoped to the curated active library (``Recipe.curated == 1``)
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 
@@ -23,6 +24,8 @@ from app.api.deps import (
 )
 from app.api.schemas import (
     AuditJobOut,
+    CookMapGraphOut,
+    CookMapOut,
     FacetCount,
     FacetsOut,
     IngredientOut,
@@ -49,11 +52,12 @@ from app.db.models import (
     RecipeAllergen,
     RecipeCuisine,
     RecipeIngredient,
+    RecipeCookMap,
     RecipeTag,
     User,
     UserRecipeHide,
 )
-from app import classify, measures
+from app import classify, cook_map as cook_map_mod, measures
 from app import protein as protein_mod
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
@@ -460,7 +464,11 @@ def _intrinsic_prices(
     if not recipe_ids:
         return {}
     prices = get_standalone_prices(
-        factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path, retailer=retailer
+        factory,
+        servings=INTRINSIC_PORTIONS,
+        recipe_ids=recipe_ids,
+        csv_path=csv_path,
+        retailer=retailer,
     )
     return {
         recipe_id: (
@@ -489,7 +497,11 @@ def _recipe_ids_with_pricing_gaps(
     if not recipe_ids:
         return set()
     prices = get_standalone_prices(
-        factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path, retailer=retailer
+        factory,
+        servings=INTRINSIC_PORTIONS,
+        recipe_ids=recipe_ids,
+        csv_path=csv_path,
+        retailer=retailer,
     )
     return {
         recipe_id
@@ -511,47 +523,32 @@ def _alias_roots(rows: list[IngredientMapping]) -> dict[str, str]:
     return roots
 
 
-def _ingredient_keys(
+def _ingredient_mapping_state(
     session: Session,
     ingredients: list[RecipeIngredient],
     csv_path: Path | None,
     retailer: str = DEFAULT_RETAILER,
-) -> dict[int, str]:
+) -> tuple[dict[int, str], set[int]]:
+    """Resolve canonical keys and mapping status with one catalogue query."""
     sid_index = load_source_id_index(csv_path)
     mapping_rows = list(
         session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == retailer))
     )
     roots = _alias_roots(mapping_rows)
+    by_key = {row.ingredient_key: row for row in mapping_rows}
     keys: dict[int, str] = {}
+    unmapped: set[int] = set()
     for ingredient in ingredients:
         if not _has_display_quantity(ingredient):
             continue
         raw_key = sid_index.get(ingredient.source_ingredient_id or "")
         if raw_key is not None:
             keys[ingredient.id] = roots.get(raw_key, raw_key)
-    return keys
-
-
-def _unmapped_ingredient_ids(
-    session: Session,
-    ingredients: list[RecipeIngredient],
-    csv_path: Path | None,
-    retailer: str = DEFAULT_RETAILER,
-) -> set[int]:
-    ingredient_keys = _ingredient_keys(session, ingredients, csv_path, retailer)
-    mapping_rows = list(
-        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == retailer))
-    )
-    by_key = {row.ingredient_key: row for row in mapping_rows}
-    unmapped: set[int] = set()
-    for ingredient in ingredients:
-        if not _has_display_quantity(ingredient):
-            continue
-        key = ingredient_keys.get(ingredient.id)
+        key = keys.get(ingredient.id)
         row = by_key.get(key) if key else None
         if row is None or row.status != "approved":
             unmapped.add(ingredient.id)
-    return unmapped
+    return keys, unmapped
 
 
 def _has_display_quantity(ingredient: RecipeIngredient) -> bool:
@@ -736,6 +733,104 @@ def list_recipes(
     )
 
 
+def _cook_map_out(
+    row: RecipeCookMap | None,
+    recipe: Recipe,
+    *,
+    resolution: protein_mod.Resolution | None = None,
+) -> CookMapOut:
+    if row is None or (
+        row.source_fingerprint != cook_map_mod.source_fingerprint(recipe)
+        or row.schema_version != cook_map_mod.SCHEMA_VERSION
+        or row.prompt_version != cook_map_mod.PROMPT_VERSION
+    ):
+        return CookMapOut(status="not_started")
+
+    graph = None
+    error = row.error_message
+    status = row.status
+    if row.status == "ready" and row.graph_json:
+        try:
+            payload = json.loads(row.graph_json)
+            images = {
+                step.index: image_url(step.image_path, 1200)
+                for step in recipe.steps
+            }
+            for node in payload.get("nodes", []):
+                node["image_url"] = images.get(node.get("source_step_index"))
+                if resolution is not None:
+                    node["title"] = protein_mod.rewrite_text(node.get("title"), resolution)
+                    node["detail"] = protein_mod.rewrite_text(node.get("detail"), resolution)
+            graph = CookMapGraphOut(**payload)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            status = "failed"
+            error = f"Stored cook map is invalid: {exc}"
+    return CookMapOut(
+        status=status,
+        source_fingerprint=row.source_fingerprint,
+        schema_version=row.schema_version,
+        prompt_version=row.prompt_version,
+        model=row.model,
+        error=error,
+        graph=graph,
+    )
+
+
+@router.post("/recipes/{recipe_id}/cook-map", response_model=CookMapOut)
+def start_cook_map(
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    _user: User = Depends(get_current_user),
+) -> CookMapOut:
+    """Start first-cook extraction without delaying the linear cook screen."""
+    recipe = _require_library_recipe(session, recipe_id)
+    row, _started = cook_map_mod.ensure_background(session, factory, recipe)
+    return _cook_map_out(row, recipe)
+
+
+@router.get("/recipes/{recipe_id}/cook-map", response_model=CookMapOut)
+def get_cook_map(
+    recipe_id: int,
+    modifier: ProteinPreviewIn = Depends(),
+    session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    csv_path: Path | None = Depends(get_planner_csv_path),
+    _user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
+) -> CookMapOut:
+    recipe = _require_library_recipe(session, recipe_id)
+    row = session.get(RecipeCookMap, recipe_id)
+    resolution = None
+    if any(
+        value is not None
+        for value in (
+            modifier.swap_to,
+            modifier.scale,
+            modifier.target_mode,
+            modifier.target_value,
+        )
+    ):
+        _index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path, retailer)
+        if plan_recipe is not None and plan_recipe.protein is not None:
+            resolution = resolve_protein(plan_recipe, modifier.to_domain())
+    return _cook_map_out(row, recipe, resolution=resolution)
+
+
+@router.post("/recipes/{recipe_id}/cook-map/retry", response_model=CookMapOut)
+def retry_cook_map(
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    _user: User = Depends(get_current_user),
+) -> CookMapOut:
+    recipe = _require_library_recipe(session, recipe_id)
+    row, _started = cook_map_mod.ensure_background(
+        session, factory, recipe, force=True
+    )
+    return _cook_map_out(row, recipe)
+
+
 @router.get("/recipes/{recipe_id}", response_model=RecipeDetail)
 def get_recipe(
     recipe_id: int,
@@ -756,8 +851,7 @@ def get_recipe(
         )
         if _has_display_quantity(ingredient)
     ]
-    ingredient_keys = _ingredient_keys(session, ingredients, csv_path, retailer)
-    unmapped_ingredient_ids = _unmapped_ingredient_ids(
+    ingredient_keys, unmapped_ingredient_ids = _ingredient_mapping_state(
         session, ingredients, csv_path, retailer
     )
     index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path, retailer)
@@ -789,6 +883,7 @@ def get_recipe(
         allergens=[a.name for a in recipe.allergens],
         ingredients=[
             IngredientOut(
+                recipe_ingredient_id=i.id,
                 ingredient_key=ingredient_keys.get(i.id),
                 name=i.name,
                 amount=i.amount,
@@ -846,7 +941,9 @@ def _plan_recipe(
     csv_path: Path | None,
     retailer: str = DEFAULT_RETAILER,
 ) -> tuple[PlanIndex, PlanRecipe | None]:
-    index = get_index(factory, csv_path=csv_path, retailer=retailer)
+    index = get_index(
+        factory, recipe_ids=[recipe_id], csv_path=csv_path, retailer=retailer
+    )
     return index, index.recipes.get(recipe_id)
 
 
@@ -983,8 +1080,7 @@ def preview_protein(
         )
         if _has_display_quantity(ingredient)
     ]
-    ingredient_keys = _ingredient_keys(session, ingredients, csv_path, retailer)
-    unmapped_ingredient_ids = _unmapped_ingredient_ids(
+    ingredient_keys, unmapped_ingredient_ids = _ingredient_mapping_state(
         session, ingredients, csv_path, retailer
     )
     companions = protein_mod.companion_swaps(list(ingredient_keys.values()), resolution)
@@ -1019,6 +1115,7 @@ def preview_protein(
         names_after.append(name)
         out_ingredients.append(
             IngredientOut(
+                recipe_ingredient_id=line.id,
                 ingredient_key=new_key,
                 name=name,
                 amount=amount,

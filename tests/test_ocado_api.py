@@ -139,6 +139,22 @@ def test_plan_exposes_checkout_items_and_accepts_an_empty_week(client, monkeypat
     ]
 
 
+def test_ocado_rebuild_honours_recipe_subset(monkeypatch):
+    requested = []
+    index = SimpleNamespace()
+    basket = Basket()
+
+    def load_index(_factory, recipe_ids, _csv_path, retailer):
+        requested.append((recipe_ids, retailer))
+        return index
+
+    monkeypatch.setattr(ocado_api, "_load_planner_index", load_index)
+    monkeypatch.setattr(ocado_api, "build_basket", lambda *args, **kwargs: basket)
+
+    assert ocado_api._rebuild(object(), [31, 32], None, []) == (index, basket)
+    assert requested == [([31, 32], ocado_api.RETAILER)]
+
+
 def test_reserve_passes_the_slot_through(client):
     response = client.post("/api/ocado/slots/reserve", json={"slot_id": "slot-9"})
 
