@@ -33,6 +33,26 @@ through it, so adding sign-in is a change to that one function. Catalogue writes
 (mapping review, manual products, the recipe audit) are already marked
 `require_admin`.
 
+## The Ocado auth heartbeat
+
+`app.ocado.heartbeat` re-checks each Ocado session roughly daily — jittered,
+staggered across accounts, and confined to waking hours. It stops at the silent
+refresh (`allow_login=False`), so it can never send anyone a one-time code.
+
+It runs in the server process rather than as a systemd timer beside the backup
+job, and that is not incidental: the cookie jar and the browser profile are owned
+by the process, so a second writer would refresh `session.json` underneath the
+running server, which would then overwrite it from memory.
+
+Every rung the ladder walks is recorded in `ocado_auth_events`, whatever
+triggered it. `GET /api/ocado/auth-events` (admin) summarises the one number the
+design hangs on: how many silent refreshes there are per full login, and the
+longest measured stretch between two logins. A high ratio means an
+interactively-logged-in account is a rare chore; a low one means the opposite,
+and that anything built on top of it needs rethinking.
+
+Off unless `HOLAFRESCA_OCADO_HEARTBEAT=1` — see `.env.example`.
+
 ## Migrations
 
 The schema is evolved with alembic, and `init_db` runs it on start-up — a fresh

@@ -58,13 +58,15 @@ def ladder(*, silent_works=False, login_outcome=None, session_after=None):
     made = AuthLadder(profile_dir=None, headless=True)
     calls = []
 
-    def try_silent(session):
+    # ``**kwargs`` swallows the ``trigger`` the ladder now threads through every
+    # rung; these doubles stand in for the browser, not for the bookkeeping.
+    def try_silent(session, **kwargs):
         calls.append("silent")
         if silent_works:
             session.authenticated = True
         return silent_works
 
-    def start_login(session):
+    def start_login(session, **kwargs):
         calls.append("login")
         if session_after is not None:
             session.authenticated = session_after
@@ -215,7 +217,7 @@ def auto_ladder(*, submit=None):
     auth.state = AuthState.AWAITING_OTP
     auth.submitted = []
 
-    def submit_otp(code):
+    def submit_otp(code, **kwargs):
         auth.submitted.append(code)
         # The real one records the outcome on the ladder before returning it.
         auth.state = (submit or (lambda: AuthState.READY))()
@@ -333,7 +335,7 @@ def test_a_failed_login_does_not_leave_a_stage_stuck_on_screen():
     """Otherwise the button spins forever on a login that already gave up."""
     auth = ladder(silent_works=False)
 
-    def explode(session):
+    def explode(session, **kwargs):
         raise RuntimeError("browser died")
 
     auth.start_login = explode

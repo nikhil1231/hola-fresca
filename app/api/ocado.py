@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import defaultdict
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +18,7 @@ from app.api.deps import (
     get_planner_csv_path,
     get_session,
     get_session_factory,
+    require_admin,
 )
 from app.api.planner import (
     _load_planner_index,
@@ -29,6 +32,9 @@ from app.api.schemas import (
     OcadoAccountIn,
     OcadoAccountOut,
     OcadoAccountsOut,
+    OcadoAuthAccountSummaryOut,
+    OcadoAuthEventOut,
+    OcadoAuthEventsOut,
     OcadoBasketOut,
     OcadoCheckoutItemOut,
     OcadoLoginOut,
@@ -44,7 +50,7 @@ from app.api.schemas import (
     PushLineOut,
 )
 from app.api.schedule import pack_shortfall_tolerance_pct
-from app.db.models import Product, User
+from app.db.models import OcadoAuthEvent, Product, User
 from app.ocado.availability import mark_unavailable, refresh_stock
 from app.ocado.client import OcadoClient
 from app.ocado.ledger import read_ledger, write_ledger
@@ -144,6 +150,87 @@ def refresh_session(body: OcadoAccountIn) -> OcadoLoginOut:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado session refresh failed: {exc}") from exc
     return _login_out(runtime, state)
+
+
+@router.get("/auth-events", response_model=OcadoAuthEventsOut)
+def auth_events(
+    days: int = 90,
+    limit: int = 200,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+) -> OcadoAuthEventsOut:
+    """What the auth ladder has been doing, and what it implies.
+
+    Admin-gated: it spans every account, and "when did this person's Ocado
+    connection last work" is not something one user should read about another.
+
+    The summary is the point. A high ``silent_per_login`` means the browser
+    profile's upstream SSO session is carrying the app for long stretches and an
+    interactive login is a rare chore; a low one means somebody is being asked to
+    log in constantly, and the design that assumes otherwise does not hold.
+    """
+    days = max(1, min(days, 3650))
+    limit = max(1, min(limit, 1000))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = list(
+        session.scalars(
+            select(OcadoAuthEvent)
+            .where(OcadoAuthEvent.created_at >= since)
+            .order_by(OcadoAuthEvent.created_at.desc())
+        )
+    )
+
+    by_account: dict[str, list[OcadoAuthEvent]] = defaultdict(list)
+    for row in rows:
+        by_account[row.account_id].append(row)
+
+    summaries: list[OcadoAuthAccountSummaryOut] = []
+    for account_id in sorted(by_account):
+        # Oldest first, so "consecutive logins" means what it says.
+        events = sorted(by_account[account_id], key=lambda item: item.created_at)
+        silent_ok = [e for e in events if e.rung == "silent" and e.outcome == "ok"]
+        logins = [e for e in events if e.rung == "login" and e.outcome == "ok"]
+        successes = [e for e in events if e.outcome == "ok"]
+
+        stretch_hours: float | None = None
+        if len(logins) >= 2:
+            gaps = [
+                (later.created_at - earlier.created_at).total_seconds() / 3600
+                for earlier, later in zip(logins, logins[1:])
+            ]
+            stretch_hours = round(max(gaps), 1)
+
+        summaries.append(
+            OcadoAuthAccountSummaryOut(
+                account_id=account_id,
+                silent_ok=len(silent_ok),
+                logins=len(logins),
+                silent_per_login=(
+                    round(len(silent_ok) / len(logins), 2) if logins else None
+                ),
+                last_ok_at=successes[-1].created_at if successes else None,
+                last_login_at=logins[-1].created_at if logins else None,
+                longest_stretch_hours=stretch_hours,
+            )
+        )
+
+    return OcadoAuthEventsOut(
+        since=since,
+        accounts=summaries,
+        events=[
+            OcadoAuthEventOut(
+                account_id=row.account_id,
+                rung=row.rung,
+                outcome=row.outcome,
+                trigger=row.trigger,
+                detail=row.detail,
+                duration_ms=row.duration_ms,
+                created_at=row.created_at,
+            )
+            for row in rows[:limit]
+        ],
+    )
 
 
 @router.post("/otp", response_model=OcadoLoginOut)

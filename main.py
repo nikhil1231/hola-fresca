@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import mimetypes
@@ -25,7 +26,29 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 for _namespace in ("holafresca", "app"):
     logging.getLogger(_namespace).setLevel(os.environ.get("HOLAFRESCA_LOG_LEVEL", "INFO"))
 
-app = FastAPI(title="HolaFresca")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Install the auth-event sink, then start the Ocado heartbeat.
+
+    In that order, and both here rather than at import time: the sink needs the
+    session factory this process will actually use, and the heartbeat talks to
+    Ocado — neither belongs in a module that the scraper CLIs and the test suite
+    import. The heartbeat is off unless HOLAFRESCA_OCADO_HEARTBEAT is set, so a
+    developer running the server locally does not quietly start probing Ocado.
+    """
+    from app.api.deps import get_session_factory
+    from app.ocado import events, heartbeat
+
+    events.set_sink(events.db_sink(get_session_factory))
+    heartbeat.start()
+    try:
+        yield
+    finally:
+        heartbeat.stop()
+        events.set_sink(None)
+
+
+app = FastAPI(title="HolaFresca", lifespan=lifespan)
 
 app.include_router(recipes_router)
 app.include_router(mapping_router)

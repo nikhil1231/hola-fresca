@@ -214,6 +214,13 @@ class OcadoAccountRuntime:
 _RUNTIMES: dict[str, OcadoAccountRuntime] = {}
 
 
+def _record_event(event: Any) -> None:
+    """Forward a ladder event to whatever sink is installed, if any."""
+    from app.ocado import events
+
+    events.record(event)
+
+
 def account_dir(account_id: str) -> Path:
     return config.DATA_DIR / "ocado" / "accounts" / account_id
 
@@ -237,6 +244,10 @@ def get_account_runtime(account_id: str | None = None) -> OcadoAccountRuntime:
         email=account.email,
         password=account.password,
         otp_markers=account.otp_markers,
+        account_id=account.id,
+        # Imported here rather than at module scope: app.ocado.events imports the
+        # models, and this module is reached from the scraper CLIs too.
+        on_event=_record_event,
     )
     session = OcadoSession(jar_path=root / "session.json", auth=auth)
     runtime = OcadoAccountRuntime(account=account, auth=auth, session=session)
