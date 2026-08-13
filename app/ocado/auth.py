@@ -36,6 +36,12 @@ if TYPE_CHECKING:  # pragma: no cover
 
 BASE_URL = "https://www.ocado.com"
 
+#: The shortest gap between two browser-backed silent refreshes for one account.
+#: Rung 2 launches a real Chromium and walks Ocado's SSO, so a dead session plus
+#: a caller that retries on failure is a browser-launch loop pointed at Ocado.
+#: Rung 1 is untouched by this: it is one cheap HTTP request and may run freely.
+SILENT_MIN_INTERVAL_S = 3600.0
+
 #: How long to wait for the password step to resolve into either a logged-in
 #: session or an OTP prompt. Generous, because reCAPTCHA can add several seconds.
 LOGIN_TIMEOUT_S = 90.0
@@ -65,6 +71,13 @@ COOKIE_BANNER_SELECTORS = (
     "#accept-recommended-btn-handler",
 )
 ERROR_SELECTORS = (
+    # Ocado's actual login error ("We're having trouble confirming your login
+    # details") renders as a bare <span> inside div.infoosp, in shadow DOM, with
+    # no class and no role - so none of the selectors below it ever matched.
+    # _error_text was therefore never firing, and a wrong password took the full
+    # LOGIN_TIMEOUT_S to come back as a bare "timeout" instead of failing fast
+    # with the reason. Confirmed against the live page, August 2026.
+    "div.infoosp",
     ".error_message",
     ".login__error",
     "[role=alert]",
@@ -112,6 +125,45 @@ class AuthStage(StrEnum):
     SIGNING_IN = "signing_in"
     WAITING_FOR_CODE = "waiting_for_code"
     ENTERING_CODE = "entering_code"
+
+
+class _FromConfig:
+    """Sentinel for "no credential was supplied", distinct from "there is none".
+
+    ``AuthLadder(email=None)`` used to mean *fall back to the configured account*,
+    which made two very different things unsayable apart. A test building a
+    credential-less ladder got the real account and drove a real browser at the
+    real Ocado login; and an account configured without a password inherited the
+    first account's, so ``anuja`` would have logged in as ``nikhil``.
+
+    With the sentinel, omitting the argument still reads config — every existing
+    caller is unaffected — while passing ``None`` explicitly means what it says.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - only ever seen in a repr
+        return "<from config>"
+
+
+FROM_CONFIG: Any = _FromConfig()
+
+
+@dataclass(frozen=True, slots=True)
+class LadderEvent:
+    """One rung of the ladder, as it happened.
+
+    A plain value rather than a database row, because this module has no session
+    and should not grow one: the browser worker, the OTP flow and the retry
+    handler are all hard enough to test without a database in the fixture. The
+    sink that persists these lives in :mod:`app.ocado.session`, which already
+    knows about accounts.
+    """
+
+    account_id: str
+    rung: str  # probe | silent | login | otp
+    outcome: str  # ok | failed | skipped | awaiting_otp | error
+    trigger: str  # heartbeat | request | retry
+    detail: str | None = None
+    duration_ms: int | None = None
 
 
 @dataclass
@@ -219,24 +271,37 @@ class AuthLadder:
     """Refresh the Ocado cookie jar, escalating from free checks to full login."""
 
     profile_dir: Path | None = None
-    email: str | None = None
-    password: str | None = None
+    #: Defaults to :data:`FROM_CONFIG`, not ``None`` — see that sentinel. Passing
+    #: ``None`` explicitly means this ladder has no email and cannot log in.
+    email: str | None = FROM_CONFIG
+    #: ``repr=False`` because a dataclass repr lands in tracebacks and log
+    #: records. A ladder formatted into a stack trace must not print a password.
+    password: str | None = field(default=FROM_CONFIG, repr=False)
     headless: bool | None = None
     #: Where to read the emailed code from. ``None`` means ask a human for it.
     otp_mailbox: otp_mail.MailboxConfig | None = None
     #: What distinguishes this account's mail in a mailbox shared by both.
     otp_markers: tuple[str, ...] = ()
+    #: Which account these events belong to. Only ever used for attribution.
+    account_id: str = "default"
+    #: Where rung outcomes go. ``None`` keeps this module inert, which is what
+    #: every existing test wants.
+    on_event: Callable[[LadderEvent], None] | None = field(default=None, repr=False)
     state: AuthState = AuthState.LOGGED_OUT
     #: Read from other request threads while a login runs; only ever a plain
     #: assignment, so it needs no lock.
     stage: AuthStage = AuthStage.IDLE
     _worker: _BrowserWorker | None = field(default=None, repr=False)
     _pending_session: "OcadoSession | None" = field(default=None, repr=False)
+    #: Monotonic stamp of the last rung-2 attempt, for SILENT_MIN_INTERVAL_S.
+    _last_silent_at: float | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.profile_dir = self.profile_dir or (config.DATA_DIR / "ocado" / "browser-profile")
-        self.email = self.email if self.email is not None else config.OCADO_EMAIL
-        self.password = self.password if self.password is not None else config.OCADO_PASSWORD
+        if self.email is FROM_CONFIG:
+            self.email = config.OCADO_EMAIL
+        if self.password is FROM_CONFIG:
+            self.password = config.OCADO_PASSWORD
         if self.headless is None:
             self.headless = config.OCADO_LOGIN_HEADLESS
         if self.otp_mailbox is None:
@@ -248,12 +313,46 @@ class AuthLadder:
             self._worker = _BrowserWorker(self.profile_dir, bool(self.headless))
         return self._worker
 
+    def _record(
+        self,
+        rung: str,
+        outcome: str,
+        *,
+        trigger: str,
+        detail: str | None = None,
+        started_at: float | None = None,
+    ) -> None:
+        """Hand one rung outcome to the sink, if there is one.
+
+        Swallows sink failures on purpose. This is bookkeeping about a login; it
+        must never be the reason a login fails.
+        """
+        if self.on_event is None:
+            return
+        duration_ms = (
+            int((time.monotonic() - started_at) * 1000) if started_at is not None else None
+        )
+        try:
+            self.on_event(
+                LadderEvent(
+                    account_id=self.account_id,
+                    rung=rung,
+                    outcome=outcome,
+                    trigger=trigger,
+                    detail=detail,
+                    duration_ms=duration_ms,
+                )
+            )
+        except Exception:  # noqa: BLE001 - never fail a login over telemetry
+            log.warning("ocado auth: could not record a ladder event", exc_info=True)
+
     def ensure_authenticated(
         self,
         session: "OcadoSession",
         *,
         trust_existing: bool = True,
         allow_login: bool = True,
+        trigger: str = "request",
     ) -> AuthState:
         """Try the cheapest thing that could work, then escalate.
 
@@ -264,14 +363,22 @@ class AuthLadder:
         ``allow_login=False`` stops before the password step. The first two rungs
         need nothing from the user, but the third emails an OTP - so anything
         automatic (a page load, say) must not be able to reach it.
+
+        ``trigger`` is recorded against every rung this call reaches. It is what
+        separates the heartbeat's steady drum from somebody actually shopping,
+        without which neither series means anything.
         """
         self.stage = AuthStage.CHECKING_SESSION
         try:
-            if trust_existing and session.probe_authenticated():
-                log.info("ocado auth: existing jar still works")
-                self.state = AuthState.READY
-                return self.state
-            if self.try_silent(session):
+            if trust_existing:
+                started = time.monotonic()
+                if session.probe_authenticated():
+                    log.info("ocado auth: existing jar still works")
+                    self._record("probe", "ok", trigger=trigger, started_at=started)
+                    self.state = AuthState.READY
+                    return self.state
+                self._record("probe", "failed", trigger=trigger, started_at=started)
+            if self.try_silent(session, trigger=trigger):
                 log.info("ocado auth: silent refresh succeeded")
                 self.state = AuthState.READY
                 return self.state
@@ -280,12 +387,18 @@ class AuthLadder:
                 self.state = AuthState.LOGGED_OUT
                 return self.state
             log.info("ocado auth: silent refresh failed, falling back to full login")
-            return self.start_login(session)
+            return self.start_login(session, trigger=trigger)
         finally:
             self.stage = AuthStage.IDLE
 
-    def try_silent(self, session: "OcadoSession") -> bool:
-        """Re-auth with no password, if the upstream SSO session is still alive."""
+    def try_silent(self, session: "OcadoSession", *, trigger: str = "request") -> bool:
+        """Re-auth with no password, if the upstream SSO session is still alive.
+
+        Rate-limited by ``SILENT_MIN_INTERVAL_S``. The cap is deliberately here
+        rather than in the heartbeat: the 401 retry path in
+        :meth:`OcadoSession.request` reaches this rung too, and a genuinely dead
+        session would otherwise launch a browser on every request that failed.
+        """
 
         def job(worker: _BrowserWorker) -> None:
             page = worker.start_browser()
@@ -293,16 +406,45 @@ class AuthLadder:
             _export_cookies(worker, session)
             worker.stop_browser()
 
+        now = time.monotonic()
+        if self._last_silent_at is not None:
+            waited = now - self._last_silent_at
+            if waited < SILENT_MIN_INTERVAL_S:
+                log.info(
+                    "ocado auth: skipping silent refresh, last one was %.0fs ago (min %.0fs)",
+                    waited,
+                    SILENT_MIN_INTERVAL_S,
+                )
+                self._record(
+                    "silent",
+                    "skipped",
+                    trigger=trigger,
+                    detail=f"rate limited, {waited:.0f}s since last attempt",
+                )
+                return False
+        self._last_silent_at = now
+
+        started = time.monotonic()
         try:
             self.worker.submit(job)
-        except Exception:  # noqa: BLE001 - a failed refresh just means "escalate"
+        except Exception as exc:  # noqa: BLE001 - a failed refresh just means "escalate"
+            self._record(
+                "silent", "error", trigger=trigger, detail=str(exc), started_at=started
+            )
             return False
-        return session.probe_authenticated()
+        ok = session.probe_authenticated()
+        self._record(
+            "silent", "ok" if ok else "failed", trigger=trigger, started_at=started
+        )
+        return ok
 
-    def start_login(self, session: "OcadoSession") -> AuthState:
+    def start_login(self, session: "OcadoSession", *, trigger: str = "request") -> AuthState:
         email = self.email
         password = self.password
         if not email or not password:
+            self._record(
+                "login", "skipped", trigger=trigger, detail="no stored credentials"
+            )
             self.state = AuthState.LOGGED_OUT
             return self.state
         self.stage = AuthStage.SIGNING_IN
@@ -321,34 +463,51 @@ class AuthLadder:
         # the mail. Anything already in the mailbox is from an earlier attempt and
         # is either expired or about to be.
         started_at = time.time()
+        started = time.monotonic()
         try:
             outcome, detail = self.worker.submit(job)
-        except Exception:
+        except Exception as exc:
             # Never leave a browser holding the profile lock: the next launch
             # against the same profile dir would fail with a cryptic error.
             self._safe_stop()
+            self._record(
+                "login", "error", trigger=trigger, detail=str(exc), started_at=started
+            )
             self.state = AuthState.LOGGED_OUT
             raise
 
         log.info("ocado auth: password step outcome=%s detail=%s", outcome, detail)
 
         if outcome == "otp":
+            self._record(
+                "login", "awaiting_otp", trigger=trigger, started_at=started
+            )
             self._pending_session = session
             self.state = AuthState.AWAITING_OTP
-            self._auto_otp(since=started_at)
+            self._auto_otp(since=started_at, trigger=trigger)
             # Not the value _auto_otp returned: a browser failure inside
             # submit_otp resets the state, and that is what the caller needs.
             return self.state
 
         if outcome == "error":
             self._safe_stop()
+            self._record(
+                "login", "failed", trigger=trigger, detail=detail, started_at=started
+            )
             self.state = AuthState.LOGGED_OUT
             raise RuntimeError(f"Ocado rejected the login: {detail}")
 
         self._finish(session)
+        self._record(
+            "login",
+            "ok" if self.state == AuthState.READY else "failed",
+            trigger=trigger,
+            detail=None if self.state == AuthState.READY else "session never settled",
+            started_at=started,
+        )
         return self.state
 
-    def _auto_otp(self, *, since: float) -> bool:
+    def _auto_otp(self, *, since: float, trigger: str = "request") -> bool:
         """Read the emailed code and submit it, so re-auth needs nobody present.
 
         Every failure here is soft, and deliberately so: the login is parked at
@@ -358,6 +517,9 @@ class AuthLadder:
         """
         if self.otp_mailbox is None:
             log.info("ocado auth: no OTP mailbox configured, waiting for a code by hand")
+            self._record(
+                "otp", "skipped", trigger=trigger, detail="no mailbox configured"
+            )
             return False
         self.stage = AuthStage.WAITING_FOR_CODE
         try:
@@ -368,8 +530,9 @@ class AuthLadder:
                 wait_s=config.OCADO_OTP_WAIT_S,
                 poll_s=config.OCADO_OTP_POLL_S,
             )
-        except Exception:  # noqa: BLE001 - a broken mailbox must not fail the login
+        except Exception as exc:  # noqa: BLE001 - a broken mailbox must not fail the login
             log.warning("ocado auth: could not read the OTP mailbox", exc_info=True)
+            self._record("otp", "error", trigger=trigger, detail=f"mailbox: {exc}")
             return False
         if code is None:
             log.info(
@@ -377,25 +540,30 @@ class AuthLadder:
                 self.otp_markers or "(any sender)",
                 config.OCADO_OTP_WAIT_S,
             )
+            self._record("otp", "failed", trigger=trigger, detail="no code arrived")
             return False
         log.info("ocado auth: read a %d-digit code from the mailbox", len(code))
         try:
-            self.submit_otp(code)
+            self.submit_otp(code, trigger=trigger)
         except Exception:  # noqa: BLE001
             log.warning("ocado auth: the emailed code was not accepted", exc_info=True)
             return False
         return self.state == AuthState.READY
 
-    def submit_otp(self, code: str) -> AuthState:
+    def submit_otp(self, code: str, *, trigger: str = "request") -> AuthState:
         code = code.strip()
         if not code:
             raise ValueError("OTP code is required")
         session = self._pending_session
         log.info("ocado auth: otp submitted, pending_session=%s", session is not None)
         if session is None:
+            self._record(
+                "otp", "failed", trigger=trigger, detail="no login was waiting for a code"
+            )
             self.state = AuthState.LOGGED_OUT
             return self.state
         self.stage = AuthStage.ENTERING_CODE
+        started = time.monotonic()
 
         def job(worker: _BrowserWorker) -> tuple[str, str | None]:
             page = worker.page
@@ -408,15 +576,25 @@ class AuthLadder:
         try:
             try:
                 outcome, detail = self.worker.submit(job)
-            except Exception:
+            except Exception as exc:
                 self._safe_stop()
                 self._pending_session = None
+                self._record(
+                    "otp", "error", trigger=trigger, detail=str(exc), started_at=started
+                )
                 self.state = AuthState.LOGGED_OUT
                 raise
 
             log.info("ocado auth: otp step outcome=%s detail=%s", outcome, detail)
 
             if outcome in {"error", "timeout"}:
+                self._record(
+                    "otp",
+                    "failed",
+                    trigger=trigger,
+                    detail=detail if outcome == "error" else "timed out",
+                    started_at=started,
+                )
                 # Keep the browser open: a mistyped or slow code deserves another go.
                 raise RuntimeError(
                     f"Ocado rejected the code: {detail}"
@@ -426,6 +604,13 @@ class AuthLadder:
 
             self._pending_session = None
             self._finish(session)
+            self._record(
+                "otp",
+                "ok" if self.state == AuthState.READY else "failed",
+                trigger=trigger,
+                detail=None if self.state == AuthState.READY else "session never settled",
+                started_at=started,
+            )
             return self.state
         finally:
             # /ocado/otp calls this directly, so it cannot rely on the reset in

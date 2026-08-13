@@ -12,7 +12,23 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from app.db.session import init_db, make_engine
+from app.db.session import ALEMBIC_DIR, init_db, make_engine
+
+
+def head_revision() -> str:
+    """The current alembic head, read from the scripts rather than written here.
+
+    These tests assert that a database ends up *at head*. Spelling the revision
+    out means every future migration breaks them for no reason, and — worse —
+    that the obvious fix is to paste the new id in, which passes whether or not
+    the migration actually ran.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(ALEMBIC_DIR))
+    return ScriptDirectory.from_config(cfg).get_current_head()
 
 #: The pre-accounts schema, cut down to the tables migration 0002 touches plus
 #: the ones app.db.session patches columns onto on the way past.
@@ -129,7 +145,7 @@ def test_an_old_database_is_migrated_rather_than_rebuilt(tmp_path):
     init_db(engine)
 
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002_accounts"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == head_revision()
         # Nothing was dropped on the way through.
         assert conn.execute(text("SELECT COUNT(*) FROM recipes")).scalar() == 2
 
@@ -201,5 +217,5 @@ def test_a_fresh_database_is_stamped_at_head(tmp_path):
     init_db(engine)
 
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002_accounts"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == head_revision()
         assert conn.execute(text("SELECT COUNT(*) FROM users")).scalar() == 1

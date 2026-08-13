@@ -595,6 +595,56 @@ class IngredientMapping(Base):
     )
 
 
+class OcadoAuthEvent(Base):
+    """One rung of the Ocado auth ladder, and how it went.
+
+    The ladder's behaviour was only ever visible in the process log, which is a
+    bad place to keep it for two reasons: journald retention is not ours to rely
+    on, and the question it answers — *how long does a session actually live* —
+    needs weeks of history to answer at all. See :mod:`app.ocado.heartbeat`.
+
+    The rung matters more than the outcome. A ``silent`` success means the
+    upstream SSO session in the browser profile is still good and nobody had to
+    do anything; a ``login`` means it was not, and somebody did. The ratio
+    between them is what decides whether an interactively-logged-in account is a
+    quarterly chore or a weekly interruption.
+
+    Keyed by ``account_id`` (the config slug) to match :class:`OcadoCartSync` and
+    :class:`OcadoCartLedger`. When accounts become per-user rows this moves with
+    them, which is why nothing here reaches for a ``users`` foreign key yet.
+    """
+
+    __tablename__ = "ocado_auth_events"
+    __table_args__ = (
+        Index("ix_ocado_auth_event_account_created", "account_id", "created_at"),
+        CheckConstraint(
+            "rung in ('probe', 'silent', 'login', 'otp')",
+            name="ck_ocado_auth_event_rung",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
+
+    # probe -> silent -> login -> otp, matching AuthLadder.ensure_authenticated.
+    rung: Mapped[str] = mapped_column(String(16), index=True)
+    # ok | failed | skipped | awaiting_otp | error. Deliberately not constrained:
+    # a new outcome should be recordable without a migration, and nothing
+    # branches on the value — this table is read by humans.
+    outcome: Mapped[str] = mapped_column(String(24), index=True)
+    # heartbeat | request | retry — what asked. Without it the heartbeat's steady
+    # drum is indistinguishable from real use, and the lifetime measurement
+    # depends on telling them apart.
+    trigger: Mapped[str] = mapped_column(String(16), default="request", index=True)
+
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Wall-clock cost of the rung, for spotting a silent refresh that has started
+    # taking 40 s because it is really doing a full browser launch every time.
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
 class OcadoCartSync(Base):
     """One row, recording that a sync has happened at all.
 

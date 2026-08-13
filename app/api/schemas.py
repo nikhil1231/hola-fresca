@@ -815,6 +815,41 @@ class OcadoOtpIn(OcadoAccountIn):
     code: str = Field(min_length=1)
 
 
+class OcadoAuthEventOut(BaseModel):
+    account_id: str
+    rung: str
+    outcome: str
+    trigger: str
+    detail: str | None = None
+    duration_ms: int | None = None
+    created_at: datetime
+
+
+class OcadoAuthAccountSummaryOut(BaseModel):
+    """One account's answer to "how long does a session actually last"."""
+
+    account_id: str
+    #: Quiet refreshes that worked — nobody had to do anything.
+    silent_ok: int = 0
+    #: Full logins. The interruptions, in other words.
+    logins: int = 0
+    #: silent_ok / logins, the ratio the whole exercise is for. None until there
+    #: has been at least one login to divide by, which is the honest answer:
+    #: "no interruptions yet" is not a ratio.
+    silent_per_login: float | None = None
+    last_ok_at: datetime | None = None
+    last_login_at: datetime | None = None
+    #: Longest run between two consecutive full logins, in hours — the closest
+    #: thing to a measured session lifetime. None until two logins exist.
+    longest_stretch_hours: float | None = None
+
+
+class OcadoAuthEventsOut(BaseModel):
+    since: datetime
+    accounts: list[OcadoAuthAccountSummaryOut] = Field(default_factory=list)
+    events: list[OcadoAuthEventOut] = Field(default_factory=list)
+
+
 class PushLineOut(BaseModel):
     sku: str
     quantity: int
