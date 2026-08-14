@@ -68,11 +68,6 @@ MAX_PRODUCTS_TO_DECORATE = PAGE_SIZE
 #: How many ids the bulk ``uids=`` endpoint is asked for at once.
 PRODUCT_BATCH_SIZE = 50
 
-#: Whether this shop's calls need a browser driven for them. They do not — see
-#: the module docstring — so nothing here launches Chrome, and the scrape runs
-#: on a headless host. Contrast :data:`app.scraper.products.ocado.USES_BROWSER`.
-USES_BROWSER = False
-
 #: "Typical life 14 days", "Typical life 3 months". The unit is spelled out.
 _LIFE_LABEL_RE = re.compile(
     r"typical\s+life\s+(?P<quantity>\d+(?:\.\d+)?)\s*(?P<unit>day|week|month|year)s?", re.I

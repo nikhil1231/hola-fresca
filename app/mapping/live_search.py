@@ -7,23 +7,19 @@ cubes, which are a fine (and cheaper) stand-in. This module lets the reviewer
 re-search with their own wording and pick from the results by hand, with no LLM
 involved.
 
-One runner per retailer, each owning its own session: where that session is a
-browser profile it is what the site trusts, and sharing one context between two
-shops would throw away that trust on every switch.
+One runner per retailer, each owning its own HTTP session, so two shops never
+share a connection or a backoff.
 
 Results are persisted exactly like the batch scrape (raw cache + ``products`` +
 ``product_search_hits``), so a re-search permanently enriches the candidate pool
 and everything downstream keeps working off product ids.
 
 The session lives in one dedicated worker thread and searches are dispatched to
-it — Playwright's sync API is thread-affine, so a browser-backed shop has no
-choice. It is started lazily on the first search and closed after an idle
-period.
+it, started lazily on the first search and closed after an idle period.
 """
 from __future__ import annotations
 
 import logging
-import os
 import queue
 import threading
 from concurrent.futures import Future
@@ -43,29 +39,15 @@ from app.scraper.ratelimit import AdaptiveThrottle
 
 log = logging.getLogger("holafresca.mapping")
 
-#: Close the browser after this many seconds with no searches.
+#: Close the session after this many seconds with no searches.
 IDLE_TIMEOUT_S = 600.0
 #: Give a single search this long before giving up.
 SEARCH_TIMEOUT_S = 90.0
 
 
-def browser_headless(retailer: str) -> bool:
-    """Whether this shop's browser calls can be made without a visible window.
-
-    Only consulted for a shop that drives a browser at all — Sainsbury's no
-    longer does, so this decides nothing there. The shop gets the default and
-    the environment gets the last word, because a host with no display cannot
-    open a window whatever the shop would prefer.
-    """
-    override = os.environ.get("HOLAFRESCA_LIVE_BROWSER_HEADLESS")
-    if override is not None and override.strip():
-        return override.strip().lower() not in {"0", "false", "no"}
-    return bool(getattr(get_adapter(retailer), "BROWSER_HEADLESS", True))
-
-
 @dataclass
 class _Job:
-    """One call to make on the browser thread. ``call`` takes the client."""
+    """One call to make on the worker thread. ``call`` takes the client."""
 
     call: Callable[[Any], Any]
     future: Future
@@ -79,22 +61,19 @@ class LiveSearchRunner:
     basket page's stock and price refresh. :meth:`run` is the general form and
     :meth:`search` the shorthand.
 
-    The dedicated thread is Playwright's requirement, not everyone's — a shop
-    fetched over HTTP would be safe called from anywhere. It keeps the thread
-    regardless, because what the runner is really for is that one shop is asked
-    one thing at a time behind one shared throttle, and that is worth having
-    whichever transport is underneath.
+    The dedicated thread outlived the reason it was introduced — Playwright's
+    sync API is thread-affine and the clients were browsers. It is kept because
+    what the runner is really for is that one shop is asked one thing at a time
+    behind one shared throttle, and that is worth having on its own.
     """
 
     def __init__(
         self,
         *,
         retailer: str = DEFAULT_RETAILER,
-        headless: bool | None = None,
         idle_timeout: float = IDLE_TIMEOUT_S,
     ):
         self.retailer = retailer
-        self.headless = browser_headless(retailer) if headless is None else headless
         self.idle_timeout = idle_timeout
         self._queue: queue.Queue[_Job] = queue.Queue()
         self._thread: threading.Thread | None = None
@@ -107,11 +86,7 @@ class LiveSearchRunner:
         return self._throttle
 
     def run(self, call: Callable[[Any], Any], timeout: float = SEARCH_TIMEOUT_S):
-        """Run ``call(client)`` on the browser thread and return its result.
-
-        Playwright's sync API is thread-affine, so every call has to arrive here
-        rather than touch the client directly.
-        """
+        """Run ``call(client)`` on the worker thread and return its result."""
         job = _Job(call=call, future=Future())
         with self._lock:
             self._ensure_thread()
@@ -138,17 +113,17 @@ class LiveSearchRunner:
                 try:
                     job = self._queue.get(timeout=self.idle_timeout)
                 except queue.Empty:
-                    return  # idle: close the browser and let the thread exit
+                    return  # idle: close the session and let the thread exit
                 try:
                     if client is None:
                         log.info("opening %s live session", self.retailer)
-                        client = registry.client(self.retailer, headless=self.headless)
+                        client = registry.client(self.retailer)
                         client.__enter__()
                     job.future.set_result(job.call(client))
                 except Exception as exc:  # noqa: BLE001 - surface to the caller
                     job.future.set_exception(exc)
-                    # A failed search may mean a dead browser; drop it so the
-                    # next search starts a fresh session.
+                    # The session may be what broke; drop it so the next
+                    # search starts a fresh one.
                     if client is not None:
                         try:
                             client.__exit__(None, None, None)

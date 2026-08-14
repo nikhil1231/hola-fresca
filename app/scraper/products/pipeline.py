@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -21,10 +22,53 @@ from app.db.session import ensure_columns
 from app.retailers import DEFAULT_RETAILER
 from app.scraper.products import registry, storage
 from app.scraper.products.base import base_price, chunks
-from app.scraper.products.browser import BrowserSession, is_dead_browser
 from app.scraper.products.registry import get_adapter
 from app.scraper.products.worklist import IngredientWorkItem, load_worklist
 from app.scraper.ratelimit import AdaptiveThrottle
+
+
+#: Failures in a row that mean the *run* has stopped working, rather than that
+#: this many products are individually bad. Ten is comfortably more than a run
+#: hits by chance — the observed rate is roughly one transient in a hundred and
+#: fifty — and small enough that a dead connection cannot get far.
+MAX_CONSECUTIVE_FAILURES = 10
+
+
+class ScrapeAborted(RuntimeError):
+    """The run was stopped because it had stopped working."""
+
+
+class _RunHealth:
+    """Stops a broken run instead of letting it condemn its own worklist.
+
+    This is the surviving half of something the browser stack used to do. A
+    Chrome crash once failed every remaining item in a worklist — 179 searches
+    succeeded, the browser closed, and the last 71 were each recorded as their
+    own error without ever being tried. The browser is gone now, but that
+    failure *shape* is not: a dropped connection or a shop that starts refusing
+    everything would walk the rest of the worklist marking each row bad just as
+    efficiently, and the rows would look permanently broken rather than merely
+    interrupted.
+
+    So the rule is kept and made transport-independent. One failure is a row's
+    own problem; ten in a row is the run's, and the untried remainder is left
+    alone for the next one.
+    """
+
+    def __init__(self, limit: int = MAX_CONSECUTIVE_FAILURES):
+        self.limit = limit
+        self.consecutive = 0
+
+    def succeeded(self) -> None:
+        self.consecutive = 0
+
+    def failed(self, exc: BaseException) -> None:
+        self.consecutive += 1
+        if self.consecutive >= self.limit:
+            raise ScrapeAborted(
+                f"stopping the run after {self.consecutive} failures in a row; "
+                f"the remaining worklist is untouched (last error: {exc})"
+            ) from exc
 
 
 @dataclass
@@ -85,22 +129,16 @@ def fetch(
     *,
     limit: int | None = None,
     retry_errors: bool = False,
-    headless: bool = False,
     throttle: AdaptiveThrottle | None = None,
     retailer: str = DEFAULT_RETAILER,
 ) -> ProductStageResult:
     adapter = get_adapter(retailer)
     result = ProductStageResult()
     throttle = throttle or AdaptiveThrottle(workers=1, delay=1.5, max_delay=20.0)
-    # A BrowserSession rather than a bare client: Chrome does not reliably
-    # survive a few hundred searches, and a crash used to fail every remaining
-    # item in the worklist rather than costing one relaunch. For a shop fetched
-    # over HTTP there is no browser to lose, and this wrapper costs one function
-    # call — it stays in the shared path rather than becoming a branch.
-    with BrowserSession(lambda: registry.client(retailer, headless=headless)) as browser:
-        _fetch_searches(adapter, browser, session_factory, result, limit, retry_errors, throttle)
-        _fetch_products(adapter, browser, session_factory, result, limit, retry_errors, throttle)
-        result.notes.append(f"{browser.restarts} browser restarts")
+    health = _RunHealth()
+    with registry.client(retailer) as client:
+        _fetch_searches(adapter, client, session_factory, result, limit, retry_errors, throttle, health)
+        _fetch_products(adapter, client, session_factory, result, limit, retry_errors, throttle, health)
     return result
 
 
@@ -274,12 +312,13 @@ def search_state_key(item: IngredientWorkItem) -> str:
 
 def _fetch_searches(
     adapter: ModuleType,
-    browser: BrowserSession,
+    client: Any,
     session_factory: sessionmaker[Session],
     result: ProductStageResult,
     limit: int | None,
     retry_errors: bool,
     throttle: AdaptiveThrottle,
+    health: "_RunHealth",
 ) -> None:
     statuses = ["discovered", "error"] if retry_errors else ["discovered"]
     with session_factory() as session:
@@ -299,7 +338,7 @@ def _fetch_searches(
     for state_id, key, label in rows:
         item = _item_from_label(label)
         try:
-            response = browser.call(lambda c: c.search(item.name, throttle))
+            response = client.search(item.name, throttle)
             product_ids = adapter.extract_product_ids(response)[:adapter.MAX_PRODUCTS_TO_DECORATE]
             decorated_products = adapter.extract_product_objects(response)
             decorated_skus = []
@@ -333,24 +372,23 @@ def _fetch_searches(
                 _add_product_states(adapter, session, product_ids, fetched_skus=set(decorated_skus))
             result.fetched += 1
         except Exception as exc:  # noqa: BLE001 - keep scrape restartable
-            if is_dead_browser(exc):
-                # The browser is gone and BrowserSession has already exhausted its
-                # relaunches. This row was never actually tried, so leave it
-                # untouched for the next run rather than recording it as bad.
-                raise
             with session_factory() as session:
                 _set_state(session, state_id, "error", str(exc))
             result.errors += 1
+            health.failed(exc)
+        else:
+            health.succeeded()
 
 
 def _fetch_products(
     adapter: ModuleType,
-    browser: BrowserSession,
+    client: Any,
     session_factory: sessionmaker[Session],
     result: ProductStageResult,
     limit: int | None,
     retry_errors: bool,
     throttle: AdaptiveThrottle,
+    health: "_RunHealth",
 ) -> None:
     statuses = ["discovered", "error"] if retry_errors else ["discovered"]
     with session_factory() as session:
@@ -370,7 +408,7 @@ def _fetch_products(
     by_key = {key: state_id for state_id, key in rows}
     for batch in chunks(list(by_key), adapter.MAX_PRODUCTS_TO_DECORATE):
         try:
-            response = browser.call(lambda c: c.products(batch, throttle))
+            response = client.products(batch, throttle)
             objects = adapter.extract_product_objects(response)
             seen: set[str] = set()
             for product in objects:
@@ -393,12 +431,13 @@ def _fetch_products(
                     _set_state(session, by_key[sku], "error", f"product missing from the {adapter.RETAILER} response")
                 result.errors += 1
         except Exception as exc:  # noqa: BLE001 - keep scrape restartable
-            if is_dead_browser(exc):
-                raise
             for sku in batch:
                 with session_factory() as session:
                     _set_state(session, by_key[sku], "error", str(exc))
                 result.errors += 1
+            health.failed(exc)
+        else:
+            health.succeeded()
 
 
 def _normalize_products(

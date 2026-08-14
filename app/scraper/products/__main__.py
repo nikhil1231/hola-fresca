@@ -5,9 +5,8 @@
     python -m app.scraper.products --retailer ocado normalize
     python -m app.scraper.products --retailer sainsburys status
 
-Each retailer keeps its own ``product_scrape_state`` rows, raw cache and browser
-profile, so the stages can be run for one shop without disturbing another's
-progress.
+Each retailer keeps its own ``product_scrape_state`` rows and raw cache, so the
+stages can be run for one shop without disturbing another's progress.
 """
 from __future__ import annotations
 
@@ -30,7 +29,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"retailer adapter name ({', '.join(sorted(ADAPTER_IDS))})",
     )
     parser.add_argument("--workers", type=int, default=1, help="reserved; defaults to 1")
-    parser.add_argument("--headless", action="store_true", help="run browser session headlessly")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_discover = sub.add_parser("discover", help="load ingredient terms into product state")
@@ -80,7 +78,6 @@ def main(argv: list[str] | None = None) -> int:
             session_factory,
             limit=args.limit,
             retry_errors=args.retry_errors,
-            headless=args.headless,
             throttle=throttle,
             retailer=retailer,
         )

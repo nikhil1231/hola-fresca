@@ -1,14 +1,12 @@
-"""Ocado product adapter and browser-session JSON fetcher."""
+"""Ocado product adapter and its HTTP JSON fetcher."""
 from __future__ import annotations
 
 import json
+import logging
 import re
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urljoin
 
-from app import config
-from app.scraper.products.browser import BrowserJsonClient
 from app.scraper.products.base import (
     NormalizedProduct,
     ProductStatus,
@@ -22,7 +20,10 @@ from app.scraper.products.base import (
     parse_pack_size,
     parse_unit_price,
 )
+from app.scraper.products.http_session import HttpJsonClient, JsonFetchError
 from app.scraper.ratelimit import AdaptiveThrottle
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "RETAILER",
@@ -30,7 +31,7 @@ __all__ = [
     "MAX_PRODUCTS_TO_DECORATE",
     "NormalizedProduct",
     "Client",
-    "OcadoBrowserClient",
+    "OcadoClient",
     "chunks",
     "extract_product_ids",
     "extract_product_objects",
@@ -50,12 +51,11 @@ MAX_PRODUCTS_TO_DECORATE = 50
 #: How many ids the bulk product endpoint is asked for at once.
 PRODUCT_BATCH_SIZE = 50
 
-#: Ocado's search and decorate endpoints are still fetched from a browser, and
-#: are happy with a headless one. The live stock read needs no browser at all.
-#: Contrast :data:`app.scraper.products.sainsburys.USES_BROWSER`, which is False
-#: for the whole shop.
-USES_BROWSER = True
-BROWSER_HEADLESS = True
+#: Where the CSRF token sits in the JSON any Ocado page embeds. Deliberately a
+#: second copy of :data:`app.ocado.session.CSRF_RE` rather than an import, for
+#: the same reason ``availability.PRODUCTS_PATH`` is: it keeps the scraper free
+#: of the auth stack, which drags a login flow and a browser worker behind it.
+CSRF_RE = re.compile(r'"csrf"\s*:\s*\{\s*"token"\s*:\s*"([^"]+)"')
 
 _UUID_RE = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I
@@ -238,27 +238,73 @@ def shelf_life_from_payload(payload: dict[str, Any]) -> tuple[str | None, int | 
     return parse_shelf_life(payload.get("guaranteedProductLife"))
 
 
-class OcadoBrowserClient(BrowserJsonClient):
-    """Fetch Ocado JSON from a real browser session without bypassing WAF."""
+class OcadoClient(HttpJsonClient):
+    """Fetch Ocado JSON over HTTP.
 
-    warmup_url = f"{BASE_URL}/categories"
+    Ocado's edge is far lighter than Sainsbury's. The search endpoint answers an
+    anonymous request outright — no browser, no handshake of any particular
+    shape, not even a cookie. Only the decorate endpoint is guarded, and what it
+    asks for is not a session but the CSRF token that every page carries.
 
-    def __init__(self, *, profile_dir: Path | None = None, headless: bool = False):
-        super().__init__(
-            profile_dir=profile_dir or (config.DATA_DIR / "ocado" / "browser-profile"),
-            headless=headless,
-        )
+    That is the same token :class:`app.ocado.session.OcadoSession` reads for the
+    live stock refresh, which is the detail that gives the game away: the
+    basket's refresh has always been a plain HTTP call against *this very
+    endpoint*, while the scrape sitting beside it drove a browser to reach it.
+    """
+
+    referer = f"{BASE_URL}/"
+
+    #: Any page carries the token; this is the cheapest one that does.
+    csrf_url = f"{BASE_URL}/"
+
+    def __enter__(self) -> "OcadoClient":
+        super().__enter__()
+        self._csrf: str | None = None
+        return self
 
     def search(self, term: str, throttle: AdaptiveThrottle) -> dict[str, Any]:
         return self.json_fetch("GET", search_url(term), None, throttle)
 
     def products(self, skus: list[str], throttle: AdaptiveThrottle) -> Any:
-        """Decorate a batch of ids. Ocado takes a bare JSON array of product ids."""
-        return self.json_fetch("PUT", f"{BASE_URL}{PRODUCTS_PATH}", skus, throttle)
+        """Decorate a batch of ids. Ocado takes a bare JSON array of product ids.
+
+        Retried once against a freshly read token when Ocado says the CSRF is
+        what it disliked. A scrape runs for several minutes and the token is
+        read once at the start, so an expiry mid-run is an ordinary event and
+        not a reason to fail the batch — but only that one refusal is retried,
+        because anything else is the batch's own problem and re-sending it would
+        just ask twice.
+        """
+        try:
+            return self._decorate(skus, throttle)
+        except JsonFetchError as exc:
+            if exc.headers.get("ecom-csrf-failure", "").lower() != "true":
+                raise
+            log.info("Ocado rejected the CSRF token; re-reading it and retrying the batch")
+            self._csrf = None
+            return self._decorate(skus, throttle)
+
+    def _decorate(self, skus: list[str], throttle: AdaptiveThrottle) -> Any:
+        return self.json_fetch(
+            "PUT",
+            f"{BASE_URL}{PRODUCTS_PATH}",
+            skus,
+            throttle,
+            headers={"x-csrf-token": self._csrf_token()},
+        )
+
+    def _csrf_token(self) -> str:
+        """The token from any page, read once per session and cached."""
+        if self._csrf is None:
+            match = CSRF_RE.search(self.fetch_text(self.csrf_url))
+            if match is None:
+                raise RuntimeError(f"could not find an Ocado CSRF token at {self.csrf_url}")
+            self._csrf = match.group(1)
+        return self._csrf
 
 
 #: The name :func:`app.scraper.products.registry.client` resolves.
-Client = OcadoBrowserClient
+Client = OcadoClient
 
 
 def _looks_product_id_key(key: str) -> bool:

@@ -104,32 +104,47 @@ out rather than read as 415 g), and **shelf life is a display label**
 Note *typical* against Ocado's guaranteed *minimum* — the two are not the same
 promise, so Sainsbury's figures run slightly optimistic for the same food.
 
-### Two transports, and why Sainsbury's stopped needing a browser
+### Why the scrape stopped needing a browser
 
-Both retailers sit behind Akamai, and neither answers `httpx`. That was long
-taken to mean both needed a browser driven for them, and Sainsbury's needed a
-**headed** one — headless was refused outright, from the same profile, on the
-same machine.
+Both shops were scraped by driving Chrome, Sainsbury's **headed** — headless was
+refused outright, from the same profile, on the same machine. Neither shop needs
+a browser at all, and the two of them were refusing for entirely different
+reasons that both looked like "Akamai wants a real browser".
 
-The refusal was never about the session. Akamai's edge on these endpoints checks
-the **TLS handshake**, not a cookie: a request carrying no cookies at all is
-answered, and the identical URL is denied the moment it arrives over Python's
-TLS stack, warm profile or not. The browser was supplying a handshake, and
-nothing else. So `app/scraper/products/http_session.py` presents a browser's
-handshake directly (`curl_cffi`, libcurl built against the browser TLS/HTTP-2
-profiles) and asks over plain HTTP. Same catalogue, no browser, ~0.5s per
-search against several seconds, and it runs on a display-less host.
+**Sainsbury's** checks the **TLS handshake**, not a session. A request carrying
+no cookies is answered; the identical URL is denied the moment it arrives over
+Python's TLS stack, warm profile or not. The browser was supplying a handshake
+and nothing else, which is why headed worked and every attempt to trim it down
+did not. `app/scraper/products/http_session.py` presents a browser's handshake
+directly (`curl_cffi`, libcurl built against the browser TLS/HTTP-2 profiles).
+Chrome, Firefox and Safari profiles are all accepted — the rule rejects
+non-browsers rather than admitting one build.
 
-Sainsbury's uses that. Ocado is still fetched from a real browser session with a
-persistent profile (`app/scraper/products/browser.py`) — it is happy headless,
-and its live stock read already needed no browser at all. Chrome does not
-reliably survive a few hundred searches, so `BrowserSession` relaunches it and
-retries; without that, one crash marked every remaining worklist item as its own
-failure.
+**Ocado** was not checking anything of the sort. Its search endpoint answers a
+bare `httpx` request. Only the decorate endpoint is guarded, and it wants the
+**CSRF token** that every page carries — the same token `OcadoSession` has always
+read for the basket's live stock refresh, against that very endpoint, over plain
+HTTP, while the scrape beside it drove a browser to reach it. `OcadoClient` reads
+the token once per session and re-reads it on the one refusal Ocado names in a
+header (`ecom-csrf-failure`).
 
-Adapters declare which transport they want with `USES_BROWSER`, and both clients
-present the same surface — a context manager with `search` and `products` — so
-`registry.client(retailer)` is the only thing that has to know.
+Measured against the live shops: a search costs ~0.5s instead of several seconds,
+150 Sainsbury's searches ran 149/150 and 100 Ocado searches 100/100, and the
+whole thing runs on a host with no display.
+
+Playwright is still a dependency, for exactly one thing: the Ocado **login** in
+`app/ocado/auth.py`, which faces a reCAPTCHA. Nothing in `app/scraper/` may
+import it, and a test enforces that.
+
+`registry.client(retailer)` returns whichever client an adapter exports as
+`Client`; the pipeline and the live-search runner know nothing else about it.
+
+The crash-recovery that `BrowserSession` used to provide is now `_RunHealth` in
+the pipeline. Its reason for existing outlived the browser: one bad row is that
+row's problem, but ten failures in a row mean the *run* is broken, and it stops
+rather than walking the rest of the worklist marking every remaining item as its
+own failure. That is the bug it was born from — one Chrome crash once turned 71
+untried rows into 71 permanent-looking errors.
 
 ### Shelf life and the waste model
 

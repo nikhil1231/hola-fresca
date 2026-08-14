@@ -50,6 +50,22 @@ REQUEST_TIMEOUT_S = 30.0
 IMPERSONATE = "chrome"
 
 
+class JsonFetchError(RuntimeError):
+    """A request the retailer refused, with enough of the answer to act on it.
+
+    A ``RuntimeError`` still, because that is what the pipeline and the runner
+    already catch and record against the row being fetched. What it adds is the
+    status and headers, so a caller that can *fix* a particular refusal —
+    Ocado's rotating CSRF token being the case in hand — can recognise its own
+    and retry, instead of every failure looking alike from the outside.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None, headers: dict | None = None):
+        super().__init__(message)
+        self.status = status
+        self.headers = {str(k).lower(): v for k, v in (headers or {}).items()}
+
+
 class HttpJsonClient:
     """An HTTP session for a retailer's JSON API, fingerprinted as a browser.
 
@@ -125,18 +141,40 @@ class HttpJsonClient:
             )
         except Exception as exc:  # noqa: BLE001 - a transport failure is a slow-down signal
             throttle.note_throttle()
-            raise RuntimeError(f"{url} could not be fetched: {exc}") from exc
+            raise JsonFetchError(f"{url} could not be fetched: {exc}") from exc
 
         content_type = response.headers.get("content-type") or ""
         if response.status_code != 200 or "json" not in content_type.lower():
             throttle.note_throttle()
-            raise RuntimeError(
-                f"{url} returned {response.status_code} {content_type or 'unknown content-type'}"
+            raise JsonFetchError(
+                f"{url} returned {response.status_code} {content_type or 'unknown content-type'}",
+                status=response.status_code,
+                headers=dict(response.headers),
             )
         try:
             payload = response.json()
         except (json.JSONDecodeError, ValueError) as exc:
             throttle.note_throttle()
-            raise RuntimeError(f"{url} returned non-JSON content") from exc
+            raise JsonFetchError(f"{url} returned non-JSON content") from exc
         throttle.note_success()
         return payload
+
+    def fetch_text(self, url: str, *, timeout_s: float = REQUEST_TIMEOUT_S) -> str:
+        """A plain page fetch, for the things that are not API calls.
+
+        Deliberately outside the throttle: this is not a request against the
+        retailer's API budget but the one-off page read that makes such requests
+        possible at all (Ocado's CSRF token). Counting it as a throttled call
+        would let a token refresh look like API pressure and slow the scrape for
+        a reason that has nothing to do with the shop's patience.
+        """
+        if self._session is None:
+            raise RuntimeError(f"{type(self).__name__} must be used as a context manager")
+        response = self._session.get(url, timeout=timeout_s)
+        if response.status_code != 200:
+            raise JsonFetchError(
+                f"{url} returned {response.status_code}",
+                status=response.status_code,
+                headers=dict(response.headers),
+            )
+        return response.text

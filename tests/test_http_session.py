@@ -1,32 +1,45 @@
 """The browser-free JSON transport.
 
-Sainsbury's is fetched over plain HTTP with a browser's TLS fingerprint rather
-than by driving Chrome. These pin the two things that made the browser client
-safe to run unattended for a few hundred requests, because the new transport has
-to keep them: a request that is refused must *slow the next one down*, and a WAF
-serving an HTML page must count as a refusal even when it does so with a 200.
+Both shops are fetched over plain HTTP now rather than by driving Chrome. These
+pin the two things that made the browser client safe to run unattended for a few
+hundred requests, because the new transport has to keep them: a request that is
+refused must *slow the next one down*, and a WAF serving an HTML page must count
+as a refusal even when it does so with a 200.
 """
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from app.scraper.products import sainsburys
-from app.scraper.products.http_session import HttpJsonClient
+import app.scraper.products
+from app.scraper.products import ocado, sainsburys
+from app.scraper.products.http_session import HttpJsonClient, JsonFetchError
+from app.scraper.products.registry import ADAPTER_IDS, get_adapter
 from app.scraper.ratelimit import AdaptiveThrottle
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, content_type="application/json", body=None):
+    def __init__(self, status_code=200, content_type="application/json", body=None,
+                 headers=None):
         self.status_code = status_code
-        self.headers = {"content-type": content_type}
+        self.headers = {"content-type": content_type, **(headers or {})}
         self._body = body if body is not None else {"products": []}
 
     def json(self):
         if isinstance(self._body, str):
             return json.loads(self._body)  # raises, as curl_cffi's would
         return self._body
+
+
+class FakePage:
+    """A plain HTML answer, as ``fetch_text`` reads it."""
+
+    def __init__(self, text, status_code=200):
+        self.status_code = status_code
+        self.text = text
+        self.headers = {"content-type": "text/html"}
 
 
 class FakeSession:
@@ -45,6 +58,11 @@ class FakeSession:
         if isinstance(response, Exception):
             raise response
         return response
+
+    def get(self, url, *, timeout=None):
+        self.calls.append({"method": "GET", "url": url, "headers": {}, "data": None,
+                           "timeout": timeout})
+        return self._responses.pop(0)
 
     def close(self):
         self.closed = True
@@ -132,12 +150,26 @@ def test_closing_releases_the_session():
     assert session.closed
 
 
-def test_sainsburys_needs_no_browser():
-    # The point of the exercise: the shop is reachable without launching one,
-    # and the registry must not hand this adapter a headless flag.
-    assert sainsburys.USES_BROWSER is False
-    assert issubclass(sainsburys.Client, HttpJsonClient)
-    assert not hasattr(sainsburys, "BrowserClient")
+def test_no_adapter_opens_a_browser_to_scrape():
+    # The point of the exercise. Both shops are reachable over HTTP, so a
+    # regression that reintroduces Playwright into the scrape fails here rather
+    # than on whichever machine has no display.
+    for retailer in ADAPTER_IDS:
+        adapter = get_adapter(retailer)
+        assert issubclass(adapter.Client, HttpJsonClient), retailer
+        assert not hasattr(adapter, "BrowserClient"), retailer
+
+
+def test_the_scraper_package_imports_no_playwright():
+    # Playwright survives only for the Ocado *login* (app/ocado/auth.py), which
+    # faces a reCAPTCHA. Nothing under the scraper may reach for it.
+    root = Path(app.scraper.products.__file__).parent
+    offenders = [
+        path.name
+        for path in sorted(root.glob("*.py"))
+        if "playwright" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
 
 
 def test_sainsburys_asks_the_gol_endpoints():
@@ -153,3 +185,61 @@ def test_sainsburys_asks_the_gol_endpoints():
     assert "/groceries-api/gol-services/product/v1/product" in search_url
     assert "filter%5Bkeyword%5D=chorizo" in search_url
     assert "uids=7317686%2C536" in products_url
+
+
+def test_ocado_sends_the_csrf_token_it_read_from_a_page():
+    # The decorate endpoint is the only guarded one at Ocado, and what it wants
+    # is the token any page carries — not a login.
+    client = ocado.OcadoClient()
+    session = FakeSession(
+        FakePage('window.x = {"csrf":{"token":"tok-123"},"other":1}'),
+        FakeResponse(body=[{"id": "a"}]),
+    )
+    client._session = session
+    client._csrf = None
+
+    client.products(["a", "b"], _throttle())
+
+    page, put = session.calls
+    assert page["method"] == "GET" and page["url"] == ocado.BASE_URL + "/"
+    assert put["headers"]["x-csrf-token"] == "tok-123"
+
+
+def test_ocado_rereads_a_rejected_csrf_token_and_retries_once():
+    # A scrape runs for minutes off a token read at the start, so an expiry
+    # mid-run is ordinary. Ocado names this refusal in a header.
+    client = ocado.OcadoClient()
+    session = FakeSession(
+        FakeResponse(status_code=403, content_type="text/html",
+                     headers={"ecom-csrf-failure": "true"}),
+        FakePage('{"csrf":{"token":"fresh"}}'),
+        FakeResponse(body=[{"id": "a"}]),
+    )
+    client._session = session
+    client._csrf = "stale"
+
+    result = client.products(["a"], _throttle())
+
+    assert result == [{"id": "a"}]
+    assert client._csrf == "fresh"
+
+
+def test_ocado_does_not_retry_a_refusal_that_is_not_about_the_csrf():
+    # Re-sending a batch Ocado disliked for its own reasons just asks twice.
+    client = ocado.OcadoClient()
+    session = FakeSession(FakeResponse(status_code=500, content_type="text/html"))
+    client._session = session
+    client._csrf = "tok"
+
+    with pytest.raises(JsonFetchError):
+        client.products(["a"], _throttle())
+    assert len(session.calls) == 1
+
+
+def test_ocado_says_so_when_no_token_is_on_the_page():
+    client = ocado.OcadoClient()
+    client._session = FakeSession(FakePage("<html>no token here</html>"))
+    client._csrf = None
+
+    with pytest.raises(RuntimeError, match="CSRF token"):
+        client.products(["a"], _throttle())
