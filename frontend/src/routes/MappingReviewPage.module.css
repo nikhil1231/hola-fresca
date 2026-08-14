@@ -224,6 +224,15 @@
   color: var(--mantine-color-cyan-5);
 }
 
+.priceColumn {
+  min-width: 88px;
+}
+
+.offerBadge {
+  width: max-content;
+  max-width: none;
+}
+
 .draggableCandidateRow {
   cursor: grab;
   transition:

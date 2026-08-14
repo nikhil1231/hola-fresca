@@ -55,6 +55,7 @@ class Candidate:
     result_rank: int
     #: The shelf price behind a promotion, NULL when nothing is on offer. What
     #: the ordering sorts on — see :func:`app.mapping.ordering.sort_unit_price`.
+    base_price: float | None = None
     base_unit_price: float | None = None
     search_term: str | None = None
     # Who sells it. 'manual' marks a hand-entered product for something no
@@ -167,6 +168,7 @@ def gather_candidates(
                 pack_size_value=product.pack_size_value,
                 pack_size_unit=product.pack_size_unit,
                 price=product.price,
+                base_price=product.base_price,
                 unit_price=product.unit_price,
                 unit_price_basis=product.unit_price_basis,
                 base_unit_price=product.base_unit_price,

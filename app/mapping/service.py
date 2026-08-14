@@ -259,6 +259,7 @@ def _candidate_from_product(mp: IngredientMappingProduct) -> Candidate | None:
         pack_size_value=product.pack_size_value,
         pack_size_unit=product.pack_size_unit,
         price=product.price,
+        base_price=product.base_price,
         unit_price=product.unit_price,
         unit_price_basis=product.unit_price_basis,
         base_unit_price=product.base_unit_price,

@@ -708,7 +708,7 @@ export default function MappingReviewPage() {
                 <Table.Th w={70}>Accept</Table.Th>
                 <Table.Th>Product</Table.Th>
                 <Table.Th>Pack</Table.Th>
-                <Table.Th>Price</Table.Th>
+                <Table.Th className={classes.priceColumn}>Price</Table.Th>
                 <Table.Th>Unit price</Table.Th>
                 <Table.Th>Rating</Table.Th>
                 <Table.Th w={140}>Match</Table.Th>
@@ -774,7 +774,22 @@ export default function MappingReviewPage() {
                       )}
                     </Table.Td>
                     <Table.Td>{c.pack_size_raw ?? '—'}</Table.Td>
-                    <Table.Td>{money(c.price)}</Table.Td>
+                    <Table.Td className={classes.priceColumn}>
+                      <Stack gap={4} align="flex-start">
+                        <Text size="sm">{money(c.base_price ?? c.price)}</Text>
+                        {c.base_price != null && (
+                          <Badge
+                            className={classes.offerBadge}
+                            size="xs"
+                            variant="light"
+                            color="grape"
+                            tt="none"
+                          >
+                            {money(c.price)}
+                          </Badge>
+                        )}
+                      </Stack>
+                    </Table.Td>
                     <Table.Td>
                       <Stack gap={4} align="flex-start">
                         <MetricPill
@@ -790,7 +805,13 @@ export default function MappingReviewPage() {
                             stated rather than silently priced in — otherwise this
                             column looks wrong against the shop's own page. */}
                         {c.base_unit_price != null && (
-                          <Badge size="xs" variant="light" color="grape" tt="none">
+                          <Badge
+                            className={classes.offerBadge}
+                            size="xs"
+                            variant="light"
+                            color="grape"
+                            tt="none"
+                          >
                             £{c.unit_price}/{c.unit_price_basis}
                           </Badge>
                         )}

@@ -12,7 +12,14 @@ from tests.conftest import seed_candidates
 KEY = "name:chicken breast"
 KEY_Q = quote(KEY, safe="")
 PRODUCTS = [
-    {"sku": "p1", "name": "Ocado Chicken Breast", "price": 3.5, "pack_value": 600, "pack_unit": "g"},
+    {
+        "sku": "p1",
+        "name": "Ocado Chicken Breast",
+        "price": 3.5,
+        "base_price": 4.25,
+        "pack_value": 600,
+        "pack_unit": "g",
+    },
     {"sku": "p2", "name": "Mini Fillets", "price": 2.5, "pack_value": 300, "pack_unit": "g"},
 ]
 
@@ -76,6 +83,7 @@ def test_detail_before_any_decision_lists_candidates(client):
     assert body["usage"]["median"] == 450
     assert body["ingredient_icon_url"].startswith("https://img.hellofresh.com/")
     assert body["example_recipes"][0]["name"] == "Chicken Dinner"
+    assert body["candidates"][0]["base_price"] == 4.25
 
 
 def test_detail_uses_frequency_name_when_mapping_name_is_stale(client, factory):

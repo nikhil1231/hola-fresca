@@ -679,6 +679,8 @@ class MappingCandidateOut(BaseModel):
     pack_size_value: float | None = None
     pack_size_unit: str | None = None
     price: float | None = None
+    #: Regular pack price behind a Nectar/retailer offer; NULL off promotion.
+    base_price: float | None = None
     unit_price: float | None = None
     unit_price_basis: str | None = None
     #: The shelf price behind a promotion, and what the order is computed from.
