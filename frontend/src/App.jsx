@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import { AppShell, Container, Text } from '@mantine/core'
+import { useMediaQuery } from '@mantine/hooks'
 
 import Header from './components/Header.jsx'
 import { useLocalPlanImport } from './hooks/useLocalPlanImport.js'
@@ -57,7 +58,12 @@ function LastUpdatedFooter() {
 function App() {
   useLocalPlanImport()
   const { pathname } = useLocation()
-  const immersive = pathname === '/basket' || pathname.startsWith('/recipes/')
+  const compactRecipeLayout = useMediaQuery('(max-width: 59.99em)')
+  const recipeSegments = pathname.split('/').filter(Boolean)
+  const recipeDetail = recipeSegments[0] === 'recipes' && recipeSegments.length === 2
+  const cooking = recipeSegments[0] === 'recipes' && recipeSegments[2] === 'cook'
+  const immersive = pathname === '/basket' || cooking || (recipeDetail && compactRecipeLayout)
+  const home = pathname === '/'
 
   return (
     <AppShell header={immersive ? undefined : { height: 64 }} padding={0}>
@@ -68,9 +74,9 @@ function App() {
       )}
       <AppShell.Main>
         <Container
-          fluid={immersive}
-          size={immersive ? undefined : 'xl'}
-          px={immersive ? 0 : { base: 24, sm: 'xl' }}
+          fluid={immersive || home}
+          size={immersive || home ? undefined : 'xl'}
+          px={immersive ? 0 : home ? { base: 18, sm: 32 } : { base: 24, sm: 'xl' }}
           py={immersive ? 0 : { base: 'lg', sm: 'xl' }}
         >
           <Outlet />

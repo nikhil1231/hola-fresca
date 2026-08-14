@@ -1,196 +1,230 @@
 .pageStack {
+  width: 100%;
+  max-width: 1480px;
+  margin-inline: auto;
   padding-bottom: var(--mantine-spacing-xl);
 }
 
 .pageHeader {
+  align-items: center;
   row-gap: var(--mantine-spacing-sm);
+}
+
+.headerIntro {
+  min-width: 0;
+}
+
+.headerIcon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--hf-accent);
+  background: color-mix(in srgb, var(--hf-accent) 12%, var(--hf-surface));
+}
+
+.pageTitle {
+  font-size: 1.35rem;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.scheduleSummary {
+  margin-top: 1px;
 }
 
 .weekRow {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: var(--mantine-spacing-lg);
-  align-items: start;
-  padding: var(--mantine-spacing-md);
+  gap: var(--mantine-spacing-md);
+  align-items: center;
+  padding: 12px 16px;
   border: 1px solid var(--hf-border);
   border-radius: var(--hf-radius-sm);
   background: var(--hf-surface);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
-@media (max-width: 48em) {
-  .pageHeader {
-    align-items: flex-start;
-  }
-
-  .scheduleSummary {
-    display: none;
-  }
-
-  .headerActions {
-    width: 100%;
-    justify-content: flex-end;
-  }
-
-  .weekRow {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .tiles {
-    width: 100%;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    padding-bottom: var(--mantine-spacing-xs);
-    scroll-snap-type: inline proximity;
-    scrollbar-width: thin;
-  }
+.weekRowEmpty {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'info actions';
+  min-height: 62px;
 }
 
-/* The week being planned right now — the one the cutoff is counting down for. */
+.weekRowWithMeals {
+  grid-template-columns: minmax(180px, 0.55fr) minmax(0, 3fr) auto;
+  grid-template-areas: 'info tiles actions';
+  min-height: 180px;
+}
+
 .weekRowActive {
   border-color: var(--hf-border-strong);
-  box-shadow: 0 0 0 1px var(--hf-border-strong) inset;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hf-border-strong) 45%, transparent) inset;
+  background: color-mix(in srgb, var(--hf-accent) 4%, var(--hf-surface));
 }
 
 .weekRowInactive {
   background: color-mix(in srgb, var(--hf-surface) 65%, transparent);
 }
 
-.weekRowInactive .tiles {
-  opacity: 0.55;
-}
-
-/* History. Read-only, and styled to read as a record rather than as something
-   waiting to be filled in: flat, muted, no card of its own. */
-.weekRowPast {
-  border-style: dashed;
-  border-color: var(--hf-border);
-  background: transparent;
-  padding-block: var(--mantine-spacing-xs);
+.weekRowInactive .weekInfo {
+  opacity: 0.8;
 }
 
 .weekRowPast .weekTitle {
-  color: var(--mantine-color-dimmed);
-  font-weight: 600;
-}
-
-.weekRowPast .tile {
-  filter: grayscale(0.55);
-  opacity: 0.8;
-  transition: filter 120ms ease, opacity 120ms ease;
-}
-
-.weekRowPast .tile:hover,
-.weekRowPast .tile:focus-within {
-  filter: none;
-  opacity: 1;
-}
-
-/* The week being cooked right now, which from Tuesday sits at the top of the
-   history rather than in the planning window. Kept out of the grey. */
-.weekRowCurrent .tile {
-  filter: none;
-  opacity: 1;
+  font-weight: 700;
 }
 
 .historyDivider {
-  margin-top: var(--mantine-spacing-xs);
+  margin-block: 2px;
 }
 
-.weekMeta {
+.historyDivider :global(.mantine-Divider-label) {
+  color: var(--hf-text-subtle);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.weekInfo {
+  grid-area: info;
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 6px;
+}
+
+.weekHeading {
   min-width: 0;
 }
 
 .weekTitle {
   font-size: var(--mantine-font-size-md);
   line-height: 1.2;
+  white-space: nowrap;
 }
 
-.tiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--mantine-spacing-sm);
+.weekDetails {
   min-width: 0;
 }
 
-.tile,
-.addTile {
-  position: relative;
-  width: 128px;
-  aspect-ratio: 1 / 1;
-  border-radius: var(--mantine-radius-md);
-  overflow: hidden;
-  flex: none;
-  scroll-snap-align: start;
+.cutoff {
+  min-width: 0;
+}
+
+.weekDetails > :not(:last-child)::after {
+  margin-left: 6px;
+  color: var(--hf-text-subtle);
+  content: '·';
+}
+
+.weekActions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--mantine-spacing-xs);
+  white-space: nowrap;
+}
+
+.addMealsButton {
+  min-height: 32px;
+  padding-inline: 18px !important;
+  color: #07130b;
+  background: var(--hf-accent);
+}
+
+.addMealsButton:hover {
+  background: var(--hf-accent-soft);
+}
+
+.tiles {
+  grid-area: tiles;
+  display: flex;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-block: 1px;
+  scroll-snap-type: inline proximity;
+  scrollbar-width: thin;
 }
 
 .tile {
+  position: relative;
   display: block;
-  color: inherit;
-  text-decoration: none;
-  background: var(--hf-surface-soft);
+  width: 225px;
+  aspect-ratio: 500 / 333;
+  min-width: 0;
+  flex: 0 0 225px;
+  overflow: hidden;
   border: 1px solid var(--hf-border);
+  border-radius: var(--mantine-radius-md);
+  color: inherit;
+  background: var(--hf-surface-soft);
+  text-decoration: none;
+  scroll-snap-align: start;
+}
+
+.tile > a {
+  display: block;
+  height: 100%;
 }
 
 .tileImage {
-  position: absolute;
-  inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: fill;
 }
 
-/* A dark wash under the caption only, so the food stays visible above it. */
 .tileCaption {
   position: absolute;
-  inset: auto 0 0 0;
-  padding: 6px 7px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0));
+  inset: auto 0 0;
+  padding: 22px 10px 8px;
   color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.88), transparent);
 }
 
 .tileName {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.25;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .tilePortions {
-  font-size: 12px;
-  opacity: 0.85;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.82;
 }
 
-/* Top-left, clear of the remove button, and clamped to one line: the badge says
-   there is a modification and roughly what, the tooltip says it in full. */
 .tileModifier {
   position: absolute;
-  top: 4px;
-  left: 4px;
-  max-width: calc(100% - 32px);
+  top: 6px;
+  left: 6px;
+  max-width: calc(100% - 36px);
+  overflow: hidden;
   padding: 2px 6px;
   border-radius: var(--mantine-radius-sm);
-  background: var(--mantine-color-grape-6);
   color: #fff;
+  background: var(--mantine-color-grape-6);
   font-size: 9px;
   font-weight: 700;
   line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tileRemove {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 5px;
+  right: 5px;
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -206,49 +240,125 @@
   }
 }
 
-.addTile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  border: 1px dashed var(--hf-border);
-  background: var(--hf-surface);
-  color: var(--mantine-color-dimmed);
-  text-decoration: none;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
-}
-
-.addTile:hover {
-  border-color: var(--hf-border-strong);
-  color: var(--hf-accent-soft);
-  background: color-mix(in srgb, var(--hf-accent) 12%, var(--hf-surface));
-}
-
-.addTileLabel {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.emptyHint {
-  display: flex;
-  align-items: center;
-  min-height: 116px;
-  color: var(--mantine-color-dimmed);
-  font-size: var(--mantine-font-size-sm);
+@media (max-width: 64em) {
+  .weekRowWithMeals {
+    grid-template-columns: minmax(160px, 0.6fr) minmax(0, 2fr);
+    grid-template-areas:
+      'info actions'
+      'tiles tiles';
+  }
 }
 
 @media (max-width: 48em) {
-  .tiles {
-    flex-wrap: nowrap;
+  .pageStack {
+    gap: var(--mantine-spacing-md);
   }
 
-  .tile,
-  .addTile {
-    width: 152px;
+  .pageHeader {
+    align-items: flex-start;
   }
 
-  .emptyHint {
-    min-height: 152px;
+  .headerIcon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .pageTitle {
+    font-size: 1.05rem;
+  }
+
+  .scheduleSummary {
+    max-width: 230px;
+    font-size: 0.72rem;
+    line-height: 1.25;
+  }
+
+  .headerActions > button {
+    height: 34px;
+    padding-inline: 12px;
+  }
+
+  .settingsButton {
+    display: none;
+  }
+
+  .weekRow {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .weekRowEmpty {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'info'
+      'actions';
+    min-height: 108px;
+  }
+
+  .weekRowWithMeals {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'info'
+      'actions'
+      'tiles';
+    min-height: 190px;
+  }
+
+  .weekRowPast.weekRowWithMeals {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'info actions'
+      'tiles tiles';
+  }
+
+  .weekHeading {
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .weekDetails {
+    align-items: flex-start;
+  }
+
+  .cutoff {
+    flex-basis: 100%;
+  }
+
+  .weekDetails > :not(:last-child)::after {
+    content: none;
+  }
+
+  .weekActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .weekRowPast.weekRowWithMeals .weekActions {
+    width: auto;
+    align-self: start;
+  }
+
+  .weekRowInactive .weekActions {
+    justify-content: flex-end;
+  }
+
+}
+
+@media (max-width: 25em) {
+  .scheduleSummary {
+    display: none;
+  }
+
+  .headerIcon {
+    display: none;
+  }
+
+  .weekRowWithMeals {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'info'
+      'actions'
+      'tiles';
   }
 }
