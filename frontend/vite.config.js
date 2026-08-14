@@ -51,12 +51,6 @@ const pageFiles = {
     'frontend/src/hooks/useRecipeQueries.js',
     'frontend/src/api/client.js',
   ],
-  cuisines: [
-    'frontend/src/routes/CuisinesPage.jsx',
-    'frontend/src/routes/CuisinesPage.module.css',
-    'frontend/src/hooks/useRecipeQueries.js',
-    'frontend/src/api/client.js',
-  ],
   recipeDetail: [
     'frontend/src/routes/RecipeDetailPage.jsx',
     'frontend/src/routes/RecipeDetailPage.module.css',

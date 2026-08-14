@@ -12,7 +12,6 @@ import { installAccessSessionHandling } from './api/session.js'
 import App from './App.jsx'
 import BasketPage from './routes/BasketPage.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
-import CuisinesPage from './routes/CuisinesPage.jsx'
 import CookingPage from './routes/CookingPage.jsx'
 import HomePage from './routes/HomePage.jsx'
 import RecipeDetailPage from './routes/RecipeDetailPage.jsx'
@@ -42,7 +41,6 @@ createRoot(document.getElementById('root')).render(
               <Route index element={<HomePage />} />
               <Route path="browse" element={<BrowsePage />} />
               <Route path="basket" element={<BasketPage />} />
-              <Route path="cuisines" element={<CuisinesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="recipes/:id" element={<RecipeDetailPage />} />
               <Route path="mapping" element={<MappingPage />} />

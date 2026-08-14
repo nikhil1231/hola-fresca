@@ -76,9 +76,6 @@ export default function Header() {
               <NavLink to="/basket" className={navClass}>
                 Basket
               </NavLink>
-              <NavLink to="/cuisines" className={navClass}>
-                Cuisines
-              </NavLink>
               <NavLink to="/mapping" className={navClass}>
                 Mapping
               </NavLink>
@@ -167,9 +164,6 @@ export default function Header() {
           </NavLink>
           <NavLink to="/basket" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Basket
-          </NavLink>
-          <NavLink to="/cuisines" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
-            Cuisines
           </NavLink>
           <NavLink to="/settings" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Settings
