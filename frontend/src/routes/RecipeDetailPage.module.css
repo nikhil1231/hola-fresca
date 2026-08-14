@@ -567,6 +567,150 @@
   text-decoration: none;
 }
 
+.desktopDetailPage {
+  min-height: calc(100dvh - 64px);
+  color: var(--hf-text);
+}
+
+.desktopHero {
+  width: 100%;
+  height: min(420px, 38vw);
+  min-height: 340px;
+  object-fit: cover;
+  background: var(--hf-surface-soft);
+}
+
+.desktopTitle {
+  max-width: 680px;
+  color: var(--hf-text);
+  font-size: clamp(2rem, 3vw, 3.15rem);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.desktopHeroActions .secondaryCta,
+.desktopHeroActions .plannedControls {
+  min-height: 36px;
+  border-radius: var(--hf-radius-sm) !important;
+}
+
+.desktopHeroActions .secondaryCta {
+  padding-inline: 14px;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.desktopHeroActions .secondaryCta span {
+  display: block;
+}
+
+.desktopHeroActions .secondaryCta small {
+  display: none;
+}
+
+.desktopHeroActions .plannedControls {
+  padding-inline: 4px;
+}
+
+.desktopHeroActions .portionStepper {
+  height: 32px;
+  border: 0;
+  background: transparent;
+}
+
+.desktopRatingsPanel {
+  width: fit-content;
+  max-width: 100%;
+  border-color: var(--hf-border) !important;
+  background: var(--hf-surface) !important;
+}
+
+.desktopRatingItem {
+  min-width: 92px;
+}
+
+.desktopRatingValue {
+  min-height: 36px;
+}
+
+.desktopMacroGrid .macro {
+  display: block;
+  min-height: auto;
+  padding: 16px !important;
+  border: 1px solid var(--hf-border) !important;
+  border-radius: var(--hf-radius-sm) !important;
+  background: var(--hf-surface) !important;
+  text-align: center;
+  box-shadow: none;
+}
+
+.desktopMacroGrid .macroValue {
+  font-size: 1.25rem;
+}
+
+.desktopMacroGrid .macro > :last-child {
+  justify-content: center !important;
+}
+
+.desktopMacroGrid .macroDot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 999px;
+  background: var(--macro-color);
+  vertical-align: 0.08em;
+}
+
+.desktopDetailPage .detailControls {
+  gap: 16px;
+  padding: 0;
+  overflow: visible;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none;
+}
+
+.desktopIngredientsTable th:first-child,
+.desktopIngredientsTable td:first-child {
+  padding-left: 8px;
+}
+
+.desktopIngredientsTable th,
+.desktopIngredientsTable td {
+  border-color: var(--hf-border);
+}
+
+.desktopIngredientRow {
+  cursor: pointer;
+}
+
+.desktopIngredientRow:hover {
+  box-shadow: inset 3px 0 var(--hf-accent);
+}
+
+.desktopIngredientRow:hover td {
+  background: rgba(73, 221, 132, 0.035) !important;
+}
+
+.desktopIngredientImage {
+  flex-shrink: 0;
+  object-fit: contain;
+  background: var(--hf-bg-elevated);
+}
+
+.desktopQuantityCell {
+  width: 88px;
+  vertical-align: top;
+}
+
+.desktopIngredientWarning {
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: text-bottom;
+}
+
 .mobileAdjustments {
   display: none;
 }

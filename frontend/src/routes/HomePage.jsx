@@ -29,9 +29,6 @@ import {
 
 import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import {
-  formatCutoff,
-  formatCutoffCountdown,
-  formatWeekRange,
   formatWeekStart,
   MAX_PAST_WEEKS,
   useSchedule,
@@ -66,6 +63,13 @@ function cadenceLabel(cadenceWeeks) {
   if (cadenceWeeks === 1) return 'Every week'
   if (cadenceWeeks === 2) return 'Every fortnight'
   return `Every ${cadenceWeeks} weeks`
+}
+
+function cutoffDaysLabel(cutoffAt) {
+  const cutoff = new Date(cutoffAt).getTime()
+  if (!Number.isFinite(cutoff)) return null
+  const days = Math.max(0, Math.ceil((cutoff - Date.now()) / 86_400_000))
+  return `Cutoff in ${days} ${days === 1 ? 'day' : 'days'}`
 }
 
 function RecipeTile({ entry, weekStart, onRemove, editable }) {
@@ -115,21 +119,18 @@ function RecipeTile({ entry, weekStart, onRemove, editable }) {
   )
 }
 
-function AddTile({ weekStart, remaining }) {
+function AddMealsButton({ weekStart }) {
   return (
-    <Tooltip label={`Pick recipes for ${formatWeekRange(weekStart)}`} withArrow>
-      <Box
-        component={Link}
-        to={`/browse?week=${weekStart}`}
-        className={classes.addTile}
-        aria-label={`Add recipes to the week of ${weekStart}`}
-      >
-        <IconPlus size={22} />
-        <span className={classes.addTileLabel}>
-          {remaining} {remaining === 1 ? 'slot' : 'slots'}
-        </span>
-      </Box>
-    </Tooltip>
+    <Button
+      component={Link}
+      to={`/browse?week=${weekStart}`}
+      className={classes.addMealsButton}
+      size="compact-sm"
+      leftSection={<IconPlus size={15} />}
+      aria-label={`Add meals to the week of ${weekStart}`}
+    >
+      Add meals
+    </Button>
   )
 }
 
@@ -138,12 +139,13 @@ function WeekRow({
   entries,
   recipesPerWeek,
   past = false,
+  showCutoff = false,
   onRemoveRecipe,
   onToggleSkip,
   skipPending,
 }) {
   const badge = past ? pastBadge(week) : STATUS_BADGE[week.status] ?? STATUS_BADGE.open
-  const countdown = week.status === 'open' ? formatCutoffCountdown(week.cutoff_at) : null
+  const cutoffLabel = showCutoff ? cutoffDaysLabel(week.cutoff_at) : null
   // A week that has been shopped for is a record, not a draft: its recipes are
   // what was cooked, and editing them would rewrite history rather than change
   // anything. The planning window is where recipes are chosen.
@@ -157,6 +159,7 @@ function WeekRow({
         week.is_active ? classes.weekRowActive : '',
         past ? classes.weekRowPast : '',
         past && !week.complete ? classes.weekRowCurrent : '',
+        entries.length > 0 ? classes.weekRowWithMeals : classes.weekRowEmpty,
         !past && (week.status === 'skipped' || week.status === 'paused')
           ? classes.weekRowInactive
           : '',
@@ -164,53 +167,48 @@ function WeekRow({
         .filter(Boolean)
         .join(' ')}
     >
-      <div className={classes.weekMeta}>
-        <Group gap={6} wrap="nowrap">
+      <div className={classes.weekInfo}>
+        <Group gap={8} wrap="wrap" className={classes.weekHeading}>
           <Title order={4} className={classes.weekTitle}>
             {formatWeekStart(week.week_start)}
           </Title>
-          {week.is_active && (
-            <Badge size="xs" variant="filled" color="fresh" radius="sm">
-              Now
-            </Badge>
-          )}
-        </Group>
-
-        <Group gap={6}>
           <Badge size="sm" variant="light" color={badge.color} radius="sm">
             {badge.label}
           </Badge>
+        </Group>
+
+        <Group gap={6} className={classes.weekDetails}>
           <Text size="xs" c="dimmed">
             {past
               ? `${entries.length} ${entries.length === 1 ? 'recipe' : 'recipes'}`
               : `${entries.length}/${recipesPerWeek} recipes`}
           </Text>
-        </Group>
 
-        {/* A deadline that expired weeks ago is not news. */}
-        {!past && (
-          <Text size="xs" c={countdown === 'closed' || week.closed ? 'orange' : 'dimmed'}>
-            {week.closed ? 'Cutoff was ' : 'Cutoff '}
-            {formatCutoff(week.cutoff_at)}
-            {countdown ? ` · ${countdown}` : ''}
-          </Text>
-        )}
-        <Group gap="xs" mt={4}>
-          {!past && (
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color={week.skipped ? 'fresh' : 'gray'}
-              loading={skipPending}
-              onClick={() => onToggleSkip(week)}
-              disabled={week.status === 'paused'}
-            >
-              {week.skipped ? 'Plan this week' : 'Skip week'}
-            </Button>
+          {cutoffLabel && (
+            <Text size="xs" c="dimmed" className={classes.cutoff}>
+              {cutoffLabel}
+            </Text>
           )}
+        </Group>
+      </div>
+
+      <div className={classes.weekActions}>
+        {!past && (
+          <Button
+            size="compact-sm"
+            variant="subtle"
+            color={week.skipped ? 'fresh' : 'gray'}
+            loading={skipPending}
+            onClick={() => onToggleSkip(week)}
+            disabled={week.status === 'paused'}
+          >
+            {week.skipped ? 'Plan this week' : 'Skip week'}
+          </Button>
+        )}
+        <Group gap="xs" wrap="nowrap">
           {entries.length > 0 && (
             <Button
-              size="compact-xs"
+              size="compact-sm"
               variant="subtle"
               component={Link}
               to={`/basket?week=${week.week_start}`}
@@ -219,32 +217,23 @@ function WeekRow({
               Basket
             </Button>
           )}
+          {editable && remaining > 0 && <AddMealsButton weekStart={week.week_start} />}
         </Group>
       </div>
 
-      <div className={classes.tiles}>
-        {entries.map((entry) => (
-          <RecipeTile
-            key={entry.recipe.id}
-            entry={entry}
-            weekStart={week.week_start}
-            editable={editable}
-            onRemove={() => onRemoveRecipe(week.week_start, entry.recipe.id)}
-          />
-        ))}
-        {editable && remaining > 0 && (
-          <AddTile weekStart={week.week_start} remaining={remaining} />
-        )}
-        {!editable && entries.length === 0 && (
-          <div className={classes.emptyHint}>
-            {week.skipped
-              ? 'Skipped — no shop this week.'
-              : past
-                ? 'Nothing was planned.'
-                : 'Paused.'}
-          </div>
-        )}
-      </div>
+      {entries.length > 0 && (
+        <div className={classes.tiles}>
+          {entries.map((entry) => (
+            <RecipeTile
+              key={entry.recipe.id}
+              entry={entry}
+              weekStart={week.week_start}
+              editable={editable}
+              onRemove={() => onRemoveRecipe(week.week_start, entry.recipe.id)}
+            />
+          ))}
+        </div>
+      )}
     </Box>
   )
 }
@@ -267,12 +256,13 @@ export default function HomePage() {
 
   return (
     <Stack gap="lg" className={classes.pageStack}>
-      <Group justify="space-between" align="flex-end" wrap="wrap" className={classes.pageHeader}>
-        <div>
-          <Group gap="xs">
-            <IconCalendarWeek size={28} color="var(--mantine-color-fresh-7)" />
-            <Title order={2}>Your shops</Title>
-          </Group>
+      <Group justify="space-between" wrap="nowrap" className={classes.pageHeader}>
+        <Group gap="sm" wrap="nowrap" className={classes.headerIntro}>
+          <Box className={classes.headerIcon}>
+            <IconCalendarWeek size={20} />
+          </Box>
+          <div>
+            <Title order={2} className={classes.pageTitle}>Your shops</Title>
           {settings ? (
             <Text c="dimmed" size="sm" className={classes.scheduleSummary}>
               {cadenceLabel(settings.cadence_weeks)} · recipes settled by{' '}
@@ -283,9 +273,10 @@ export default function HomePage() {
                   } before, ${settings.cutoff_time}`}
             </Text>
           ) : (
-            <Skeleton height={16} width={280} mt={6} />
+            <Skeleton height={16} width={280} mt={4} />
           )}
-        </div>
+          </div>
+        </Group>
         <Group gap="xs" wrap="nowrap" className={classes.headerActions}>
           <Button
             variant={paused ? 'filled' : 'default'}
@@ -301,6 +292,7 @@ export default function HomePage() {
           </Button>
           <Tooltip label="Schedule settings" withArrow>
             <ActionIcon
+              className={classes.settingsButton}
               component={Link}
               to="/settings"
               variant="default"
@@ -371,12 +363,13 @@ export default function HomePage() {
             />
           )}
 
-          {schedule.weeks.map((week) => (
+          {schedule.weeks.map((week, index) => (
             <WeekRow
               key={week.week_start}
               week={week}
               entries={getWeekRecipes(week.week_start)}
               recipesPerWeek={recipesPerWeek}
+              showCutoff={index === 0}
               onRemoveRecipe={removeRecipeFromWeek}
               onToggleSkip={(target) =>
                 setSkipped.mutate({ weekStart: target.week_start, skipped: !target.skipped })
