@@ -104,8 +104,14 @@
 }
 
 
-.summaryPanel {
+.summaryPanel,
+.mappingSurface {
   background: #ffffff;
+}
+
+:global([data-mantine-color-scheme='dark']) .summaryPanel,
+:global([data-mantine-color-scheme='dark']) .mappingSurface {
+  background: var(--hf-surface);
 }
 
 .summaryHeader {
@@ -145,6 +151,31 @@
   min-width: 0;
 }
 
+.metricPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background-color: var(--metric-pill-light-bg);
+  color: var(--metric-pill-light-color);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 650;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+:global([data-mantine-color-scheme='dark']) .metricPill {
+  background-color: var(--metric-pill-dark-bg);
+  color: var(--metric-pill-dark-color);
+}
+
+.selectedCandidateRow > td:first-child {
+  box-shadow: inset 4px 0 0 var(--mantine-color-fresh-6);
+}
 
 .optionCheckbox {
   margin-top: 26px;

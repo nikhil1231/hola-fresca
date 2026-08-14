@@ -1029,3 +1029,22 @@ class ScheduleOut(BaseModel):
 class ScheduleWeekIn(BaseModel):
     skipped: bool
     note: str | None = None
+
+
+class RetailerOut(BaseModel):
+    id: str
+    label: str
+    # Products can be scraped, mapped and priced.
+    catalogued: bool
+    # A basket can be pushed to the retailer's own cart. False means the week can
+    # still be planned and priced there, but the shop itself is done by hand.
+    shoppable: bool
+
+
+class RetailersOut(BaseModel):
+    active: str
+    items: list[RetailerOut] = Field(default_factory=list)
+
+
+class RetailerSelectionIn(BaseModel):
+    retailer: str

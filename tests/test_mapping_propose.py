@@ -46,11 +46,11 @@ def test_build_prompt_includes_usage_and_candidates():
     assert "450" in user  # median usage grams
 
 
-def test_parse_proposal_drops_hallucinated_and_normalises_ranks():
+def test_parse_proposal_drops_hallucinated_skus_and_keeps_the_model_ordering():
     ic = _ic()
     raw = {
         "accepted": [
-            {"sku": "sku-b", "rank": 5, "match_type": "exact", "reason": "ok"},
+            {"sku": "sku-b", "rank": 5, "match_type": "form_differs", "reason": "diced"},
             {"sku": "sku-a", "rank": 2, "match_type": "form_differs", "reason": "raw"},
             {"sku": "sku-ghost", "rank": 1, "match_type": "exact", "reason": "hallucinated"},
         ],
@@ -59,10 +59,30 @@ def test_parse_proposal_drops_hallucinated_and_normalises_ranks():
         "note": "fine",
     }
     parsed = P.parse_proposal(raw, ic)
-    skus = [a.sku for a in parsed.accepted]
-    assert skus == ["sku-a", "sku-b"]  # ghost dropped, sorted by rank then renumbered
+    # Ghost dropped; the model's own ordering survives as llm_rank, renumbered
+    # 1..n so the gaps it left ("2" and "5") mean nothing downstream.
+    assert [a.sku for a in parsed.accepted] == ["sku-a", "sku-b"]
+    assert [a.llm_rank for a in parsed.accepted] == [1, 2]
     assert [a.rank for a in parsed.accepted] == [1, 2]
-    assert parsed.accepted[0].match_type == "form_differs"
+
+
+def test_parse_proposal_orders_by_match_type_over_the_models_rank():
+    # The model put the form_differs product first; match type is not its call.
+    ic = _ic()
+    raw = {
+        "accepted": [
+            {"sku": "sku-b", "rank": 1, "match_type": "form_differs", "reason": "diced"},
+            {"sku": "sku-a", "rank": 2, "match_type": "exact", "reason": "fillets"},
+        ],
+        "each_to_grams": None,
+        "needs_substitution": False,
+        "note": "fine",
+    }
+    parsed = P.parse_proposal(raw, ic)
+    assert [a.sku for a in parsed.accepted] == ["sku-a", "sku-b"]
+    assert [a.rank for a in parsed.accepted] == [1, 2]
+    assert [a.llm_rank for a in parsed.accepted] == [2, 1]
+    assert parsed.accepted[0].match_type == "exact"
 
 
 def test_parse_proposal_invalid_match_type_defaults_to_exact():

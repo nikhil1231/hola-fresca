@@ -1,0 +1,130 @@
+{
+  "products": [
+    {
+      "sainId": "qj0txjyf",
+      "product_uid": "7317686",
+      "eans": ["0000001738339"],
+      "product_type": "BASIC",
+      "name": "Sainsbury's Spanish Chorizo Ring 225g",
+      "image": "https://assets.sainsburys-groceries.co.uk/gol/7317686/image.jpg",
+      "full_url": "https://www.sainsburys.co.uk/gol-ui/product/sainsburys-spanish-chorizo-ring-225g",
+      "unit_price": { "price": 10, "measure": "kg", "measure_amount": 1 },
+      "retail_price": { "price": 2.25, "measure": "" },
+      "original_unit_price": { "price": 11.56, "measure": "kg", "measure_amount": 1 },
+      "is_available": true,
+      "promotions": [
+        {
+          "promotion_uid": "10758248",
+          "strap_line": "Buy 1 for 2.25",
+          "original_price": 2.6,
+          "promo_type": "SIMPLE_FIXED_PRICE"
+        }
+      ],
+      "is_alcoholic": false,
+      "labels": [
+        { "label_uid": "Chilled", "text": "Chilled", "color": "#005096" },
+        { "label_uid": "Typical life 14 days", "text": "Typical life 14 days", "color": "#218234" }
+      ],
+      "reviews": {
+        "is_enabled": true,
+        "product_uid": "7317686",
+        "total": 94,
+        "average_rating": 4.3936
+      },
+      "assets": { "plp_image": "https://assets.sainsburys-groceries.co.uk/gol/7317686/image.jpg" },
+      "categories": [
+        { "id": "314374", "name": "Continental meats" },
+        { "id": "314374", "name": "Continental meats" },
+        { "id": "474595", "name": "Meat & fish essentials" }
+      ]
+    },
+    {
+      "sainId": "nrkyyt45",
+      "product_uid": "7995709",
+      "eans": ["0000000381437"],
+      "product_type": "BASIC",
+      "name": "Sainsbury's Chorizo Ring Mild 225g",
+      "image": "https://assets.sainsburys-groceries.co.uk/gol/7995709/image.jpg",
+      "full_url": "https://www.sainsburys.co.uk/gol-ui/product/sainsburys-chorizo-ring-mild-225g",
+      "unit_price": { "price": 11.56, "measure": "kg", "measure_amount": 1 },
+      "retail_price": { "price": 2.6, "measure": "" },
+      "is_available": true,
+      "promotions": [],
+      "labels": [],
+      "reviews": {
+        "is_enabled": true,
+        "product_uid": "7995709",
+        "total": 32,
+        "average_rating": 4.7188
+      },
+      "assets": { "plp_image": "https://assets.sainsburys-groceries.co.uk/gol/7995709/image.jpg" },
+      "categories": [{ "id": "314374", "name": "Continental meats" }]
+    },
+    {
+      "sainId": "x97jkpq0",
+      "product_uid": "536",
+      "eans": ["0000000358484"],
+      "product_type": "BASIC",
+      "name": "Sainsbury's Baked Beans In Tomato Sauce 400g",
+      "image": "https://assets.sainsburys-groceries.co.uk/gol/536/image.jpg",
+      "full_url": "https://www.sainsburys.co.uk/gol-ui/product/sainsburys-baked-beans-in-tomato-sauce-400g",
+      "unit_price": { "price": 0.95, "measure": "kg", "measure_amount": 1 },
+      "retail_price": { "price": 0.38, "measure": "" },
+      "is_available": true,
+      "promotions": [],
+      "labels": [
+        {
+          "label_uid": "ALDI PRICE MATCH*",
+          "text": "ALDI PRICE MATCH*",
+          "color": "#D70000"
+        }
+      ],
+      "reviews": {
+        "is_enabled": true,
+        "product_uid": "536",
+        "total": 238,
+        "average_rating": 3.5168
+      },
+      "assets": { "plp_image": "https://assets.sainsburys-groceries.co.uk/gol/536/image.jpg" },
+      "categories": [
+        { "id": "13263", "name": "Pulses & beans" },
+        { "id": "572864", "name": "Baked Beans" },
+        { "id": "474591", "name": "Food cupboard essentials" }
+      ],
+      "attributes": { "brand": ["Sainsbury's"] }
+    },
+    {
+      "sainId": "sjvyvyy4",
+      "product_uid": "3300787",
+      "product_type": "BASIC",
+      "name": "Heinz Baked Beans in a Rich Tomato Sauce 4 x 415g",
+      "full_url": "https://www.sainsburys.co.uk/gol-ui/product/heinz-baked-beans-in-a-rich-tomato-sauce-4-x-415g",
+      "unit_price": { "price": 2.35, "measure": "kg", "measure_amount": 1 },
+      "retail_price": { "price": 3.9, "measure": "" },
+      "is_available": false,
+      "promotions": [],
+      "labels": [],
+      "reviews": { "is_enabled": true, "product_uid": "3300787", "total": 274, "average_rating": 4.2628 },
+      "assets": { "plp_image": "https://assets.sainsburys-groceries.co.uk/gol/3300787/image.jpg" },
+      "categories": [{ "id": "572864", "name": "Baked Beans" }],
+      "attributes": { "brand": ["Heinz"] }
+    },
+    {
+      "sainId": "126t9874",
+      "product_uid": "671682",
+      "product_type": "BASIC",
+      "name": "Sainsbury's Baking Potatoes x4",
+      "full_url": "https://www.sainsburys.co.uk/gol-ui/product/sainsburys-baking-potatoes-x4",
+      "unit_price": { "price": 0.2, "measure": "ea", "measure_amount": 1 },
+      "retail_price": { "price": 0.79, "measure": "ea" },
+      "is_available": true,
+      "promotions": [],
+      "labels": [{ "label_uid": "BRITISH", "text": "BRITISH", "color": "#4c4c4c" }],
+      "reviews": { "is_enabled": true, "product_uid": "671682", "total": 115, "average_rating": 4.5391 },
+      "assets": { "plp_image": "https://assets.sainsburys-groceries.co.uk/gol/671682/image.jpg" },
+      "categories": [{ "id": "13238", "name": "Potatoes & sweet potatoes" }],
+      "attributes": { "brand": ["Sainsbury's"] }
+    }
+  ],
+  "controls": {}
+}

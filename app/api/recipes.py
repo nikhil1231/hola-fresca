@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api import facets as facet_cfg
 from app.api.deps import (
+    get_active_retailer,
     get_current_user,
     get_planner_csv_path,
     get_session,
@@ -57,6 +58,7 @@ from app import protein as protein_mod
 from app.mapping.candidates import load_source_id_index
 from app.media import image_url
 from app.planner.cache import get_index, get_standalone_prices
+from app.retailers import DEFAULT_RETAILER
 from app.planner.index import RETAILER, PlanIndex, PlanRecipe, resolve_protein
 
 
@@ -448,11 +450,14 @@ def _intrinsic_prices(
     rows: list[Recipe] | list[int],
     factory: sessionmaker[Session],
     csv_path: Path | None,
+    retailer: str = DEFAULT_RETAILER,
 ) -> dict[int, tuple[float, float, int]]:
     recipe_ids = [recipe if isinstance(recipe, int) else recipe.id for recipe in rows]
     if not recipe_ids:
         return {}
-    prices = get_standalone_prices(factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path)
+    prices = get_standalone_prices(
+        factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path, retailer=retailer
+    )
     return {
         recipe_id: (
             _round_money(price.score),
@@ -468,6 +473,7 @@ def _recipe_ids_with_pricing_gaps(
     recipe_ids: list[int],
     factory: sessionmaker[Session],
     csv_path: Path | None,
+    retailer: str = DEFAULT_RETAILER,
 ) -> set[int]:
     """Recipes carrying an ingredient the basket cannot price.
 
@@ -478,7 +484,9 @@ def _recipe_ids_with_pricing_gaps(
     """
     if not recipe_ids:
         return set()
-    prices = get_standalone_prices(factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path)
+    prices = get_standalone_prices(
+        factory, servings=INTRINSIC_PORTIONS, csv_path=csv_path, retailer=retailer
+    )
     return {
         recipe_id
         for recipe_id in recipe_ids
@@ -503,10 +511,11 @@ def _ingredient_keys(
     session: Session,
     ingredients: list[RecipeIngredient],
     csv_path: Path | None,
+    retailer: str = DEFAULT_RETAILER,
 ) -> dict[int, str]:
     sid_index = load_source_id_index(csv_path)
     mapping_rows = list(
-        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == RETAILER))
+        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == retailer))
     )
     roots = _alias_roots(mapping_rows)
     keys: dict[int, str] = {}
@@ -523,10 +532,11 @@ def _unmapped_ingredient_ids(
     session: Session,
     ingredients: list[RecipeIngredient],
     csv_path: Path | None,
+    retailer: str = DEFAULT_RETAILER,
 ) -> set[int]:
-    ingredient_keys = _ingredient_keys(session, ingredients, csv_path)
+    ingredient_keys = _ingredient_keys(session, ingredients, csv_path, retailer)
     mapping_rows = list(
-        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == RETAILER))
+        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == retailer))
     )
     by_key = {row.ingredient_key: row for row in mapping_rows}
     unmapped: set[int] = set()
@@ -550,10 +560,11 @@ def _has_display_quantity(ingredient: RecipeIngredient) -> bool:
     return ingredient.amount is not None or ingredient.amount_g is not None
 
 
-def _unmapped_recipe_ids(session: Session, csv_path: Path | None) -> set[int]:
+def _unmapped_recipe_ids(
+    session: Session, csv_path: Path | None, retailer: str = DEFAULT_RETAILER) -> set[int]:
     sid_index = load_source_id_index(csv_path)
     mapping_rows = list(
-        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == RETAILER))
+        session.scalars(select(IngredientMapping).where(IngredientMapping.retailer == retailer))
     )
     roots = _alias_roots(mapping_rows)
     approved_roots = {
@@ -607,6 +618,7 @@ def list_recipes(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> PaginatedRecipes:
     filters = dict(
         q=q, cuisine=cuisine, diet=diet, tag=tag, protein=protein, max_time=max_time,
@@ -621,7 +633,9 @@ def list_recipes(
         filtered_candidate_ids = _filtered_recipe_ids(session, filters, user.id)
         if exclude_unmapped:
             excluded_recipe_ids.update(
-                _recipe_ids_with_pricing_gaps(filtered_candidate_ids, factory, csv_path)
+                _recipe_ids_with_pricing_gaps(
+                    filtered_candidate_ids, factory, csv_path, retailer
+                )
             )
         candidate_ids = [
             recipe_id
@@ -643,14 +657,14 @@ def list_recipes(
     if q and sort == facet_cfg.DEFAULT_SORT and candidate_ids is not None:
         page_ids = candidate_ids[effective_offset:effective_offset + page_size]
         rows = _rows_in_id_order(session, page_ids)
-        intrinsic = _intrinsic_prices(rows, factory, csv_path)
+        intrinsic = _intrinsic_prices(rows, factory, csv_path, retailer)
     elif sort in {"price_low", "price_high"}:
         if candidate_ids is None:
             id_stmt = _apply_filters(select(Recipe.id), **filters, user_id=user.id)
             if excluded_recipe_ids:
                 id_stmt = id_stmt.where(Recipe.id.not_in(excluded_recipe_ids))
             candidate_ids = list(session.scalars(id_stmt).all())
-        intrinsic = _intrinsic_prices(candidate_ids, factory, csv_path)
+        intrinsic = _intrinsic_prices(candidate_ids, factory, csv_path, retailer)
         sorted_ids = sorted(
             candidate_ids,
             key=lambda recipe_id: (
@@ -691,7 +705,7 @@ def list_recipes(
                 .limit(page_size)
             )
             rows = session.scalars(stmt).all()
-        intrinsic = _intrinsic_prices(rows, factory, csv_path)
+        intrinsic = _intrinsic_prices(rows, factory, csv_path, retailer)
     page_ids = [r.id for r in rows]
     personal_ratings = _personal_rating_map(session, user.id, page_ids)
     wishlist = _wishlist_map(session, user.id, page_ids)
@@ -725,6 +739,7 @@ def get_recipe(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> RecipeDetail:
     recipe = _require_library_recipe(session, recipe_id)
 
@@ -737,9 +752,11 @@ def get_recipe(
         )
         if _has_display_quantity(ingredient)
     ]
-    ingredient_keys = _ingredient_keys(session, ingredients, csv_path)
-    unmapped_ingredient_ids = _unmapped_ingredient_ids(session, ingredients, csv_path)
-    index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path)
+    ingredient_keys = _ingredient_keys(session, ingredients, csv_path, retailer)
+    unmapped_ingredient_ids = _unmapped_ingredient_ids(
+        session, ingredients, csv_path, retailer
+    )
+    index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path, retailer)
     return RecipeDetail(
         id=recipe.id,
         name=recipe.name,
@@ -820,9 +837,12 @@ def get_recipe(
 
 
 def _plan_recipe(
-    factory: sessionmaker[Session], recipe_id: int, csv_path: Path | None
+    factory: sessionmaker[Session],
+    recipe_id: int,
+    csv_path: Path | None,
+    retailer: str = DEFAULT_RETAILER,
 ) -> tuple[PlanIndex, PlanRecipe | None]:
-    index = get_index(factory, csv_path=csv_path)
+    index = get_index(factory, csv_path=csv_path, retailer=retailer)
     return index, index.recipes.get(recipe_id)
 
 
@@ -927,6 +947,7 @@ def preview_protein(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     _user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> ProteinPreviewOut:
     """The recipe as it would be with this protein modifier applied.
 
@@ -937,7 +958,7 @@ def preview_protein(
     """
     recipe = _require_library_recipe(session, recipe_id)
 
-    index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path)
+    index, plan_recipe = _plan_recipe(factory, recipe_id, csv_path, retailer)
     if plan_recipe is None or plan_recipe.protein is None:
         raise HTTPException(
             status_code=400, detail="This recipe has no protein that can be swapped or scaled."
@@ -958,8 +979,10 @@ def preview_protein(
         )
         if _has_display_quantity(ingredient)
     ]
-    ingredient_keys = _ingredient_keys(session, ingredients, csv_path)
-    unmapped_ingredient_ids = _unmapped_ingredient_ids(session, ingredients, csv_path)
+    ingredient_keys = _ingredient_keys(session, ingredients, csv_path, retailer)
+    unmapped_ingredient_ids = _unmapped_ingredient_ids(
+        session, ingredients, csv_path, retailer
+    )
     companions = protein_mod.companion_swaps(list(ingredient_keys.values()), resolution)
 
     out_ingredients: list[IngredientOut] = []
@@ -1049,6 +1072,7 @@ def set_personal_rating(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> RecipeDetail:
     _require_library_recipe(session, recipe_id)
 
@@ -1063,7 +1087,7 @@ def set_personal_rating(
     else:
         existing.rating = body.rating
     session.commit()
-    return get_recipe(recipe_id, session, factory, csv_path, user)
+    return get_recipe(recipe_id, session, factory, csv_path, user, retailer)
 
 
 @router.put("/recipes/{recipe_id}/wishlist", response_model=RecipeDetail)
@@ -1074,6 +1098,7 @@ def set_wishlist(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> RecipeDetail:
     _require_library_recipe(session, recipe_id)
 
@@ -1083,7 +1108,7 @@ def set_wishlist(
     elif not body.wishlisted and existing is not None:
         session.delete(existing)
     session.commit()
-    return get_recipe(recipe_id, session, factory, csv_path, user)
+    return get_recipe(recipe_id, session, factory, csv_path, user, retailer)
 
 
 @router.post("/recipes/{recipe_id}/hide")
@@ -1166,6 +1191,7 @@ def revert_recipe_edits(
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
     _admin: User = Depends(require_admin),
+    retailer: str = Depends(get_active_retailer),
 ) -> RecipeDetail:
     """Put the source's original numbers back and mark the edits reverted.
 
@@ -1178,7 +1204,7 @@ def revert_recipe_edits(
         audit_mod.revert_recipe(session, recipe_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return get_recipe(recipe_id, session, factory, csv_path, user)
+    return get_recipe(recipe_id, session, factory, csv_path, user, retailer)
 
 
 @router.get("/facets", response_model=FacetsOut)
@@ -1186,6 +1212,7 @@ def get_facets(
     session: Session = Depends(get_session),
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> FacetsOut:
     # Counted over what this user can actually see, so a facet never promises
     # results that a personal hide has already taken off the page.
@@ -1261,7 +1288,7 @@ def get_facets(
         excludes.append(
             FacetCount(value=v, label=label, count=ingredient_count(facet_cfg.INGREDIENT_KEYWORDS[v]))
         )
-    unmapped_count = len(_unmapped_recipe_ids(session, csv_path))
+    unmapped_count = len(_unmapped_recipe_ids(session, csv_path, retailer))
     if unmapped_count:
         excludes.insert(
             0,

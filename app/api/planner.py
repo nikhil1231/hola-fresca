@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api.deps import (
+    get_active_retailer,
     get_current_user,
     get_planner_csv_path,
     get_session,
@@ -251,13 +252,17 @@ def _load_planner_index(
     factory: sessionmaker[Session],
     recipe_ids: list[int],
     csv_path: Path | None,
+    retailer: str = RETAILER,
 ) -> PlanIndex:
     """The shared curated index; ``recipe_ids`` is only ever a subset of it.
 
     Every recipe id reaching this module has been through ``_require_curated`` or
     ``_apply_filters``, both of which insist on the curated library.
+
+    One index per retailer, cached separately — see :mod:`app.planner.cache`. The
+    recipes in them are identical; the packs are not, which is the whole point.
     """
-    return get_index(factory, csv_path=csv_path)
+    return get_index(factory, csv_path=csv_path, retailer=retailer)
 
 
 @router.post("/basket", response_model=BasketOut)
@@ -267,20 +272,21 @@ def basket(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> BasketOut:
     recipe_ids = _selection_ids(body.selections)
     _require_curated(session, recipe_ids)
     if not body.selections:
         return _basket_out(Basket())
 
-    index = _load_planner_index(factory, recipe_ids, csv_path)
+    index = _load_planner_index(factory, recipe_ids, csv_path, retailer)
     selections = [_planner_selection(selection) for selection in body.selections]
     return _basket_out(build_basket(
         index,
         selections,
         pack_overrides=body.pack_overrides,
         snap_overrides=body.snap_overrides,
-        pack_preferences=pack_preferences(session, user.id),
+        pack_preferences=pack_preferences(session, user.id, retailer=retailer),
         pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session, user.id),
     ))
 
@@ -291,6 +297,7 @@ def set_pack_preference(
     session: Session = Depends(get_session),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> PackPreferenceOut:
     """Fix (or release) the pack size this user always buys an ingredient in.
 
@@ -304,7 +311,7 @@ def set_pack_preference(
     """
     mapping = session.scalar(
         select(IngredientMapping).where(
-            IngredientMapping.retailer == RETAILER,
+            IngredientMapping.retailer == retailer,
             IngredientMapping.ingredient_key == body.ingredient_key,
         )
     )
@@ -317,7 +324,9 @@ def set_pack_preference(
             status_code=400,
             detail=f"{body.sku} is not an approved product for {body.ingredient_key}",
         )
-    write_pack_preference(session, user.id, body.ingredient_key, body.sku)
+    write_pack_preference(
+        session, user.id, body.ingredient_key, body.sku, retailer=retailer
+    )
     session.commit()
     note_pack_preference(factory)
     return PackPreferenceOut(ingredient_key=body.ingredient_key, sku=body.sku)
@@ -330,6 +339,7 @@ def _candidate_ids(
     factory: sessionmaker[Session],
     csv_path: Path | None,
     user_id: int,
+    retailer: str = RETAILER,
 ) -> set[int]:
     """Which recipes the request's filters allow — a membership test, not an order.
 
@@ -341,7 +351,9 @@ def _candidate_ids(
     if "unmapped" not in body.filters.exclude:
         return candidate_ids
 
-    gap_recipe_ids = _recipe_ids_with_pricing_gaps(sorted(candidate_ids), factory, csv_path)
+    gap_recipe_ids = _recipe_ids_with_pricing_gaps(
+        sorted(candidate_ids), factory, csv_path, retailer
+    )
     return candidate_ids - gap_recipe_ids
 
 
@@ -352,6 +364,7 @@ def suggestions(
     factory: sessionmaker[Session] = Depends(get_session_factory),
     csv_path: Path | None = Depends(get_planner_csv_path),
     user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
 ) -> PlannerSuggestionsOut:
     pinned_recipe_ids = _selection_ids(body.selections)
     _require_curated(session, pinned_recipe_ids)
@@ -366,9 +379,12 @@ def suggestions(
         pinned,
         candidate_portions=body.candidate_portions,
         csv_path=csv_path,
-        pack_preferences=pack_preferences(session, user.id),
+        retailer=retailer,
+        pack_preferences=pack_preferences(session, user.id, retailer=retailer),
     )
-    allowed = _candidate_ids(session, body, set(pinned_recipe_ids), factory, csv_path, user.id)
+    allowed = _candidate_ids(
+        session, body, set(pinned_recipe_ids), factory, csv_path, user.id, retailer
+    )
 
     page_scores = [c for c in ranked if c.recipe_id in allowed]
     total = len(page_scores)

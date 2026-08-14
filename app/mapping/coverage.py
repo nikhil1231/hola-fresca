@@ -25,12 +25,14 @@ from app.db.models import (
 )
 from app.mapping import service
 from app.mapping.candidates import load_source_id_index
+from app.retailers import DEFAULT_RETAILER
 
-RETAILER = "ocado"
+#: Default shop; every public function takes ``retailer`` and falls back to it.
+RETAILER = DEFAULT_RETAILER
 DEFAULT_STATUSES = ("approved",)
 
 
-def _mapped_keys(session: Session, statuses: tuple[str, ...]) -> set[str]:
+def _mapped_keys(session: Session, statuses: tuple[str, ...], retailer: str) -> set[str]:
     """Ingredient keys that no longer need shopping decisions.
 
     Three ways to qualify: the mapping has accepted products; it is a pantry
@@ -41,7 +43,7 @@ def _mapped_keys(session: Session, statuses: tuple[str, ...]) -> set[str]:
         row[0]
         for row in session.execute(
             select(IngredientMapping.ingredient_key).where(
-                IngredientMapping.retailer == RETAILER,
+                IngredientMapping.retailer == retailer,
                 IngredientMapping.status.in_(statuses),
                 or_(IngredientMapping.products.any(), IngredientMapping.pantry_staple == 1),
             )
@@ -49,12 +51,12 @@ def _mapped_keys(session: Session, statuses: tuple[str, ...]) -> set[str]:
     }
     alias_rows = session.execute(
         select(IngredientMapping.ingredient_key).where(
-            IngredientMapping.retailer == RETAILER,
+            IngredientMapping.retailer == retailer,
             IngredientMapping.alias_of.is_not(None),
         )
     ).all()
     for (key,) in alias_rows:
-        if service.resolve_alias(session, key) in resolved:
+        if service.resolve_alias(session, key, retailer) in resolved:
             resolved.add(key)
     return resolved
 
@@ -77,13 +79,14 @@ def coverage_report(
     *,
     statuses: tuple[str, ...] = DEFAULT_STATUSES,
     csv_path: Path | None = None,
+    retailer: str = RETAILER,
 ) -> CoverageReport:
     sid_index = load_source_id_index(csv_path)
     report = CoverageReport()
     unresolved: dict[str, int] = defaultdict(int)
 
     with session_factory() as session:
-        mapped = _mapped_keys(session, statuses)
+        mapped = _mapped_keys(session, statuses, retailer)
         rows = session.execute(
             select(RecipeIngredient.source_ingredient_id)
             .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
@@ -136,11 +139,11 @@ class Basket:
 
 
 def _best_product(
-    session: Session, key: str, statuses: tuple[str, ...]
+    session: Session, key: str, statuses: tuple[str, ...], retailer: str
 ) -> tuple[IngredientMapping | None, IngredientMappingProduct | None]:
     mapping = session.scalar(
         select(IngredientMapping).where(
-            IngredientMapping.retailer == RETAILER,
+            IngredientMapping.retailer == retailer,
             IngredientMapping.ingredient_key == key,
             IngredientMapping.status.in_(statuses),
         )
@@ -165,6 +168,7 @@ def build_basket(
     statuses: tuple[str, ...] = DEFAULT_STATUSES,
     include_staples: bool = False,
     csv_path: Path | None = None,
+    retailer: str = RETAILER,
 ) -> Basket:
     sid_index = load_source_id_index(csv_path)
     need_g: dict[str, float] = defaultdict(float)
@@ -184,7 +188,7 @@ def build_basket(
                 # different names sums into one pack instead of buying twice.
                 mapping = session.scalar(
                     select(IngredientMapping).where(
-                        IngredientMapping.retailer == RETAILER,
+                        IngredientMapping.retailer == retailer,
                         IngredientMapping.ingredient_key == raw_key,
                     )
                 )
@@ -203,7 +207,7 @@ def build_basket(
         for key, grams in sorted(need_g.items(), key=lambda kv: kv[1], reverse=True):
             # Staples (salt, oil, sugar) are mapped and approved, but assumed
             # already in the cupboard — record them, don't shop for them.
-            mapping, best = _best_product(session, key, statuses)
+            mapping, best = _best_product(session, key, statuses, retailer)
             if mapping is not None and mapping.pantry_staple and not include_staples:
                 basket.staples.append(name_by_key.get(key, key))
                 continue
@@ -211,7 +215,7 @@ def build_basket(
                 basket.unmapped.append(name_by_key.get(key, key))
                 continue
             product = best.product or session.scalar(
-                select(Product).where(Product.retailer == RETAILER, Product.sku == best.sku)
+                select(Product).where(Product.retailer == retailer, Product.sku == best.sku)
             )
             line = BasketLine(ingredient_key=key, name=name_by_key.get(key, key), need_g=round(grams, 1))
             if product is None:

@@ -15,32 +15,38 @@ from pathlib import Path
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import config
-from app.mapping import service
+from app.mapping import ordering, service
 from app.mapping.candidates import Candidate, IngredientCandidates, iter_worklist
 from app.mapping.openai_client import Completer
+from app.retailers import DEFAULT_RETAILER
 
 log = logging.getLogger("holafresca.mapping")
 
 MATCH_TYPES = ("exact", "substitute", "form_differs")
 
 SYSTEM_PROMPT = (
-    "You map a cooking-recipe ingredient to real UK Ocado grocery products. "
+    "You map a cooking-recipe ingredient to real UK supermarket grocery products. "
     "You are given the ingredient, how it is typically used across recipes (grams), "
-    "and a list of candidate products already returned by Ocado search. "
+    "and a list of candidate products already returned by the retailer's search. "
     "Choose only the candidates that genuinely ARE this ingredient, and rank them by "
-    "how good a default they are.\n"
+    "how well the pack suits the typical usage.\n"
     "Policies:\n"
-    "- Prefer Ocado own-brand / good-value options; prefer the product family whose pack "
-    "size suits the typical usage. Include a few pack sizes of the same product when useful.\n"
-    "- Reject premium/gourmet outliers, wrong forms (e.g. breaded when raw is wanted), and "
-    "unrelated products the search dragged in.\n"
-    "- Use ratings only as a tie-break, and to reject clearly bad products.\n"
+    "- Prefer own-brand / everyday options over premium ranges; prefer the product family "
+    "whose pack size suits the typical usage. Include a few pack sizes of the same product "
+    "when useful.\n"
+    "- Reject wrong forms (e.g. breaded when raw is wanted), and unrelated products the "
+    "search dragged in. Reject clearly bad products.\n"
+    "- Do NOT try to balance price against rating when ranking: the final order is computed "
+    "afterwards from unit price and ratings. Your 'rank' should express only which product "
+    "is the most sensible thing to cook from — pack size against typical usage, and how "
+    "squarely the product is the ingredient.\n"
     "- NEVER force a match. If nothing fits directly, return an empty 'accepted' list and set "
     "'needs_substitution' true, explaining the substitution or composite in 'note'.\n"
     "- If the ingredient is sold by count (e.g. limes, garlic bulbs) estimate 'each_to_grams' "
     "(grams per single unit); otherwise leave it null.\n"
     "- 'match_type': 'exact' (is the ingredient), 'substitute' (a stand-in), or 'form_differs' "
-    "(right ingredient, different prep/form). Every accepted sku must be one of the given skus."
+    "(right ingredient, different prep/form). This decides the top-level grouping of the "
+    "offered products, so be precise with it. Every accepted sku must be one of the given skus."
 )
 
 PROPOSAL_SCHEMA = {
@@ -75,6 +81,8 @@ class AcceptedProduct:
     rank: int
     match_type: str
     reason: str
+    #: The model's own ordering, before :mod:`app.mapping.ordering` re-sorted it.
+    llm_rank: int | None = None
 
 
 @dataclass
@@ -120,7 +128,7 @@ def build_prompt(ic: IngredientCandidates) -> tuple[str, str]:
         "candidates": [_candidate_line(c) for c in ic.candidates],
     }
     user = (
-        "Ingredient and candidate Ocado products (choose and rank the good matches):\n"
+        "Ingredient and candidate products (choose and rank the good matches):\n"
         + json.dumps(payload, ensure_ascii=False, indent=1)
     )
     return SYSTEM_PROMPT, user
@@ -146,9 +154,14 @@ def parse_proposal(raw: dict, ic: IngredientCandidates) -> ProposedMapping:
                 reason=str(entry.get("reason") or ""),
             )
         )
+    # Normalise the model's ordering to 1..n and keep it, then let the
+    # deterministic pass decide the order the products are actually offered in.
     accepted.sort(key=lambda a: a.rank)
     for i, a in enumerate(accepted, start=1):
-        a.rank = i  # normalise ranks to 1..n
+        a.llm_rank = i
+    accepted = ordering.order_accepted(accepted, ic.candidates)
+    for i, a in enumerate(accepted, start=1):
+        a.rank = i
     each = raw.get("each_to_grams")
     return ProposedMapping(
         each_to_grams=float(each) if isinstance(each, (int, float)) else None,
@@ -181,7 +194,14 @@ def run_propose(
     model: str | None = None,
     csv_path: Path | None = None,
     complete: Completer | None = None,
+    retailer: str = DEFAULT_RETAILER,
 ) -> ProposeResult:
+    """Propose mappings for one retailer's candidate pool.
+
+    Mappings are per-shop rows, so this is run once per retailer: the same
+    ingredient needs its own proposal against each catalogue, and being mapped at
+    one shop is not a reason to skip it at another.
+    """
     if complete is None:
         from app.mapping.openai_client import OpenAIJSONClient
 
@@ -192,8 +212,8 @@ def run_propose(
 
     result = ProposeResult()
     with session_factory() as session:
-        worklist = iter_worklist(session, csv_path=csv_path, limit=limit)
-        existing = service.existing_mapping_keys(session)
+        worklist = iter_worklist(session, csv_path=csv_path, limit=limit, retailer=retailer)
+        existing = service.existing_mapping_keys(session, retailer)
 
     # By default (and with --only-missing) skip ingredients already mapped;
     # --force re-proposes and overwrites them.
@@ -201,8 +221,8 @@ def run_propose(
     result.skipped = len(worklist) - len(to_process)
     total = len(to_process)
     log.info(
-        "propose: %d in worklist, %d to process, %d already mapped (skipped); model=%s",
-        len(worklist), total, result.skipped, model_name,
+        "propose[%s]: %d in worklist, %d to process, %d already mapped (skipped); model=%s",
+        retailer, len(worklist), total, result.skipped, model_name,
     )
 
     for i, ic in enumerate(to_process, start=1):
@@ -214,7 +234,9 @@ def run_propose(
             log.warning("[%d/%d] %s -> ERROR: %s", i, total, ic.name, exc)
             continue
         with session_factory() as session:
-            service.write_proposal(session, ic, proposed, model=model_name)
+            service.write_proposal(
+                session, ic, proposed, model=model_name, retailer=retailer
+            )
         result.proposed += 1
         flags = []
         if proposed.each_to_grams is not None:

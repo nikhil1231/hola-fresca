@@ -13,9 +13,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import IngredientMapping, IngredientMappingProduct
+from app.mapping import ordering
 from app.mapping.candidates import Candidate, IngredientCandidates
+from app.retailers import DEFAULT_RETAILER, RETAILER_IDS
 
-RETAILER = "ocado"
+#: The shop these functions read when the caller names none. Kept as a module
+#: constant so existing call sites keep working; every function that touches a
+#: retailer-scoped table takes ``retailer`` and defaults to this.
+RETAILER = DEFAULT_RETAILER
 VALID_STATUSES = ("proposed", "approved", "rejected", "needs_review", "no_match", "alias")
 MATCH_TYPES = ("exact", "substitute", "form_differs")
 
@@ -26,6 +31,9 @@ class AcceptedInput:
     rank: int = 1
     match_type: str = "exact"
     reason: str | None = None
+    #: The model's own ordering, kept so the offered order can be recomputed
+    #: without another LLM pass. None for a human decision.
+    llm_rank: int | None = None
 
 
 @dataclass
@@ -87,14 +95,55 @@ class IngredientDetail:
 
 
 def existing_mapping_keys(session: Session, retailer: str = RETAILER) -> set[str]:
+    """Keys already represented for ``retailer``.
+
+    Product decisions are retailer-specific, but aliases describe recipe
+    ingredients and are shared.  A globally aliased key must therefore never be
+    sent through another retailer's product proposal pass.
+    """
     return {
         row[0]
         for row in session.execute(
             select(IngredientMapping.ingredient_key).where(
-                IngredientMapping.retailer == retailer
+                or_(
+                    IngredientMapping.retailer == retailer,
+                    IngredientMapping.alias_of.is_not(None),
+                )
             )
         )
     }
+
+
+def _shared_alias_target(session: Session, key: str) -> str | None:
+    """Return the retailer-independent alias target for ``key``.
+
+    ``alias_of`` predates multiple catalogues and still lives on each mapping
+    row.  Treat those columns as replicated copies of one ingredient fact.  The
+    write path below keeps them equal; raising on conflicting legacy data is
+    safer than allowing query order to decide which ingredient gets bought.
+    """
+    targets = list(
+        session.scalars(
+            select(IngredientMapping.alias_of)
+            .where(
+                IngredientMapping.ingredient_key == key,
+                IngredientMapping.alias_of.is_not(None),
+            )
+            .distinct()
+        )
+    )
+    if len(targets) > 1:
+        raise ValueError(f"conflicting shared aliases for {key!r}: {', '.join(sorted(targets))}")
+    return targets[0] if targets else None
+
+
+def _keep_shared_alias(mapping: IngredientMapping, target: str | None) -> None:
+    """Restore alias state after a retailer-specific proposal/decision write."""
+    if target is None:
+        return
+    mapping.alias_of = target
+    mapping.status = "alias"
+    mapping.decided_by = "human"
 
 
 def _representative_price(ic: IngredientCandidates, accepted_skus: list[str]) -> float | None:
@@ -124,6 +173,7 @@ def _upsert_mapping(session: Session, ic: IngredientCandidates, retailer: str) -
         session.add(mapping)
     mapping.name = ic.name
     mapping.line_count = ic.line_count
+    _keep_shared_alias(mapping, _shared_alias_target(session, ic.ingredient_key))
     return mapping
 
 
@@ -148,6 +198,7 @@ def _set_children(
                 product_id=cand.product_id if cand else None,
                 sku=a.sku,
                 rank=a.rank,
+                llm_rank=a.llm_rank,
                 match_type=a.match_type if a.match_type in MATCH_TYPES else "exact",
                 accepted=1,
                 reason=a.reason,
@@ -156,12 +207,22 @@ def _set_children(
         )
 
 
-def write_proposal(session: Session, ic: IngredientCandidates, proposed, *, model: str) -> None:
+def write_proposal(
+    session: Session,
+    ic: IngredientCandidates,
+    proposed,
+    *,
+    model: str,
+    retailer: str = RETAILER,
+) -> None:
     """Persist an LLM proposal as ``status='proposed'`` (overwrites any prior)."""
-    mapping = _upsert_mapping(session, ic, RETAILER)
+    mapping = _upsert_mapping(session, ic, retailer)
     session.flush()
     accepted = [
-        AcceptedInput(sku=a.sku, rank=a.rank, match_type=a.match_type, reason=a.reason)
+        AcceptedInput(
+            sku=a.sku, rank=a.rank, match_type=a.match_type, reason=a.reason,
+            llm_rank=a.llm_rank,
+        )
         for a in proposed.accepted
     ]
     _set_children(session, mapping, ic, accepted, source="llm")
@@ -169,10 +230,103 @@ def write_proposal(session: Session, ic: IngredientCandidates, proposed, *, mode
     mapping.decided_by = "llm"
     mapping.model = model
     mapping.llm_notes = proposed.note
-    mapping.each_to_grams = proposed.each_to_grams
+    # Only ever filled in, never overwritten. ``derive_count_metadata`` defers to
+    # a value that is already there, so a re-proposal that guessed differently
+    # would stick — and grams-per-unit is not what a re-run is trying to improve.
+    if mapping.each_to_grams is None:
+        mapping.each_to_grams = proposed.each_to_grams
     mapping.needs_substitution = 1 if proposed.needs_substitution else 0
     mapping.spend_score = _spend_score(ic, [a.sku for a in accepted])
+    _keep_shared_alias(mapping, _shared_alias_target(session, ic.ingredient_key))
     session.commit()
+
+
+def _candidate_from_product(mp: IngredientMappingProduct) -> Candidate | None:
+    """A :class:`Candidate` for an already-accepted product row.
+
+    Reordering only compares the products a mapping already accepted, so it reads
+    them straight off the join rather than re-gathering the whole search cache.
+    """
+    product = mp.product
+    if product is None:
+        return None
+    return Candidate(
+        product_id=product.id,
+        sku=product.sku,
+        name=product.name,
+        brand=product.brand,
+        pack_size_raw=product.pack_size_raw,
+        pack_size_value=product.pack_size_value,
+        pack_size_unit=product.pack_size_unit,
+        price=product.price,
+        unit_price=product.unit_price,
+        unit_price_basis=product.unit_price_basis,
+        # Treat 0 ratings as "no rating" rather than a real 0.0-star score.
+        avg_rating=product.avg_rating if (product.ratings_count or 0) > 0 else None,
+        ratings_count=product.ratings_count or None,
+        url=product.url,
+        result_rank=mp.rank,
+        retailer=product.retailer,
+    )
+
+
+def reorder_proposals(session: Session, *, retailer: str = RETAILER) -> int:
+    """Re-sort every LLM proposal's products under the current ordering rules.
+
+    The point of storing ``llm_rank`` — retuning the balance between unit price
+    and rating costs a re-sort, not another pass over the model. Only untouched
+    LLM proposals are moved: once a human has ordered a mapping, that order is
+    theirs. Returns the number of mappings whose order actually changed.
+    """
+    mappings = session.scalars(
+        select(IngredientMapping).where(
+            IngredientMapping.retailer == retailer,
+            IngredientMapping.status == "proposed",
+            IngredientMapping.decided_by == "llm",
+        )
+    ).all()
+
+    changed = 0
+    for mapping in mappings:
+        children = list(mapping.products)
+        if len(children) < 2:
+            continue
+        candidates = [c for c in (_candidate_from_product(mp) for mp in children) if c]
+        ordered = ordering.order_accepted(children, candidates)
+        if [mp.sku for mp in ordered] == [mp.sku for mp in sorted(children, key=lambda p: p.rank)]:
+            continue
+        # (mapping_id, rank) is unique, so the new ranks are parked out of the
+        # way before being written; assigning them directly would collide with
+        # the rows still holding the old values.
+        for i, mp in enumerate(ordered, start=1):
+            mp.rank = -i
+        session.flush()
+        for mp in children:
+            mp.rank = -mp.rank
+        session.flush()
+        mapping.spend_score = _spend_score_from_children(mapping, ordered)
+        changed += 1
+
+    session.commit()
+    return changed
+
+
+def _spend_score_from_children(
+    mapping: IngredientMapping, ordered: list[IngredientMappingProduct]
+) -> float | None:
+    """``line_count x top price``, recomputed when reordering moves the top.
+
+    Mirrors :func:`_representative_price`: the new top product's price when it
+    has one, and the median of the rest when it does not.
+    """
+    if mapping.pantry_staple:
+        return None
+    prices = [mp.product.price for mp in ordered if mp.product and mp.product.price is not None]
+    if not prices:
+        return None
+    top = ordered[0].product
+    price = top.price if top is not None and top.price is not None else statistics.median(prices)
+    return round(mapping.line_count * price, 2)
 
 
 def save_decision(
@@ -208,6 +362,7 @@ def save_decision(
     mapping.pantry_staple = 1 if decision.pantry_staple else 0
     mapping.reviewer_notes = decision.reviewer_notes
     mapping.spend_score = None if decision.pantry_staple else _spend_score(ic, [a.sku for a in accepted])
+    _keep_shared_alias(mapping, _shared_alias_target(session, ic.ingredient_key))
     session.commit()
     return mapping
 
@@ -222,12 +377,9 @@ def resolve_alias(session: Session, key: str, retailer: str = RETAILER) -> str:
     current = key
     while current not in seen:
         seen.add(current)
-        target = session.scalar(
-            select(IngredientMapping.alias_of).where(
-                IngredientMapping.retailer == retailer,
-                IngredientMapping.ingredient_key == current,
-            )
-        )
+        # Ingredient aliases are independent of the catalogue. ``retailer`` is
+        # retained in the signature for compatibility with mapping call sites.
+        target = _shared_alias_target(session, current)
         if not target:
             return current
         current = target
@@ -252,22 +404,27 @@ def set_alias(
         raise ValueError(f"no mapping for {ingredient_key!r}")
 
     if target_key is None:
-        mapping.alias_of = None
-        # Back into the review queue: the products it kept are its own again.
-        mapping.status = "proposed"
-        mapping.decided_by = "human"
+        for row in session.scalars(
+            select(IngredientMapping).where(
+                IngredientMapping.ingredient_key == ingredient_key
+            )
+        ):
+            row.alias_of = None
+            # Back into each retailer's review queue: the products it kept are
+            # its own again.
+            row.status = "proposed"
+            row.decided_by = "human"
         session.commit()
         return mapping
 
     if target_key == ingredient_key:
         raise ValueError("an ingredient cannot be an alias of itself")
-    target = session.scalar(
-        select(IngredientMapping).where(
-            IngredientMapping.retailer == retailer,
-            IngredientMapping.ingredient_key == target_key,
-        )
+    target_exists = session.scalar(
+        select(IngredientMapping.id).where(
+            IngredientMapping.ingredient_key == target_key
+        ).limit(1)
     )
-    if target is None:
+    if target_exists is None:
         raise ValueError(f"no mapping for target {target_key!r}")
 
     # Point at the target's root so chains stay flat, then reject the link if
@@ -276,9 +433,28 @@ def set_alias(
     if root == ingredient_key:
         raise ValueError("that would create an alias cycle")
 
-    mapping.alias_of = root
-    mapping.status = "alias"
-    mapping.decided_by = "human"
+    # Materialise the shared relationship for every catalogue. This makes a new
+    # retailer inherit aliases immediately, even before that retailer has
+    # searched either spelling itself.
+    by_retailer = {
+        row.retailer: row
+        for row in session.scalars(
+            select(IngredientMapping).where(
+                IngredientMapping.ingredient_key == ingredient_key
+            )
+        )
+    }
+    for retailer_id in RETAILER_IDS:
+        row = by_retailer.get(retailer_id)
+        if row is None:
+            row = IngredientMapping(
+                retailer=retailer_id,
+                ingredient_key=ingredient_key,
+                name=mapping.name,
+                line_count=mapping.line_count,
+            )
+            session.add(row)
+        _keep_shared_alias(row, root)
     session.commit()
     return mapping
 
@@ -293,15 +469,32 @@ def list_aliases(session: Session, retailer: str = RETAILER) -> list[tuple[str, 
     ).all()
     out = []
     for m in rows:
-        out.append((m.ingredient_key, m.name, m.alias_of, _name_of(session, m.alias_of) or m.alias_of))
+        out.append(
+            (
+                m.ingredient_key,
+                m.name,
+                m.alias_of,
+                _name_of(session, m.alias_of, retailer) or m.alias_of,
+            )
+        )
     return sorted(out, key=lambda r: r[3].lower())
 
 
 def _name_of(session: Session, key: str, retailer: str = RETAILER) -> str | None:
-    return session.scalar(
+    name = session.scalar(
         select(IngredientMapping.name).where(
             IngredientMapping.retailer == retailer, IngredientMapping.ingredient_key == key
         )
+    )
+    if name is not None:
+        return name
+    # The target may not have reached this retailer's mapping queue yet. Its
+    # recipe-facing name is still shared, so fall back to another catalogue.
+    return session.scalar(
+        select(IngredientMapping.name)
+        .where(IngredientMapping.ingredient_key == key)
+        .order_by(IngredientMapping.id)
+        .limit(1)
     )
 
 
@@ -367,7 +560,11 @@ def get_detail(session: Session, ic: IngredientCandidates, retailer: str = RETAI
         pantry_staple=bool(mapping.pantry_staple) if mapping else False,
         search_term=(mapping.search_term if mapping and mapping.search_term else _default_term(ic)),
         alias_of=mapping.alias_of if mapping else None,
-        alias_of_name=_name_of(session, mapping.alias_of) if mapping and mapping.alias_of else None,
+        alias_of_name=(
+            _name_of(session, mapping.alias_of, retailer)
+            if mapping and mapping.alias_of
+            else None
+        ),
         decided_by=mapping.decided_by if mapping else None,
         model=mapping.model if mapping else None,
         llm_notes=mapping.llm_notes if mapping else None,

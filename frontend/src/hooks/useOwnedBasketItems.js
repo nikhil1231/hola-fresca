@@ -6,7 +6,7 @@ import { usePlanWeek, useOptimisticWeek, usePlantWeek } from './usePlanQuery.js'
 
 // "I already have this" — the basket lines to leave out of the shop, for one
 // week. Server-side since accounts, so ticking something off on the phone in the
-// kitchen is what the laptop pushes to Ocado.
+// kitchen is what the laptop pushes to the retailer.
 
 export function useOwnedBasketItems(weekStart) {
   const week = usePlanWeek(weekStart)

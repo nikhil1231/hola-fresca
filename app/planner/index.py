@@ -24,10 +24,14 @@ from app.mapping.candidates import load_recipe_pct_index, load_source_id_index
 from app.planner import waste as waste_mod
 from app import protein as protein_mod
 from app.protein import ProteinLine
+from app.retailers import DEFAULT_RETAILER
 
 log = logging.getLogger(__name__)
 
-RETAILER = "ocado"
+#: The shop these functions read when the caller names none. Kept as a module
+#: constant so existing call sites keep working; every function that touches a
+#: retailer-scoped table takes ``retailer`` and defaults to this.
+RETAILER = DEFAULT_RETAILER
 DEFAULT_STATUSES = ("approved",)
 COUNT_UNITS = {"unit(s)", "unit", "units"}
 COUNT_PACK_RE = re.compile(
@@ -66,6 +70,13 @@ class Pack:
     #: Guaranteed minimum life on delivery. A bigger pack is only a longer supply
     #: until this runs out - four months of mozzarella is two weeks of mozzarella.
     shelf_life_days: int | None = None
+    #: The shop this pack was indexed *for*, which is not always the shop that
+    #: sells it — see :attr:`external`. Carried on the pack rather than compared
+    #: against a module constant because "external" is relative to the basket
+    #: being built: a Sainsbury's pack is external to an Ocado shop and native to
+    #: a Sainsbury's one, and a fixed constant made every pack from the second
+    #: retailer look like something you go out and buy by hand.
+    shop: str = RETAILER
 
     @property
     def cost_per_g(self) -> float:
@@ -77,7 +88,13 @@ class Pack:
 
     @property
     def external(self) -> bool:
-        return self.retailer != RETAILER
+        """Bought outside the shop this basket is for.
+
+        Priced into the week either way, but never pushed to a cart — today that
+        means ``retailer='manual'``, the hand-sourced products of
+        :mod:`app.mapping.manual`.
+        """
+        return self.retailer != self.shop
 
 
 @dataclass(frozen=True, slots=True)
@@ -435,7 +452,10 @@ def _pack_capacity_qty(
 
 
 def _build_pack(
-    mp: IngredientMappingProduct, each_to_grams: float | None, unit_kind: str
+    mp: IngredientMappingProduct,
+    each_to_grams: float | None,
+    unit_kind: str,
+    retailer: str,
 ) -> Pack | None:
     product = mp.product
     if product is None or product.price is None:
@@ -453,12 +473,15 @@ def _build_pack(
         capacity_qty=capacity_qty,
         quantity_unit="unit" if unit_kind == "count" else "g",
         price=float(product.price),
-        salvage=waste_mod.salvage_fraction(product.shelf_life_days, product.category),
+        salvage=waste_mod.salvage_fraction(
+            product.shelf_life_days, product.category, product.retailer
+        ),
         rank=mp.rank,
         match_type=mp.match_type,
         pack_size_raw=product.pack_size_raw,
         url=product.url,
         retailer=product.retailer,
+        shop=retailer,
         # NULL means never checked, which is not the same as sold out - the
         # catalogue simply has nothing to say yet, so the pack stays buyable.
         available=product.in_stock != 0,
@@ -517,7 +540,7 @@ def _load_ingredients(
         packs: list[Pack] = []
         unpriceable = 0
         for mp in accepted:
-            pack = _build_pack(mp, row.each_to_grams, unit_kind)
+            pack = _build_pack(mp, row.each_to_grams, unit_kind, retailer)
             if pack is None:
                 unpriceable += 1
             else:

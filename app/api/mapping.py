@@ -12,7 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_session
+from app import retailers as retailers_mod
+from app.api.deps import get_active_retailer, get_session
+from app.retailers import DEFAULT_RETAILER
 from app.api.schemas import (
     AliasIn,
     AliasListOut,
@@ -99,17 +101,20 @@ def _example_recipes(session: Session, source_ids: list[str], limit: int = 4):
     return [_to_card(recipe) for recipe in rows]
 
 
-def _ic(session: Session, key: str):
+def _ic(session: Session, key: str, retailer: str = DEFAULT_RETAILER):
     # Having no cached candidates is a legitimate state — a search that found
     # nothing, or a pantry line filed without one — so those still open, letting
     # the reviewer reach the re-search box and fix them by hand. Only a key the
     # system has never heard of (no mapping row, no candidates, not in the
     # frequency data) is a genuine 404.
     usage = _usage_stats().get(key)
-    ic = gather_candidates(session, key, usage=usage)
+    ic = gather_candidates(session, key, usage=usage, retailer=retailer)
     if not ic.candidates and usage is None:
         known = session.scalar(
-            select(IngredientMapping.id).where(IngredientMapping.ingredient_key == key)
+            select(IngredientMapping.id).where(
+                IngredientMapping.retailer == retailer,
+                IngredientMapping.ingredient_key == key,
+            )
         )
         if known is None:
             raise HTTPException(status_code=404, detail="unknown ingredient")
@@ -123,13 +128,18 @@ def list_ingredients(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=1000),
     session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
 ) -> MappingListOut:
     offset = (page - 1) * page_size
-    items = service.list_items(session, status=status, q=q, limit=page_size, offset=offset)
-    total = service.count_items(session, status=status, q=q)
+    items = service.list_items(
+        session, status=status, q=q, limit=page_size, offset=offset, retailer=retailer
+    )
+    total = service.count_items(session, status=status, q=q, retailer=retailer)
     counts = dict(
         session.execute(
-            select(IngredientMapping.status, func.count()).group_by(IngredientMapping.status)
+            select(IngredientMapping.status, func.count())
+            .where(IngredientMapping.retailer == retailer)
+            .group_by(IngredientMapping.status)
         ).all()
     )
     return MappingListOut(
@@ -148,18 +158,25 @@ def alias_options(
     q: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
     session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
 ) -> AliasOptionsOut:
     return AliasOptionsOut(
         items=[
             AliasOptionOut(ingredient_key=k, name=n)
-            for k, n in service.list_alias_options(session, exclude_key=exclude, q=q, limit=limit)
+            for k, n in service.list_alias_options(
+                session, exclude_key=exclude, q=q, limit=limit, retailer=retailer
+            )
         ]
     )
 
 
 @router.get("/ingredients/{key}", response_model=MappingDetailOut)
-def get_ingredient(key: str, session: Session = Depends(get_session)) -> MappingDetailOut:
-    detail = service.get_detail(session, _ic(session, key))
+def get_ingredient(
+    key: str,
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
+) -> MappingDetailOut:
+    detail = service.get_detail(session, _ic(session, key, retailer), retailer)
     source_ids = _source_ids_for_key(key)
     candidates = [
         MappingCandidateOut(
@@ -196,9 +213,12 @@ def get_ingredient(key: str, session: Session = Depends(get_session)) -> Mapping
 
 @router.post("/ingredients/{key}", response_model=MappingDetailOut)
 def save_ingredient(
-    key: str, body: DecisionIn, session: Session = Depends(get_session)
+    key: str,
+    body: DecisionIn,
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
 ) -> MappingDetailOut:
-    ic = _ic(session, key)
+    ic = _ic(session, key, retailer)
     decision = service.DecisionInput(
         status=body.status,
         accepted=[
@@ -211,17 +231,20 @@ def save_ingredient(
         reviewer_notes=body.reviewer_notes,
     )
     try:
-        service.save_decision(session, ic, decision)
+        service.save_decision(session, ic, decision, retailer)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_ingredient(key, session)
+    return get_ingredient(key, session, retailer)
 
 
 @router.post("/ingredients/{key}/search", response_model=MappingDetailOut)
 def search_ingredient(
-    key: str, body: SearchIn, session: Session = Depends(get_session)
+    key: str,
+    body: SearchIn,
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
 ) -> MappingDetailOut:
-    """Re-search Ocado with the reviewer's own wording and merge the results.
+    """Re-search the active retailer with the reviewer's own wording.
 
     Widens the candidate pool rather than replacing it, so an earlier good match
     is never lost. Runs a real browser session, so it is slow (seconds) and
@@ -230,17 +253,27 @@ def search_ingredient(
     from app.mapping import live_search
 
     try:
-        live_search.search_and_store(session, key, body.term)
+        live_search.search_and_store(session, key, body.term, retailer=retailer)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - browser/network failures are expected
-        raise HTTPException(status_code=502, detail=f"Ocado search failed: {exc}") from exc
-    return get_ingredient(key, session)
+        raise HTTPException(
+            status_code=502, detail=f"{retailers_mod.label(retailer)} search failed: {exc}"
+        ) from exc
+    return get_ingredient(key, session, retailer)
 
 
 @router.get("/stats", response_model=MappingStatsOut)
-def get_stats(session: Session = Depends(get_session)) -> MappingStatsOut:
-    """Headline progress: how much of the recipe library the mapping can price."""
+def get_stats(
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
+) -> MappingStatsOut:
+    """Headline progress: how much of the recipe library the mapping can price.
+
+    Per-shop, like everything else on this page. A shop whose catalogue has not
+    been scraped yet honestly reports nothing mapped, rather than borrowing the
+    other one's coverage and claiming a library it cannot price.
+    """
     from contextlib import contextmanager
 
     from app.mapping import coverage as coverage_mod
@@ -252,13 +285,17 @@ def get_stats(session: Session = Depends(get_session)) -> MappingStatsOut:
     def _request_session():
         yield session
 
-    rep = coverage_mod.coverage_report(_request_session)
+    rep = coverage_mod.coverage_report(_request_session, retailer=retailer)
     counts = dict(
         session.execute(
-            select(IngredientMapping.status, func.count()).group_by(IngredientMapping.status)
+            select(IngredientMapping.status, func.count())
+            .where(IngredientMapping.retailer == retailer)
+            .group_by(IngredientMapping.status)
         ).all()
     )
-    remaining = len(generate_mod.pending_worklist(session, count=100_000))
+    remaining = len(
+        generate_mod.pending_worklist(session, count=100_000, retailer=retailer)
+    )
     return MappingStatsOut(
         lines_total=rep.lines_total,
         lines_resolved=rep.lines_resolved,
@@ -272,45 +309,56 @@ def get_stats(session: Session = Depends(get_session)) -> MappingStatsOut:
 
 
 @router.get("/aliases", response_model=AliasListOut)
-def list_aliases(session: Session = Depends(get_session)) -> AliasListOut:
+def list_aliases(
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
+) -> AliasListOut:
     return AliasListOut(
         items=[
             AliasOut(ingredient_key=k, name=n, alias_of=t, alias_of_name=tn)
-            for k, n, t, tn in service.list_aliases(session)
+            for k, n, t, tn in service.list_aliases(session, retailer)
         ]
     )
 
 
 @router.post("/ingredients/{key}/alias", response_model=MappingDetailOut)
 def set_alias(
-    key: str, body: AliasIn, session: Session = Depends(get_session)
+    key: str,
+    body: AliasIn,
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
 ) -> MappingDetailOut:
     """Link this ingredient to another (or clear the link when alias_of is null)."""
     from app.api.deps import _session_factory
     from app.planner.index import derive_count_metadata
 
     try:
-        service.set_alias(session, key, body.alias_of)
+        service.set_alias(session, key, body.alias_of, retailer)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Aliasing moves this ingredient's recipe lines under a different root, which
     # is exactly the evidence the counted/weighed classification is drawn from.
-    derive_count_metadata(_session_factory())
-    return get_ingredient(key, session)
+    derive_count_metadata(_session_factory(), retailer=retailer)
+    return get_ingredient(key, session, retailer)
 
 
 @router.post("/generate", response_model=JobOut)
-def start_generate(body: GenerateIn) -> JobOut:
+def start_generate(
+    body: GenerateIn, retailer: str = Depends(get_active_retailer)
+) -> JobOut:
     """Pull the next batch of ingredients into the review queue, in the background.
 
-    Slow (an Ocado search and an LLM call each), so this returns a job handle to
-    poll rather than blocking the request.
+    Slow (a retailer search and an LLM call each), so this returns a job handle
+    to poll rather than blocking the request. Scoped to the active retailer:
+    mappings are per-shop rows, so this fills that shop's queue and no other.
     """
     from app.api.deps import _session_factory
     from app.mapping import generate as generate_mod
 
     try:
-        job = generate_mod.start_background(_session_factory(), count=body.count)
+        job = generate_mod.start_background(
+            _session_factory(), count=body.count, retailer=retailer
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return JobOut(**job.as_dict())
@@ -327,8 +375,12 @@ def get_job(job_id: str) -> JobOut:
 
 
 @router.post("/bulk-approve")
-def bulk_approve(body: BulkApproveIn, session: Session = Depends(get_session)) -> dict:
-    n = service.bulk_approve(session, body.keys)
+def bulk_approve(
+    body: BulkApproveIn,
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
+) -> dict:
+    n = service.bulk_approve(session, body.keys, retailer)
     return {"approved": n}
 
 
@@ -380,9 +432,12 @@ def delete_manual_product(sku: str, session: Session = Depends(get_session)) -> 
 
 @router.post("/ingredients/{key}/manual", response_model=MappingDetailOut)
 def resolve_with_manual_product(
-    key: str, body: ManualResolveIn, session: Session = Depends(get_session)
+    key: str,
+    body: ManualResolveIn,
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
 ) -> MappingDetailOut:
-    """"Ocado does not sell this" — record what you buy instead and approve it."""
+    """"This shop does not sell it" — record what you buy instead and approve it."""
     from app.mapping import manual
 
     payload = body.model_dump()
@@ -398,22 +453,26 @@ def resolve_with_manual_product(
             each_to_grams=each_to_grams,
             reviewer_notes=reviewer_notes,
             usage=_usage_stats().get(key),
+            retailer=retailer,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_ingredient(key, session)
+    return get_ingredient(key, session, retailer)
 
 
 @router.post("/ingredients/{key}/manual/{sku:path}", response_model=MappingDetailOut)
 def attach_manual_product(
-    key: str, sku: str, session: Session = Depends(get_session)
+    key: str,
+    sku: str,
+    session: Session = Depends(get_session),
+    retailer: str = Depends(get_active_retailer),
 ) -> MappingDetailOut:
     """Offer an existing manual product as a candidate for another ingredient."""
     from app.mapping import manual
 
     try:
-        manual.attach(session, key, sku)
+        manual.attach(session, key, sku, retailer=retailer)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     session.commit()
-    return get_ingredient(key, session)
+    return get_ingredient(key, session, retailer)

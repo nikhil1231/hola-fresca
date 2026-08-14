@@ -3,7 +3,11 @@
     python -m app.scraper.products --retailer ocado discover --limit 10
     python -m app.scraper.products --retailer ocado fetch --limit 10
     python -m app.scraper.products --retailer ocado normalize
-    python -m app.scraper.products --retailer ocado status
+    python -m app.scraper.products --retailer sainsburys status
+
+Each retailer keeps its own ``product_scrape_state`` rows, raw cache and browser
+profile, so the stages can be run for one shop without disturbing another's
+progress.
 """
 from __future__ import annotations
 
@@ -12,14 +16,20 @@ import sys
 
 from app import config
 from app.db.session import init_db, make_engine, make_session_factory
+from app.retailers import DEFAULT_RETAILER
 from app.scraper.products import pipeline
+from app.scraper.products.registry import ADAPTER_IDS, has_adapter
 from app.scraper.ratelimit import AdaptiveThrottle
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="app.scraper.products")
-    parser.add_argument("--retailer", default="ocado", help="retailer adapter name")
-    parser.add_argument("--workers", type=int, default=1, help="reserved; Ocado defaults to 1")
+    parser.add_argument(
+        "--retailer",
+        default=DEFAULT_RETAILER,
+        help=f"retailer adapter name ({', '.join(sorted(ADAPTER_IDS))})",
+    )
+    parser.add_argument("--workers", type=int, default=1, help="reserved; defaults to 1")
     parser.add_argument("--headless", action="store_true", help="run browser session headlessly")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -44,9 +54,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    if args.retailer != "ocado":
-        print("unknown retailer; known: ocado", file=sys.stderr)
+    if not has_adapter(args.retailer):
+        print(
+            f"unknown retailer {args.retailer!r}; known: {', '.join(sorted(ADAPTER_IDS))}",
+            file=sys.stderr,
+        )
         return 2
+    retailer = args.retailer
 
     config.ensure_dirs()
     engine = make_engine()
@@ -54,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     session_factory = make_session_factory(engine)
 
     if args.command == "discover":
-        res = pipeline.discover(session_factory, limit=args.limit)
+        res = pipeline.discover(session_factory, limit=args.limit, retailer=retailer)
         print(f"discover: {'; '.join(res.notes)}")
     elif args.command == "fetch":
         throttle = AdaptiveThrottle(workers=args.workers, delay=1.5, max_delay=20.0)
@@ -64,23 +78,26 @@ def main(argv: list[str] | None = None) -> int:
             retry_errors=args.retry_errors,
             headless=args.headless,
             throttle=throttle,
+            retailer=retailer,
         )
         print(f"fetch: {res.fetched} fetched, {res.errors} errors")
     elif args.command == "normalize":
-        res = pipeline.normalize(session_factory, limit=args.limit, force=args.force)
+        res = pipeline.normalize(
+            session_factory, limit=args.limit, force=args.force, retailer=retailer
+        )
         print(
             f"normalize: {res.normalized} products normalized, "
             f"{res.hits} search hits linked, {res.errors} errors"
         )
     elif args.command == "backfill-shelf-life":
-        res = pipeline.backfill_shelf_life(session_factory)
+        res = pipeline.backfill_shelf_life(session_factory, retailer=retailer)
         print(
             f"backfill-shelf-life: {res.normalized} of {res.products} products "
             f"have a stated shelf life, {res.errors} errors"
         )
     elif args.command == "status":
-        counts = pipeline.status_counts(session_factory)
-        print("retailer: ocado")
+        counts = pipeline.status_counts(session_factory, retailer=retailer)
+        print(f"retailer: {retailer}")
         print("  product_scrape_state:")
         for (kind, status), count in sorted(counts["states"].items()):
             print(f"    {kind:<8} {status:<12} {count}")

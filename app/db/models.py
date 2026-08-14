@@ -693,13 +693,19 @@ class OcadoCartLedger(Base):
 
 
 class PlanSettings(Base):
-    """The shopping rhythm, one row per user.
+    """The shopping rhythm and where it is shopped, one row per user.
 
     Only the *shape* of the schedule lives here — how often a shop happens, when
     its recipe list has to be settled, and whether the whole thing is paused. The
     recipes chosen for a given week are :class:`PlanSelection`; this table is what
     an unattended job would need in order to know which week it is buying for and
     when it is too late to change it.
+
+    ``retailer`` joins that list rather than getting a table of its own. It
+    answers the same kind of question — a standing fact about how this person
+    shops, changed rarely and read by everything that prices a week — and an
+    unattended job needs it for exactly the same reason it needs the cadence:
+    without it, "buy next week's shop" is not a complete instruction.
     """
 
     __tablename__ = "plan_settings"
@@ -725,6 +731,12 @@ class PlanSettings(Base):
 
     # Stops the whole schedule: no week is active, nothing is due.
     paused: Mapped[bool] = mapped_column(Integer, default=0)
+
+    # Which shop this person's weeks are priced and bought at. Deliberately not
+    # constrained to a fixed list: the set of retailers lives in app.retailers
+    # and adding one should not need a migration. An unknown value degrades to
+    # the default rather than failing a read — see app.retailers.resolve.
+    retailer: Mapped[str] = mapped_column(String(64), default="ocado")
 
     # How many upcoming shops the planner shows at once.
     horizon_weeks: Mapped[int] = mapped_column(Integer, default=6)
@@ -892,6 +904,12 @@ class IngredientMappingProduct(Base):
     sku: Mapped[str] = mapped_column(String(128), index=True)
 
     rank: Mapped[int] = mapped_column(Integer, default=0)
+    # The order the products are offered in, and the order the model put them in
+    # before the deterministic pass re-sorted them (see app.mapping.ordering).
+    # Keeping the model's own ordinal is what lets the balance between unit price
+    # and rating be re-tuned by re-sorting rather than by paying for another LLM
+    # run. NULL on human decisions and on anything proposed before this existed.
+    llm_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     match_type: Mapped[str] = mapped_column(String(16), default="exact")  # exact|substitute|form_differs
     accepted: Mapped[bool] = mapped_column(Integer, default=0, index=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)

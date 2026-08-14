@@ -17,8 +17,12 @@ from sqlalchemy.orm import Session
 
 from app import config
 from app.db.models import Product, ProductSearchHit
+from app.retailers import DEFAULT_RETAILER
 
-RETAILER = "ocado"
+#: The shop these functions read when the caller names none. Kept as a module
+#: constant so existing call sites keep working; every function that touches a
+#: retailer-scoped table takes ``retailer`` and defaults to this.
+RETAILER = DEFAULT_RETAILER
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,12 @@ nothing at all for ambient stock, so ``shelf_life_days`` carries the signal and
 have no stated life, against 2 of 33 chorizo). Freezer goods keep almost all
 their value whatever life is printed on them.
 
+Other retailers state far less. Sainsbury's publishes a life for only 7.5% of its
+range and shelves by leaf aisle rather than under a storage class, so the
+category has to carry nearly all of the signal there — see
+:data:`SALVAGE_KEYWORDS_BY_RETAILER`, which is per-retailer because a word only
+means one thing inside one shop's vocabulary.
+
 The constants below are deliberately blunt and meant to be re-tuned once real
 baskets have been cooked and the leftovers actually observed.
 """
@@ -71,6 +77,166 @@ SALVAGE_BY_KEYWORD: tuple[tuple[str, float], ...] = (
 
 SALVAGE_UNKNOWN = 0.50  # no stated life and no useful category
 
+# Named for the tables below, so a row reads as a claim about the food rather
+# than as a number. The values match their SALVAGE_BY_CATEGORY equivalents.
+_AMBIENT = 0.85
+_TREATS = 0.75
+_BAKERY = 0.20
+_CHILLED = 0.15
+
+#: Keywords that only mean one thing *within one retailer's* taxonomy.
+#:
+#: Kept apart from SALVAGE_BY_KEYWORD because a word's safety depends on the
+#: vocabulary it is read in, and the tables above are Ocado's. "Fresh" is the
+#: clearest case: every Sainsbury's category containing it is genuinely a chiller
+#: aisle, while on Ocado it also names brand ranges — which is exactly why it was
+#: excluded from the shared table. Scoping the word to one retailer is what makes
+#: it usable at all.
+#:
+#: This exists because Sainsbury's states a shelf life for only 7.5% of its range
+#: against Ocado's 33.4%, and its categories are leaf aisles ("Pulses & beans")
+#: rather than a path rooted in a storage class. Without these, 73% of Sainsbury's
+#: products fell through to SALVAGE_UNKNOWN and the planner priced three quarters
+#: of that catalogue as if half of every leftover survived the week.
+#:
+#: **Order matters — first match wins.** The entries that look redundant are the
+#: ones carrying the exceptions: "peanut butter" is ambient and has to be settled
+#: before "butter" reaches the chiller, and "salad cream" is a jar of mayonnaise
+#: rather than anything that was ever in a field.
+#:
+#: **Where a word is genuinely ambiguous, guess low.** Understating how well
+#: something keeps makes the planner buy the smaller pack; overstating it makes
+#: the planner buy a big bag of something that rots. The second mistake costs
+#: money and the first only forgoes a saving, so the tie goes to the chiller.
+SALVAGE_KEYWORDS_BY_RETAILER: dict[str, tuple[tuple[str, float], ...]] = {
+    "sainsburys": (
+        # -- exceptions first, or the general rules below swallow them ---------
+        ("peanut butter", _AMBIENT),      # before "butter"
+        ("nut butter", _AMBIENT),         # before "butter"
+        ("salad cream", _AMBIENT),        # before "salad"
+        ("salad dressing", _AMBIENT),     # before "salad"
+        ("pulses", _AMBIENT),             # "Pulses & beans" is the tinned aisle
+        ("tinned", _AMBIENT),             # before "tomatoes", "fruit", "fish"
+        ("canned", _AMBIENT),             # ditto; Sainsbury's uses both words
+        ("dried", _AMBIENT),              # before "herb", "fruit"
+        ("long life", _AMBIENT),
+        # -- the chiller ------------------------------------------------------
+        # Safe here in a way it is not on Ocado; see the note above.
+        ("fresh", _CHILLED),
+        ("chilled", _CHILLED),
+        ("yogurt", _CHILLED),
+        ("yoghurt", _CHILLED),
+        ("cheese", _CHILLED),
+        ("butter", _CHILLED),
+        ("milk", _CHILLED),
+        ("egg", _CHILLED),
+        ("ready meal", _CHILLED),
+        ("sandwich", _CHILLED),
+        ("houmous", _CHILLED),
+        ("coleslaw", _CHILLED),
+        ("quiche", _CHILLED),
+        ("continental meats", _CHILLED),
+        ("pizza", _CHILLED),
+        # -- meat and fish, which are the shortest-lived things in a basket ----
+        ("beef", _CHILLED),
+        ("chicken", _CHILLED),
+        ("pork", _CHILLED),
+        ("lamb", _CHILLED),
+        ("turkey", _CHILLED),
+        ("bacon", _CHILLED),
+        ("sausage", _CHILLED),
+        ("mince", _CHILLED),
+        ("salmon", _CHILLED),
+        ("prawn", _CHILLED),
+        ("fish", _CHILLED),
+        # -- produce ----------------------------------------------------------
+        ("vegetable", _CHILLED),
+        ("salad", _CHILLED),
+        ("lettuce", _CHILLED),
+        ("tomato", _CHILLED),
+        ("potato", _CHILLED),
+        ("onion", _CHILLED),
+        ("pepper", _CHILLED),
+        ("mushroom", _CHILLED),
+        ("herb", _CHILLED),
+        ("apple", _CHILLED),
+        ("orange", _CHILLED),
+        ("banana", _CHILLED),
+        ("berries", _CHILLED),
+        ("grape", _CHILLED),
+        ("citrus", _CHILLED),
+        ("fruit & veg", _CHILLED),
+        ("prepped", _CHILLED),
+        # -- bakery: ambient, but stales inside the week -----------------------
+        ("bread", _BAKERY),
+        ("bakery", _BAKERY),
+        ("roll", _BAKERY),
+        ("wrap", _BAKERY),
+        ("pitta", _BAKERY),
+        ("naan", _BAKERY),
+        ("cake", _BAKERY),
+        ("pastr", _BAKERY),          # pastry, pastries
+        # Plural deliberately: bare "pie" also matches "pieces", which is a cut
+        # of something fresh rather than anything from the bakery.
+        ("pies", _BAKERY),
+        ("burger", _CHILLED),
+        # -- treats: ambient, but nobody plans a week around them --------------
+        ("crisps", _TREATS),
+        ("chocolate", _TREATS),
+        ("sweets", _TREATS),
+        ("biscuit", _TREATS),
+        ("cracker", _TREATS),
+        ("cereal bar", _TREATS),
+        ("chewing gum", _TREATS),
+        ("mints", _TREATS),
+        # -- the cupboard ------------------------------------------------------
+        ("pasta", _AMBIENT),
+        ("spaghetti", _AMBIENT),
+        ("penne", _AMBIENT),
+        ("noodle", _AMBIENT),
+        ("rice", _AMBIENT),
+        ("couscous", _AMBIENT),
+        ("lentil", _AMBIENT),
+        ("chickpea", _AMBIENT),
+        ("flour", _AMBIENT),
+        ("sugar", _AMBIENT),
+        ("salt", _AMBIENT),
+        ("seasoning", _AMBIENT),
+        ("stock", _AMBIENT),
+        ("oil", _AMBIENT),
+        ("vinegar", _AMBIENT),
+        ("sauce", _AMBIENT),
+        ("paste", _AMBIENT),
+        ("marinade", _AMBIENT),
+        ("chutney", _AMBIENT),
+        ("pickle", _AMBIENT),
+        ("relish", _AMBIENT),
+        ("ketchup", _AMBIENT),
+        ("mustard", _AMBIENT),
+        ("mayonnaise", _AMBIENT),
+        ("condiment", _AMBIENT),
+        ("honey", _AMBIENT),
+        ("jam", _AMBIENT),
+        ("spread", _AMBIENT),
+        ("olives", _AMBIENT),
+        ("antipasti", _AMBIENT),
+        ("nuts", _AMBIENT),
+        ("seeds", _AMBIENT),
+        ("cereal", _AMBIENT),
+        ("granola", _AMBIENT),
+        ("soup", _AMBIENT),
+        ("coffee", _AMBIENT),
+        ("tea", _AMBIENT),
+        ("water", _AMBIENT),
+        ("squash", _AMBIENT),
+        ("lemonade", _AMBIENT),
+        ("juice", _AMBIENT),
+        ("mixer", _AMBIENT),
+        ("wine", _AMBIENT),
+        ("beer", _AMBIENT),
+    ),
+}
+
 # A pack is never a total loss: whatever the model says, buying a jar you half
 # use is not as bad as burning the money, and nothing is ever fully recovered.
 SALVAGE_FLOOR = 0.0
@@ -91,17 +257,23 @@ def _segments(category: str | None) -> list[str]:
     return [part.strip() for part in reversed(category.split(">")) if part.strip()]
 
 
-def category_salvage(category: str | None) -> float | None:
+def category_salvage(category: str | None, retailer: str | None = None) -> float | None:
     """What the shelving says about keeping, or None if it says nothing useful.
 
     Walks from the most specific segment outwards, so "M&S Food Cupboard,
     Bakery & Drinks > M&S Bakery" comes out as bakery rather than cupboard.
+
+    ``retailer`` selects the taxonomy-specific keywords, which are tried before
+    the shared ones — a word can only be read against the vocabulary it was
+    written in. Omitting it falls back to the shared table alone, which is what
+    the Ocado-era callers have always got.
     """
+    keywords = SALVAGE_KEYWORDS_BY_RETAILER.get(retailer or "", ()) + SALVAGE_BY_KEYWORD
     for segment in _segments(category):
         if segment in SALVAGE_BY_CATEGORY:
             return SALVAGE_BY_CATEGORY[segment]
         lowered = segment.lower()
-        for keyword, fraction in SALVAGE_BY_KEYWORD:
+        for keyword, fraction in keywords:
             if keyword in lowered:
                 return fraction
     return None
@@ -113,7 +285,9 @@ def is_frozen(category: str | None) -> bool:
     return any("frozen" in segment.lower() for segment in _segments(category))
 
 
-def salvage_fraction(shelf_life_days: int | None, category: str | None) -> float:
+def salvage_fraction(
+    shelf_life_days: int | None, category: str | None, retailer: str | None = None
+) -> float:
     """Fraction of an unused remainder that still has value at the next shop."""
     # Frozen wins over any stated life: a stated 2-day life on a freezer product
     # is about the thaw, and the planner is not going to thaw it early.
@@ -124,7 +298,7 @@ def salvage_fraction(shelf_life_days: int | None, category: str | None) -> float
             if shelf_life_days <= limit:
                 return fraction
         return SALVAGE_LONG_LIFE
-    from_category = category_salvage(category)
+    from_category = category_salvage(category, retailer)
     return SALVAGE_UNKNOWN if from_category is None else from_category
 
 

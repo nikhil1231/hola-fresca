@@ -3,63 +3,57 @@ from __future__ import annotations
 
 import json
 import re
-import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import quote, urlencode, urljoin
 
 from app import config
+from app.scraper.products.browser import BrowserJsonClient
+from app.scraper.products.base import (
+    NormalizedProduct,
+    basis as _basis,
+    chunks,
+    metric as _metric,
+    pack_size_from_name,
+    parse_money as _parse_money,
+    parse_pack_size,
+    parse_unit_price,
+)
 from app.scraper.ratelimit import AdaptiveThrottle
+
+__all__ = [
+    "RETAILER",
+    "BASE_URL",
+    "MAX_PRODUCTS_TO_DECORATE",
+    "NormalizedProduct",
+    "OcadoBrowserClient",
+    "chunks",
+    "extract_product_ids",
+    "extract_product_objects",
+    "normalize_product",
+    "parse_pack_size",
+    "parse_shelf_life",
+    "parse_unit_price",
+    "product_url",
+    "search_url",
+]
 
 RETAILER = "ocado"
 BASE_URL = "https://www.ocado.com"
 SEARCH_PATH = "/api/webproductpagews/v6/product-pages/search"
 PRODUCTS_PATH = "/api/webproductpagews/v6/products"
 MAX_PRODUCTS_TO_DECORATE = 50
+#: How many ids the bulk product endpoint is asked for at once.
+PRODUCT_BATCH_SIZE = 50
 
 _UUID_RE = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I
-)
-_MONEY_RE = re.compile(r"(£\s*)?(\d+(?:\.\d+)?)\s*(p)?", re.I)
-_PACK_MULTI_RE = re.compile(
-    r"(?P<count>\d+(?:\.\d+)?)\s*x\s*(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|l|litre|litres|ml)\b",
-    re.I,
-)
-_PACK_SINGLE_RE = re.compile(r"(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|l|litre|litres|ml)\b", re.I)
-_PACK_EACH_RE = re.compile(r"(?P<count>\d+(?:\.\d+)?)\s*(?:per\s+pack|pack|pk|ct|count|items?)\b", re.I)
-_UNIT_PRICE_RE = re.compile(
-    r"(?P<money>£\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?p)\s*(?:/|per\s+)(?P<basis>100g|kg|kilo|litre|liter|l|ml|item|each)",
-    re.I,
 )
 # Ocado's guaranteed minimum life on delivery, as {"quantity": n, "unit": ...}.
 # Present only for products with a meaningful expiry (~98% of Fresh & Chilled,
 # almost none of Home & Garden), so a null means "not perishable or not stated",
 # never "zero days".
 _LIFE_UNIT_DAYS = {"DAY": 1, "WEEK": 7, "MONTH": 30, "YEAR": 365}
-
-
-@dataclass(frozen=True)
-class NormalizedProduct:
-    retailer: str
-    sku: str
-    name: str
-    brand: str | None = None
-    pack_size_raw: str | None = None
-    pack_size_value: float | None = None
-    pack_size_unit: str | None = None
-    price: float | None = None
-    unit_price: float | None = None
-    unit_price_basis: str | None = None
-    category: str | None = None
-    in_stock: bool | None = None
-    shelf_life_raw: str | None = None
-    shelf_life_days: int | None = None
-    avg_rating: float | None = None
-    ratings_count: int | None = None
-    image_url: str | None = None
-    url: str | None = None
-    raw_json: str | None = None
 
 
 def search_url(term: str) -> str:
@@ -164,23 +158,6 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
     )
 
 
-def parse_pack_size(raw: str | None) -> tuple[float | None, str | None]:
-    if not raw:
-        return None, None
-    text = raw.strip()
-    multi = _PACK_MULTI_RE.search(text)
-    if multi:
-        value = float(multi.group("count")) * float(multi.group("size"))
-        return _metric(value, multi.group("unit"))
-    single = _PACK_SINGLE_RE.search(text)
-    if single:
-        return _metric(float(single.group("size")), single.group("unit"))
-    each = _PACK_EACH_RE.search(text)
-    if each:
-        return float(each.group("count")), "each"
-    return None, None
-
-
 def parse_shelf_life(raw: Any) -> tuple[str | None, int | None]:
     """Return ("2 WEEK", 14) from Ocado's guaranteedProductLife object.
 
@@ -201,112 +178,37 @@ def parse_shelf_life(raw: Any) -> tuple[str | None, int | None]:
     return f"{quantity:g} {unit}", int(round(quantity * per_unit))
 
 
-def parse_unit_price(raw: str | None) -> tuple[float | None, str | None]:
-    if not raw:
-        return None, None
-    match = _UNIT_PRICE_RE.search(raw)
-    if not match:
-        return None, None
-    return _parse_money(match.group("money")), _basis(match.group("basis"))
+def shelf_life_from_payload(payload: dict[str, Any]) -> tuple[str | None, int | None]:
+    """Where shelf life lives in a stored Ocado product payload.
+
+    Each adapter answers this differently — Ocado states a structured
+    ``guaranteedProductLife`` object, Sainsbury's hides it in a display label —
+    so ``backfill-shelf-life`` asks the adapter rather than knowing itself.
+    """
+    return parse_shelf_life(payload.get("guaranteedProductLife"))
 
 
-class OcadoBrowserClient:
+class OcadoBrowserClient(BrowserJsonClient):
     """Fetch Ocado JSON from a real browser session without bypassing WAF."""
 
+    warmup_url = f"{BASE_URL}/categories"
+
     def __init__(self, *, profile_dir: Path | None = None, headless: bool = False):
-        self.profile_dir = profile_dir or (config.DATA_DIR / "ocado" / "browser-profile")
-        self.headless = headless
-        self._playwright = None
-        self._context = None
-        self._page = None
-
-    def __enter__(self) -> "OcadoBrowserClient":
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError as exc:  # pragma: no cover - exercised only without optional dep
-            raise RuntimeError("playwright is required for Ocado browser-session fetching") from exc
-
-        self.profile_dir.mkdir(parents=True, exist_ok=True)
-        self._playwright = sync_playwright().start()
-        try:
-            self._context = self._playwright.chromium.launch_persistent_context(
-                str(self.profile_dir),
-                headless=self.headless,
-                channel="chrome",
-            )
-        except Exception:
-            self._context = self._playwright.chromium.launch_persistent_context(
-                str(self.profile_dir), headless=self.headless
-            )
-        self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
-        self._page.goto(f"{BASE_URL}/categories", wait_until="domcontentloaded")
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        if self._context is not None:
-            self._context.close()
-        if self._playwright is not None:
-            self._playwright.stop()
+        super().__init__(
+            profile_dir=profile_dir or (config.DATA_DIR / "ocado" / "browser-profile"),
+            headless=headless,
+        )
 
     def search(self, term: str, throttle: AdaptiveThrottle) -> dict[str, Any]:
-        return self._json_fetch("GET", search_url(term), None, throttle)
+        return self.json_fetch("GET", search_url(term), None, throttle)
 
     def products(self, skus: list[str], throttle: AdaptiveThrottle) -> Any:
-        return self._json_fetch("PUT", f"{BASE_URL}{PRODUCTS_PATH}", skus, throttle)
-
-    def _json_fetch(
-        self, method: str, url: str, body: Any, throttle: AdaptiveThrottle
-    ) -> dict[str, Any] | list[Any]:
-        if self._page is None:
-            raise RuntimeError("OcadoBrowserClient must be used as a context manager")
-
-        _before_request_sync(throttle)
-        result = self._page.evaluate(
-            """async ({ method, url, body }) => {
-                const options = { method, headers: { "Accept": "application/json; charset=utf-8" } };
-                if (body !== null) {
-                    options.headers["Content-Type"] = "application/json; charset=utf-8";
-                    options.body = JSON.stringify(body);
-                }
-                const response = await fetch(url, options);
-                const text = await response.text();
-                return {
-                    status: response.status,
-                    contentType: response.headers.get("content-type") || "",
-                    text
-                };
-            }""",
-            {"method": method, "url": url, "body": body},
-        )
-        status = int(result["status"])
-        content_type = result["contentType"]
-        text = result["text"]
-        if status != 200 or "json" not in content_type.lower():
-            _on_throttle_sync(throttle)
-            raise RuntimeError(f"Ocado returned {status} {content_type or 'unknown content-type'}")
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError as exc:
-            _on_throttle_sync(throttle)
-            raise RuntimeError("Ocado returned non-JSON content") from exc
-        _on_success_sync(throttle)
-        return payload
+        """Decorate a batch of ids. Ocado takes a bare JSON array of product ids."""
+        return self.json_fetch("PUT", f"{BASE_URL}{PRODUCTS_PATH}", skus, throttle)
 
 
-def _before_request_sync(throttle: AdaptiveThrottle) -> None:
-    if throttle.delay > 0:
-        time.sleep(throttle.delay)
-
-
-def _on_success_sync(throttle: AdaptiveThrottle) -> None:
-    if throttle.delay > 0:
-        throttle.delay = max(0.0, throttle.delay * throttle.recover_factor - 0.01)
-
-
-def _on_throttle_sync(throttle: AdaptiveThrottle) -> None:
-    throttle.delay = min(
-        throttle.max_delay, throttle.delay * throttle.backoff_factor + throttle.backoff_floor
-    )
+#: The name :func:`app.scraper.products.registry.browser_client` resolves.
+BrowserClient = OcadoBrowserClient
 
 
 def _looks_product_id_key(key: str) -> bool:
@@ -351,10 +253,7 @@ def _pack_size_raw(node: dict[str, Any], name: str) -> str | None:
     value = _string_field(
         node, "packSize", "packSizeDescription", "size", "weight", "netContent", "displaySize"
     )
-    if value:
-        return value
-    match = re.search(r"(?:,\s*)?(\d+(?:\.\d+)?\s*(?:kg|g|l|litre|litres|ml)\b)", name, re.I)
-    return match.group(1) if match else None
+    return value or pack_size_from_name(name)
 
 
 def _price(node: dict[str, Any]) -> float | None:
@@ -467,42 +366,3 @@ def _url(node: dict[str, Any], sku: str) -> str:
     if retailer_pid:
         return f"{BASE_URL}/products/{quote(str(retailer_pid))}"
     return product_url(sku)
-
-
-def _parse_money(value: str | int | float | None) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    match = _MONEY_RE.search(value.replace(",", ""))
-    if not match:
-        return None
-    amount = float(match.group(2))
-    if match.group(3) or ("£" not in value and "p" in value.lower()):
-        return amount / 100
-    return amount
-
-
-def _metric(value: float, unit: str) -> tuple[float, str]:
-    u = unit.lower()
-    if u == "kg":
-        return value * 1000, "g"
-    if u in {"l", "litre", "litres"}:
-        return value * 1000, "ml"
-    return value, u
-
-
-def _basis(value: str) -> str:
-    basis = value.lower()
-    if basis in {"kilo", "kg", "per_1kg"}:
-        return "kg"
-    if basis in {"litre", "liter", "l", "per_litre"}:
-        return "l"
-    if basis in {"item", "each", "per_each"}:
-        return "each"
-    return basis
-
-
-def chunks(values: list[str], size: int) -> Iterable[list[str]]:
-    for i in range(0, len(values), size):
-        yield values[i : i + size]

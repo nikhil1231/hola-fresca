@@ -42,6 +42,8 @@ import {
 import CheckoutPanel from '../components/CheckoutPanel.jsx'
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
+import { useActiveRetailer } from '../hooks/useRetailer.js'
+import RetailerChip from '../components/RetailerChip.jsx'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
 import { usePackPreference, usePlannerBasket } from '../hooks/useRecipeQueries.js'
@@ -770,8 +772,8 @@ function shortWeekLabel(value) {
   }).format(date)
 }
 
-function stockStatusText(stockRefresh, stockAge) {
-  if (stockRefresh.isPending) return 'Checking Ocado...'
+function stockStatusText(stockRefresh, stockAge, retailerLabel) {
+  if (stockRefresh.isPending) return `Checking ${retailerLabel ?? 'the shop'}...`
   if (stockAge) return `Stock checked ${stockAge}`
   return 'Stock not checked'
 }
@@ -793,7 +795,10 @@ function BasketSummary({
     <Box className={classes.summaryCard}>
       <div className={classes.summaryTop}>
         <div>
-          <Title order={1} className={classes.summaryTitle}>Basket</Title>
+          <Group gap="xs" align="center">
+            <Title order={1} className={classes.summaryTitle}>Basket</Title>
+            <RetailerChip />
+          </Group>
           <Text className={classes.summarySubtitle}>
             {entries.length} {recipeWord} · {totalPortions} {portionWord} · {formatWeekLabel(weekStart)}
           </Text>
@@ -834,20 +839,31 @@ function BasketSummary({
   )
 }
 
-function BasketControls({ pageView, setPageView, weekStart, setWeekStart, weekOptions }) {
+function BasketControls({
+  pageView,
+  setPageView,
+  weekStart,
+  setWeekStart,
+  weekOptions,
+  canCheckout,
+}) {
   return (
     <Group gap="sm" wrap="nowrap" className={classes.controls}>
-      <SegmentedControl
-        size="md"
-        value={pageView}
-        onChange={setPageView}
-        data={[
-          { label: 'Basket', value: 'basket' },
-          { label: 'Checkout', value: 'checkout' },
-        ]}
-        className={classes.viewToggle}
-        aria-label="Basket view"
-      />
+      {/* Checkout drives the retailer's own trolley, which only a shoppable
+          retailer has. Hiding the tab beats showing one that leads nowhere. */}
+      {canCheckout && (
+        <SegmentedControl
+          size="md"
+          value={pageView}
+          onChange={setPageView}
+          data={[
+            { label: 'Basket', value: 'basket' },
+            { label: 'Checkout', value: 'checkout' },
+          ]}
+          className={classes.viewToggle}
+          aria-label="Basket view"
+        />
+      )}
       <Select
         value={weekStart}
         onChange={(value) => value && setWeekStart(value)}
@@ -1098,7 +1114,7 @@ export default function BasketPage() {
   // was clicked for and the page stays linkable.
   const targetWeek = resolveTargetWeek(schedule, searchParams.get('week'))
   const weekStart = targetWeek?.week_start ?? upcomingWeekStart
-  const pageView = searchParams.get('view') === 'checkout' ? 'checkout' : 'basket'
+  const requestedView = searchParams.get('view') === 'checkout' ? 'checkout' : 'basket'
   // A basket that has been shopped for is a record of what was bought: the packs
   // chosen, the demands snapped, the lines skipped as already owned. Changing any
   // of it now would only lose the account of the shop, so the page shows it and
@@ -1149,6 +1165,10 @@ export default function BasketPage() {
     setWeekPackAndSnap,
   } = useWeekPackChoices(weekStart)
   const stockRefresh = useOcadoStockRefresh()
+  const { label: retailerLabel, shoppable: retailerShoppable } = useActiveRetailer()
+  // A ?view=checkout link survives a switch to a shop with no trolley, so the
+  // view falls back rather than leaving an empty panel with no way out of it.
+  const pageView = retailerShoppable ? requestedView : 'basket'
   const packPreference = usePackPreference()
   const [packLineKey, setPackLineKey] = useState(null)
   const [packScope, setPackScope] = useState('week')
@@ -1276,7 +1296,7 @@ export default function BasketPage() {
     return () => window.clearTimeout(handle)
   }, [hoverLineKey, glowRecipeIds])
 
-  const orderStockText = stockStatusText(stockRefresh, stockAge)
+  const orderStockText = stockStatusText(stockRefresh, stockAge, retailerLabel)
   const busyPackKey = packPreference.isPending ? packPreference.variables?.ingredientKey : null
 
   return (
@@ -1305,6 +1325,7 @@ export default function BasketPage() {
           <div className={classes.mobileTopRow}>
             <Group gap="xs" align="center">
               <Title order={1} className={classes.mobilePageTitle}>Basket</Title>
+              <RetailerChip size="xs" />
               {readOnly && (
                 <Badge color="gray" variant="light" radius="sm" leftSection={<IconLock size={12} />}>
                   Past
@@ -1327,6 +1348,7 @@ export default function BasketPage() {
 
           <BasketControls
             pageView={pageView}
+            canCheckout={retailerShoppable}
             setPageView={setPageView}
             weekStart={weekStart}
             setWeekStart={setWeekStart}
@@ -1500,7 +1522,7 @@ export default function BasketPage() {
                 <Box className={classes.bucketGrid}>
                   <NameList title="Pantry staples" names={data.staples} muted />
                   <NameList title="Mapped, not priceable" names={data.unpriceable} />
-                  <NameList title="Out of stock at Ocado" names={data.sold_out} />
+                  <NameList title={`Out of stock at ${retailerLabel ?? 'the shop'}`} names={data.sold_out} />
                 </Box>
               </div>
             )}
