@@ -49,6 +49,7 @@ from app.api.schemas import (
 )
 from app import schedule as sched
 from app.db.models import PlanSelection, PlanWeekItem, Recipe, User
+from app.planner.cache import preserve_after_personal_write
 
 log = logging.getLogger(__name__)
 
@@ -298,29 +299,31 @@ def add_recipe(
         )
     )
     if existing is None:
-        count = len(
-            session.scalars(
-                select(PlanSelection.id).where(
-                    PlanSelection.user_id == user.id, PlanSelection.week_start == week_start
+        with preserve_after_personal_write(session):
+            count = len(
+                session.scalars(
+                    select(PlanSelection.id).where(
+                        PlanSelection.user_id == user.id,
+                        PlanSelection.week_start == week_start,
+                    )
+                ).all()
+            )
+            if count >= MAX_WEEK_RECIPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A week holds at most {MAX_WEEK_RECIPES} recipes",
                 )
-            ).all()
-        )
-        if count >= MAX_WEEK_RECIPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"A week holds at most {MAX_WEEK_RECIPES} recipes",
+            session.add(
+                PlanSelection(
+                    user_id=user.id,
+                    week_start=week_start,
+                    recipe_id=body.recipe_id,
+                    position=_next_position(session, user.id, week_start),
+                    portions=body.portions or DEFAULT_PORTIONS,
+                    protein_json=_protein_json(body.protein),
+                )
             )
-        session.add(
-            PlanSelection(
-                user_id=user.id,
-                week_start=week_start,
-                recipe_id=body.recipe_id,
-                position=_next_position(session, user.id, week_start),
-                portions=body.portions or DEFAULT_PORTIONS,
-                protein_json=_protein_json(body.protein),
-            )
-        )
-        session.commit()
+            session.commit()
 
     return get_week(week_start, session, user)
 
@@ -347,13 +350,14 @@ def update_recipe(
             status_code=404, detail=f"Recipe {recipe_id} is not in the week of {week_start}"
         )
 
-    if body.portions is not None:
-        row.portions = body.portions
-    # Told apart from "not mentioned" so that clearing a modifier is expressible;
-    # `protein: null` is how the UI takes a swap back off.
-    if "protein" in body.model_fields_set:
-        row.protein_json = _protein_json(body.protein)
-    session.commit()
+    with preserve_after_personal_write(session):
+        if body.portions is not None:
+            row.portions = body.portions
+        # Told apart from "not mentioned" so that clearing a modifier is expressible;
+        # `protein: null` is how the UI takes a swap back off.
+        if "protein" in body.model_fields_set:
+            row.protein_json = _protein_json(body.protein)
+        session.commit()
     return get_week(week_start, session, user)
 
 
@@ -366,14 +370,15 @@ def remove_recipe(
 ) -> PlanWeekOut:
     """Take a recipe out of a week. Removing one that is not there is a no-op."""
     week_start = _require_editable_week(_require_week_start(week_start))
-    session.execute(
-        delete(PlanSelection).where(
-            PlanSelection.user_id == user.id,
-            PlanSelection.week_start == week_start,
-            PlanSelection.recipe_id == recipe_id,
+    with preserve_after_personal_write(session):
+        session.execute(
+            delete(PlanSelection).where(
+                PlanSelection.user_id == user.id,
+                PlanSelection.week_start == week_start,
+                PlanSelection.recipe_id == recipe_id,
+            )
         )
-    )
-    session.commit()
+        session.commit()
     return get_week(week_start, session, user)
 
 
@@ -398,22 +403,23 @@ def set_week_item(
 
     row = _week_item(session, user.id, week_start, ingredient_key)
     fields = body.model_fields_set
-    if row is None:
-        row = PlanWeekItem(
-            user_id=user.id, week_start=week_start, ingredient_key=ingredient_key
-        )
-        session.add(row)
+    with preserve_after_personal_write(session):
+        if row is None:
+            row = PlanWeekItem(
+                user_id=user.id, week_start=week_start, ingredient_key=ingredient_key
+            )
+            session.add(row)
 
-    if "pack_sku" in fields:
-        row.pack_sku = body.pack_sku
-    if "snapped" in fields:
-        row.snapped = bool(body.snapped)
-    if "owned" in fields:
-        row.owned = bool(body.owned)
+        if "pack_sku" in fields:
+            row.pack_sku = body.pack_sku
+        if "snapped" in fields:
+            row.snapped = bool(body.snapped)
+        if "owned" in fields:
+            row.owned = bool(body.owned)
 
-    if not row.pack_sku and not row.snapped and not row.owned:
-        session.delete(row)
-    session.commit()
+        if not row.pack_sku and not row.snapped and not row.owned:
+            session.delete(row)
+        session.commit()
     return get_week(week_start, session, user)
 
 
@@ -430,17 +436,18 @@ def clear_week(
     someone's old pack choices attached.
     """
     week_start = _require_editable_week(_require_week_start(week_start))
-    session.execute(
-        delete(PlanSelection).where(
-            PlanSelection.user_id == user.id, PlanSelection.week_start == week_start
+    with preserve_after_personal_write(session):
+        session.execute(
+            delete(PlanSelection).where(
+                PlanSelection.user_id == user.id, PlanSelection.week_start == week_start
+            )
         )
-    )
-    session.execute(
-        delete(PlanWeekItem).where(
-            PlanWeekItem.user_id == user.id, PlanWeekItem.week_start == week_start
+        session.execute(
+            delete(PlanWeekItem).where(
+                PlanWeekItem.user_id == user.id, PlanWeekItem.week_start == week_start
+            )
         )
-    )
-    session.commit()
+        session.commit()
     return _plan_out(session, user.id)
 
 
