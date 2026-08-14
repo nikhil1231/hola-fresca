@@ -42,6 +42,52 @@ systemctl --user enable --now holafresca-testing.service holafresca-testing-sync
 `sync-integration.sh` runs from this `deploy/` dir inside the testing checkout;
 because it is tracked, `git reset --hard` restores it instead of losing it.
 
+## Deploying from another machine
+
+The live site is `holafresca-dev.service`, which serves the **main checkout's
+working tree** on :8100 — so a deploy is a `git pull` in that tree plus whatever
+the new commits imply, not a build-and-ship.
+
+```sh
+hf-deploy            # from the laptop: deploy origin/main
+hf-deploy --check    # dry run — print what it would do, change nothing
+hf-deploy --force    # rebuild and restart even if already at head
+```
+
+- `update.sh` — runs **on the box**. Fast-forwards to `origin/main`, then does
+  only the work the diff calls for: `pip install` if `requirements.txt` moved,
+  `npm ci` if the lockfile did, a frontend rebuild if anything under `frontend/`
+  did, and a database snapshot if `alembic/versions/` gained a file. Then
+  `alembic upgrade head`, restart, and poll `/api/health` for 30 s.
+- `deploy.sh` — runs **on the dev machine**; the above over ssh. The alias is
+  `alias hf-deploy="$HOME/Documents/Programming/AI/HolaFresca/deploy/deploy.sh"`.
+
+Push first. This deploys what GitHub has, not what is on your disk.
+
+Two things it does deliberately differently from `sync-integration.sh`:
+
+- **No `git reset --hard`.** That script owns its checkout; this one does not.
+  The live tree is also the tree that gets edited on the box, so uncommitted
+  tracked changes abort the deploy rather than being flattened. Untracked files
+  are ignored — they are usually scratch, and blocking on them means a stray
+  `.log` stops a deploy.
+- **It runs migrations.** Nothing runs them at boot, so a deploy is the only
+  place they happen; a model that ships without one passes tests and breaks
+  production. The snapshot goes first because the nightly backup can be a day
+  old and `alembic downgrade` is not a restore.
+
+If the health check fails it prints the last good revision and the `git reset`
+to get back to it — but deliberately does not run it, because once a migration
+has applied, rewinding the code alone lands on a schema the old code has never
+seen.
+
+`deploy.sh` tries the box at several addresses in order and uses the first that
+answers: Tailscale MagicDNS, the full `.ts.net` name, `.local` over mDNS, then
+the LAN address. Tailscale is the normal route but not a hard dependency — if
+the tailnet is down and you are in the house, the last two still work.
+`HOLAFRESCA_HOST=<addr>` overrides the list. Nothing here is exposed publicly:
+this is ssh on the private network, not through the tunnel.
+
 ## Getting to it from outside the house — Cloudflare Tunnel + Access
 
 `cloudflared` runs on the laptop and dials *out* to Cloudflare, so there is no
