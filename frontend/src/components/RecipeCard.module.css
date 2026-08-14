@@ -318,6 +318,66 @@
   }
 }
 
+/* The basket rail is supporting context, not another browse grid. Keep its
+   cards dense on desktop while retaining the touch-friendly mobile version. */
+@media (min-width: 48.01em) {
+  .cardCompact .imageWrap {
+    aspect-ratio: 16 / 9;
+  }
+
+  .cardCompact .body {
+    padding: 8px 10px !important;
+  }
+
+  .cardCompact .content {
+    gap: 3px;
+  }
+
+  .cardCompact .cuisine {
+    font-size: 0.68rem;
+  }
+
+  .cardCompact .title {
+    font-size: 0.86rem;
+    line-height: 1.18;
+  }
+
+  .cardCompact .headline {
+    font-size: 0.72rem;
+  }
+
+  .cardCompact .stats {
+    gap: 5px;
+    padding-top: 7px;
+  }
+
+  .cardCompact .statRow {
+    column-gap: 8px;
+  }
+
+  .cardCompact .statSlot {
+    gap: 3px;
+    min-height: 15px;
+  }
+
+  .cardCompact .statSlot :global(.mantine-Text-root) {
+    font-size: 0.72rem;
+  }
+
+  .cardCompact .densityMeter {
+    height: 11px;
+    gap: 2px;
+  }
+
+  .cardCompact .densitySegment {
+    width: 3px;
+  }
+
+  .cardCompact .portionStepper {
+    height: 30px;
+  }
+}
+
 @media (max-width: 36em) {
   .headline,
   .headlineSkeleton {

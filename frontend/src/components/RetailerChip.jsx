@@ -2,6 +2,11 @@ import { Badge, Tooltip } from '@mantine/core'
 
 import { useActiveRetailer } from '../hooks/useRetailer.js'
 
+const RETAILER_COLORS = {
+  ocado: 'grape',
+  sainsburys: 'orange',
+}
+
 /** Which shop the page you are looking at is about.
  *
  *  Every price, pack size and product name on the basket and mapping pages is
@@ -13,11 +18,11 @@ import { useActiveRetailer } from '../hooks/useRetailer.js'
  *  Renders nothing until the retailer is known, rather than defaulting: naming
  *  the wrong shop, even for a moment, is worse than naming none. */
 export default function RetailerChip({ size = 'sm' }) {
-  const { label, shoppable } = useActiveRetailer()
+  const { id, label, shoppable } = useActiveRetailer()
   if (!label) return null
 
   const chip = (
-    <Badge size={size} variant="light" color={shoppable ? 'teal' : 'gray'}>
+    <Badge size={size} variant="light" color={RETAILER_COLORS[id] ?? 'gray'}>
       {label}
     </Badge>
   )

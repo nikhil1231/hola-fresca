@@ -577,7 +577,7 @@ function LineTable({
                         )}
                         <div>
                           <Group gap={6}>
-                            <Text fw={600}>{line.name}</Text>
+                            <Text fw={600} className={classes.lineName}>{line.name}</Text>
                             {line.trace && (
                               <Badge size="xs" color="yellow" variant="light">
                                 trace
@@ -728,6 +728,7 @@ function LineTable({
                                 </div>
                                 <div />
                                 <div>{formatMoney(choice.cost)}</div>
+                                <div />
                                 <div />
                               </div>
                             ))}
@@ -917,6 +918,7 @@ function RecipeRail({
                 <RecipeCard
                   recipe={entry.recipe}
                   basketBadgeLabel={`${formatMoney(recipePrices.get(entry.recipe.id))} pp`}
+                  compact
                   highlighted={glowRecipeIds.has(entry.recipe.id)}
                   plannerEntry={entry}
                   plannerControlsVisible

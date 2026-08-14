@@ -59,10 +59,14 @@ function App() {
   useLocalPlanImport()
   const { pathname } = useLocation()
   const compactRecipeLayout = useMediaQuery('(max-width: 59.99em)')
+  const mobileBasketLayout = useMediaQuery('(max-width: 48em)')
   const recipeSegments = pathname.split('/').filter(Boolean)
   const recipeDetail = recipeSegments[0] === 'recipes' && recipeSegments.length === 2
   const cooking = recipeSegments[0] === 'recipes' && recipeSegments[2] === 'cook'
-  const immersive = pathname === '/basket' || cooking || (recipeDetail && compactRecipeLayout)
+  const immersive =
+    cooking ||
+    (pathname === '/basket' && mobileBasketLayout) ||
+    (recipeDetail && compactRecipeLayout)
   const home = pathname === '/'
 
   return (

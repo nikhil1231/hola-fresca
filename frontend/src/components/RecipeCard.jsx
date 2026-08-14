@@ -234,6 +234,7 @@ export default function RecipeCard({
   recipe,
   basketAvailable = true,
   basketBadgeLabel = null,
+  compact = false,
   highlighted = false,
   marginalScore = null,
   unpricedGapCount = 0,
@@ -270,6 +271,7 @@ export default function RecipeCard({
   const densityAdjusted = differsRounded(proteinDensity, recipe.protein_energy_ratio)
   const cardClass = [
     classes.card,
+    compact ? classes.cardCompact : '',
     plannerEntry ? classes.cardSelected : '',
     highlighted ? classes.cardHighlighted : '',
   ]
