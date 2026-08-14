@@ -86,6 +86,7 @@ const pageFiles = {
   mappingReview: [
     'frontend/src/routes/MappingReviewPage.jsx',
     'frontend/src/routes/MappingReviewPage.module.css',
+    'frontend/src/routes/mappingComparison.js',
     'frontend/src/components/ManualProductForm.jsx',
     'frontend/src/components/RecipeCard.jsx',
     'frontend/src/components/RecipeCard.module.css',

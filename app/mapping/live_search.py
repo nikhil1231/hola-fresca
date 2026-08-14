@@ -1,4 +1,4 @@
-"""On-demand Ocado search for the mapping review UI.
+"""On-demand retailer search for the mapping review UI.
 
 The batch scrape covers each ingredient with one search term taken from the
 recipe library ("Vegetable Stock Paste"). That term is not always the one that
@@ -6,6 +6,10 @@ finds the right products — searching "vegetable stock" instead surfaces stock
 cubes, which are a fine (and cheaper) stand-in. This module lets the reviewer
 re-search with their own wording and pick from the results by hand, with no LLM
 involved.
+
+One runner per retailer, each owning its own browser and profile: the profiles
+are what the sites trust, and sharing one context between two shops would throw
+away that trust on every switch.
 
 Results are persisted exactly like the batch scrape (raw cache + ``products`` +
 ``product_search_hits``), so a re-search permanently enriches the candidate pool
@@ -28,15 +32,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import IngredientMapping, Product, ProductSearchHit
+from app.retailers import DEFAULT_RETAILER
 from app.scraper.products import storage
-from app.scraper.products.ocado import (
-    RETAILER,
-    OcadoBrowserClient,
-    extract_product_ids,
-    extract_product_objects,
-    normalize_product,
-)
 from app.scraper.products.pipeline import upsert_product
+from app.scraper.products.registry import get_adapter
 from app.scraper.ratelimit import AdaptiveThrottle
 
 log = logging.getLogger("holafresca.mapping")
@@ -53,10 +52,17 @@ class _Job:
     future: Future
 
 
-class OcadoSearchRunner:
+class LiveSearchRunner:
     """Serialises live searches onto one long-lived headless browser session."""
 
-    def __init__(self, *, headless: bool = True, idle_timeout: float = IDLE_TIMEOUT_S):
+    def __init__(
+        self,
+        *,
+        retailer: str = DEFAULT_RETAILER,
+        headless: bool = True,
+        idle_timeout: float = IDLE_TIMEOUT_S,
+    ):
+        self.retailer = retailer
         self.headless = headless
         self.idle_timeout = idle_timeout
         self._queue: queue.Queue[_Job] = queue.Queue()
@@ -76,7 +82,9 @@ class OcadoSearchRunner:
     def _ensure_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
-        self._thread = threading.Thread(target=self._run, name="ocado-search", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name=f"{self.retailer}-search", daemon=True
+        )
         self._thread.start()
 
     def _run(self) -> None:
@@ -89,8 +97,14 @@ class OcadoSearchRunner:
                     return  # idle: close the browser and let the thread exit
                 try:
                     if client is None:
-                        log.info("starting Ocado browser session (headless=%s)", self.headless)
-                        client = OcadoBrowserClient(headless=self.headless)
+                        log.info(
+                            "starting %s browser session (headless=%s)",
+                            self.retailer,
+                            self.headless,
+                        )
+                        client = get_adapter(self.retailer).BrowserClient(
+                            headless=self.headless
+                        )
                         client.__enter__()
                     job.future.set_result(client.search(job.term, self._throttle))
                 except Exception as exc:  # noqa: BLE001 - surface to the caller
@@ -111,14 +125,16 @@ class OcadoSearchRunner:
                     pass
 
 
-_runner: OcadoSearchRunner | None = None
+_runners: dict[str, LiveSearchRunner] = {}
 
 
-def get_runner() -> OcadoSearchRunner:
-    global _runner
-    if _runner is None:
-        _runner = OcadoSearchRunner()
-    return _runner
+def get_runner(retailer: str = DEFAULT_RETAILER) -> LiveSearchRunner:
+    """The process-wide search runner for one retailer, started on first use."""
+    runner = _runners.get(retailer)
+    if runner is None:
+        runner = LiveSearchRunner(retailer=retailer)
+        _runners[retailer] = runner
+    return runner
 
 
 def search_and_store(
@@ -126,11 +142,12 @@ def search_and_store(
     ingredient_key: str,
     term: str,
     *,
-    runner: OcadoSearchRunner | None = None,
+    runner: LiveSearchRunner | None = None,
     term_rank: int | None = None,
     line_count: int | None = None,
+    retailer: str = DEFAULT_RETAILER,
 ) -> int:
-    """Search Ocado for ``term`` and merge the results into ``ingredient_key``.
+    """Search ``retailer`` for ``term`` and merge the results into ``ingredient_key``.
 
     Existing candidates are kept — a re-search widens the pool rather than
     replacing it, so an earlier good match is never lost. Returns the number of
@@ -140,12 +157,19 @@ def search_and_store(
     if not term:
         raise ValueError("search term must not be empty")
 
-    payload = (runner or get_runner()).search(term)
-    product_ids = extract_product_ids(payload)
-    objects = extract_product_objects(payload)
+    runner = runner or get_runner(retailer)
+    # The runner is the authority on which shop this is: a caller that passed one
+    # in (the tests, and any future per-account runner) must not have the
+    # retailer argument silently disagree with it.
+    retailer = getattr(runner, "retailer", retailer)
+    adapter = get_adapter(retailer)
+
+    payload = runner.search(term)
+    product_ids = adapter.extract_product_ids(payload)
+    objects = adapter.extract_product_objects(payload)
 
     storage.write_raw(
-        RETAILER,
+        retailer,
         "search",
         f"live:{ingredient_key}:{term}",
         {
@@ -160,7 +184,7 @@ def search_and_store(
     # list keeps sorting correctly.
     existing = session.scalar(
         select(ProductSearchHit).where(
-            ProductSearchHit.retailer == RETAILER,
+            ProductSearchHit.retailer == retailer,
             ProductSearchHit.ingredient_key == ingredient_key,
         )
     )
@@ -173,11 +197,11 @@ def search_and_store(
     added = 0
     for rank, obj in enumerate(ordered, start=1):
         try:
-            normalized = normalize_product(obj)
+            normalized = adapter.normalize_product(obj)
         except ValueError:
             continue
         storage.write_raw(
-            RETAILER,
+            retailer,
             "product",
             normalized.sku,
             {"sku": normalized.sku, "response": obj, "source": "live-search"},
@@ -186,7 +210,7 @@ def search_and_store(
 
         hit = session.scalar(
             select(ProductSearchHit).where(
-                ProductSearchHit.retailer == RETAILER,
+                ProductSearchHit.retailer == retailer,
                 ProductSearchHit.ingredient_key == ingredient_key,
                 ProductSearchHit.sku == normalized.sku,
             )
@@ -195,7 +219,7 @@ def search_and_store(
             session.add(
                 ProductSearchHit(
                     product_id=product.id,
-                    retailer=RETAILER,
+                    retailer=retailer,
                     ingredient_key=ingredient_key,
                     search_term=term,
                     term_rank=term_rank,
@@ -213,7 +237,7 @@ def search_and_store(
     # Remember the term the reviewer last used for this ingredient.
     mapping = session.scalar(
         select(IngredientMapping).where(
-            IngredientMapping.retailer == RETAILER,
+            IngredientMapping.retailer == retailer,
             IngredientMapping.ingredient_key == ingredient_key,
         )
     )
@@ -221,7 +245,9 @@ def search_and_store(
         mapping.search_term = term
         mapping.updated_at = datetime.now(timezone.utc)
     session.commit()
-    log.info("live search %r for %s -> %d candidates", term, ingredient_key, added)
+    log.info(
+        "live %s search %r for %s -> %d candidates", retailer, term, ingredient_key, added
+    )
     return added
 
 

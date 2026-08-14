@@ -26,20 +26,26 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import IngredientMapping, ProductSearchHit
-from app.mapping import live_search, service
+from app.mapping import service
 from app.mapping.candidates import gather_candidates, load_usage_stats
 from app.mapping.openai_client import Completer
 from app.mapping.propose import propose_one
 from app.scraper.products.worklist import load_worklist
+from app.retailers import DEFAULT_RETAILER
+
+if TYPE_CHECKING:
+    from app.mapping import live_search
 
 log = logging.getLogger("holafresca.mapping")
 
-RETAILER = "ocado"
+#: Default shop; every public entry point takes ``retailer`` and falls back to it.
+RETAILER = DEFAULT_RETAILER
 
 # HelloFresh names its assumed-owned lines "<thing> for the <component>" ("Water
 # for the Sauce", "Sugar for the Pickle"), plus a few bare cupboard staples.
@@ -118,7 +124,11 @@ REGISTRY = _JobRegistry()
 
 
 def pending_worklist(
-    session: Session, *, count: int, csv_path: Path | None = None
+    session: Session,
+    *,
+    count: int,
+    csv_path: Path | None = None,
+    retailer: str = RETAILER,
 ) -> list[tuple[int, str, str, int]]:
     """The next ``count`` ingredients with no cached candidates, richest first.
 
@@ -127,17 +137,10 @@ def pending_worklist(
     covered = {
         row[0]
         for row in session.execute(
-            select(ProductSearchHit.ingredient_key).where(ProductSearchHit.retailer == RETAILER)
+            select(ProductSearchHit.ingredient_key).where(ProductSearchHit.retailer == retailer)
         )
     }
-    mapped = {
-        row[0]
-        for row in session.execute(
-            select(IngredientMapping.ingredient_key).where(
-                IngredientMapping.retailer == RETAILER
-            )
-        )
-    }
+    mapped = service.existing_mapping_keys(session, retailer)
     skip = covered | mapped
 
     out: list[tuple[int, str, str, int]] = []
@@ -151,9 +154,9 @@ def pending_worklist(
     return out
 
 
-def _file_pantry_staple(session: Session, key: str, name: str, line_count: int) -> None:
+def _file_pantry_staple(session: Session, key: str, name: str, line_count: int, retailer: str) -> None:
     mapping = IngredientMapping(
-        retailer=RETAILER,
+        retailer=retailer,
         ingredient_key=key,
         name=name,
         line_count=line_count,
@@ -166,9 +169,9 @@ def _file_pantry_staple(session: Session, key: str, name: str, line_count: int) 
     session.commit()
 
 
-def _file_no_match(session: Session, key: str, name: str, line_count: int) -> None:
+def _file_no_match(session: Session, key: str, name: str, line_count: int, retailer: str) -> None:
     mapping = IngredientMapping(
-        retailer=RETAILER,
+        retailer=retailer,
         ingredient_key=key,
         name=name,
         line_count=line_count,
@@ -181,16 +184,16 @@ def _file_no_match(session: Session, key: str, name: str, line_count: int) -> No
 
 
 def _file_needs_review(
-    session: Session, key: str, name: str, line_count: int, reason: str
+    session: Session, key: str, name: str, line_count: int, reason: str, retailer: str
 ) -> None:
     """Record an ingredient whose candidates cached but whose proposal failed."""
     mapping = session.scalar(
         select(IngredientMapping).where(
-            IngredientMapping.retailer == RETAILER, IngredientMapping.ingredient_key == key
+            IngredientMapping.retailer == retailer, IngredientMapping.ingredient_key == key
         )
     )
     if mapping is None:
-        mapping = IngredientMapping(retailer=RETAILER, ingredient_key=key)
+        mapping = IngredientMapping(retailer=retailer, ingredient_key=key)
         session.add(mapping)
     mapping.name = name
     mapping.line_count = line_count
@@ -206,12 +209,24 @@ def generate(
     count: int = 10,
     job: GenerateJob | None = None,
     complete: Completer | None = None,
-    runner: live_search.OcadoSearchRunner | None = None,
+    runner: live_search.LiveSearchRunner | None = None,
     csv_path: Path | None = None,
     model: str | None = None,
+    retailer: str = RETAILER,
 ) -> GenerateJob:
-    """Bring ``count`` more ingredients into the review queue."""
+    """Bring ``count`` more ingredients into ``retailer``'s review queue.
+
+    Mappings are per-retailer rows, so this is run once per shop: the same
+    ingredient needs its own proposal against each catalogue, and an approval at
+    one shop says nothing about the other.
+    """
     job = job or GenerateJob(job_id=uuid.uuid4().hex[:12])
+
+    # Imported here, not at module scope: live_search pulls in the whole
+    # Playwright/browser stack, and read-only callers of this module — the
+    # /mapping/stats endpoint only wants pending_worklist — should not pay for a
+    # browser they never open.
+    from app.mapping import live_search
 
     # Built on first use, not up front: a batch of nothing but pantry lines needs
     # no LLM at all, and a missing API key should cost only the ingredients that
@@ -230,45 +245,51 @@ def generate(
     usage_by_key = load_usage_stats(csv_path)
 
     with session_factory() as session:
-        work = pending_worklist(session, count=count, csv_path=csv_path)
+        work = pending_worklist(
+            session, count=count, csv_path=csv_path, retailer=retailer
+        )
     job.total = len(work)
-    log.info("generate: %d ingredients to add", job.total)
+    log.info("generate: %d ingredients to add for %s", job.total, retailer)
 
     for rank, key, name, line_count in work:
         job.current = name
         try:
             if is_pantry_line(name):
                 with session_factory() as session:
-                    _file_pantry_staple(session, key, name, line_count)
+                    _file_pantry_staple(session, key, name, line_count, retailer)
                 job.staples += 1
                 log.info("[%d/%d] %s -> pantry staple", job.processed + 1, job.total, name)
             else:
                 with session_factory() as session:
                     found = live_search.search_and_store(
                         session, key, name, runner=runner,
-                        term_rank=rank, line_count=line_count,
+                        term_rank=rank, line_count=line_count, retailer=retailer,
                     )
                 if not found:
                     with session_factory() as session:
-                        _file_no_match(session, key, name, line_count)
+                        _file_no_match(session, key, name, line_count, retailer)
                     job.no_match += 1
                     log.info("[%d/%d] %s -> no candidates", job.processed + 1, job.total, name)
                 else:
                     with session_factory() as session:
                         ic = gather_candidates(
-                            session, key, name=name, usage=usage_by_key.get(key)
+                            session, key, name=name, usage=usage_by_key.get(key),
+                            retailer=retailer,
                         )
                         try:
                             proposed = propose_one(ic, completer())
                             service.write_proposal(
-                                session, ic, proposed, model=state["model"]
+                                session, ic, proposed, model=state["model"],
+                                retailer=retailer,
                             )
                         except Exception as exc:  # noqa: BLE001
                             # The search already cached candidates, so this key
                             # now looks "covered" and would never be revisited.
                             # Record it as needing review rather than orphaning
                             # cached candidates behind no mapping row at all.
-                            _file_needs_review(session, key, name, line_count, str(exc))
+                            _file_needs_review(
+                                session, key, name, line_count, str(exc), retailer
+                            )
                             raise
                     job.added += 1
                     log.info(
@@ -289,7 +310,7 @@ def generate(
     if job.added or job.staples:
         from app.planner.index import derive_count_metadata
 
-        derive_count_metadata(session_factory, csv_path=csv_path)
+        derive_count_metadata(session_factory, csv_path=csv_path, retailer=retailer)
     job.status = "done"
     log.info(
         "generate done: %d proposed, %d staples, %d no-match, %d errors",
@@ -298,13 +319,18 @@ def generate(
     return job
 
 
-def start_background(session_factory: sessionmaker[Session], *, count: int = 10) -> GenerateJob:
+def start_background(
+    session_factory: sessionmaker[Session],
+    *,
+    count: int = 10,
+    retailer: str = RETAILER,
+) -> GenerateJob:
     """Kick off :func:`generate` on a worker thread and return the job handle."""
     job = REGISTRY.start()
 
     def run() -> None:
         try:
-            generate(session_factory, count=count, job=job)
+            generate(session_factory, count=count, job=job, retailer=retailer)
         except Exception as exc:  # noqa: BLE001
             job.status = "failed"
             job.error = str(exc)

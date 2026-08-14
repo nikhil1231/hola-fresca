@@ -27,6 +27,8 @@ import {
   useMappingStats,
 } from '../hooks/useMappingQueries.js'
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
+import { useActiveRetailer } from '../hooks/useRetailer.js'
+import RetailerChip from '../components/RetailerChip.jsx'
 
 const STATUS_COLORS = {
   proposed: 'blue',
@@ -167,6 +169,7 @@ export default function MappingPage() {
       return next
     })
 
+  const { label: retailerLabel } = useActiveRetailer()
   const counts = data?.counts ?? {}
   const totalQueued = Object.values(counts).reduce((a, b) => a + b, 0)
   const approved = counts.approved ?? 0
@@ -179,10 +182,14 @@ export default function MappingPage() {
   return (
     <Stack gap="lg">
       <div>
-        <Title order={2}>Ingredient {'\u2192'} product mapping</Title>
+        <Group gap="xs" align="center">
+          <Title order={2}>Ingredient {'\u2192'} product mapping</Title>
+          <RetailerChip />
+        </Group>
         <Text c="dimmed">
-          Confirm which Ocado products each ingredient maps to. Sorted by spend impact - review the
-          top rows carefully; the obvious tail can be bulk-approved.
+          Confirm which {retailerLabel ?? 'retailer'} products each ingredient maps to. Sorted by
+          spend impact - review the top rows carefully; the obvious tail can be bulk-approved.
+          Each shop has its own queue, so approving here says nothing about the other.
         </Text>
         <Group gap="lg">
           <Anchor component={Link} to="/mapping/aliases" size="sm">

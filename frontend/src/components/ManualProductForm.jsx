@@ -26,7 +26,7 @@ const EMPTY = {
   url: '',
 }
 
-// Shared by the manual-products page and the "Ocado doesn't sell this" panel on
+// Shared by the manual-products page and the "this shop doesn't sell it" panel on
 // the review page, so both collect exactly the fields the pack maths needs.
 export default function ManualProductForm({
   initial,

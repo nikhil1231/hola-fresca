@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import retailers
 from app.db.models import User
 from app.db.session import ensure_runtime_schema, make_engine, make_session_factory
 
@@ -52,6 +53,33 @@ def get_current_user(session: Session = Depends(get_session)) -> User:
         # failing later on a foreign key.
         raise HTTPException(status_code=500, detail="No user account exists in this database")
     return user
+
+
+def get_active_retailer(
+    session: Session = Depends(get_session), user: User = Depends(get_current_user)
+) -> str:
+    """Which shop this request is about.
+
+    The companion to :func:`get_current_user`: that one answers *whose* data,
+    this one answers *where* they shop, and together they are what every priced
+    read needs. Endpoints depend on this rather than reaching for a constant, so
+    the catalogue, the mappings and the basket all move together when the
+    setting changes.
+
+    Deliberately a read, never a write. ``plan_settings`` is created lazily by
+    the schedule API when someone first changes something, and a page load is
+    not a change — so a user who has never opened settings gets the default here
+    without a row appearing. An unrecognised stored value degrades to the default
+    too: a retired retailer should not turn every basket into a 500.
+    """
+    # Imported here rather than at module scope: app.db.models is already loaded
+    # by this module, but PlanSettings is only needed on this path.
+    from app.db.models import PlanSettings
+
+    stored = session.scalar(
+        select(PlanSettings.retailer).where(PlanSettings.user_id == user.id)
+    )
+    return retailers.resolve(stored)
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

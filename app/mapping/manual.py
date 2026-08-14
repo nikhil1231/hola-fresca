@@ -38,7 +38,9 @@ from app.mapping import service
 from app.mapping.candidates import gather_candidates
 
 RETAILER = "manual"
-# The retailer whose review queue manual products join; see the module docstring.
+#: The shop a manual product is filed *against*. ``Product.retailer`` stays
+#: ``'manual'``; this is the review context the candidate shows up in, and it is
+#: per-shop because "Ocado does not sell this" is not a claim about Sainsbury's.
 HOST_RETAILER = service.RETAILER
 
 # These exist because they keep — a jar of spice blend outlives any weekly plan —
@@ -139,11 +141,18 @@ def upsert_product(session: Session, data: ManualProductInput) -> Product:
     return product
 
 
-def attach(session: Session, ingredient_key: str, sku: str, *, line_count: int = 0) -> None:
+def attach(
+    session: Session,
+    ingredient_key: str,
+    sku: str,
+    *,
+    line_count: int = 0,
+    retailer: str = HOST_RETAILER,
+) -> None:
     """Add a manual product to an ingredient's candidate pool (idempotent)."""
     existing = session.scalar(
         select(ProductSearchHit).where(
-            ProductSearchHit.retailer == HOST_RETAILER,
+            ProductSearchHit.retailer == retailer,
             ProductSearchHit.ingredient_key == ingredient_key,
             ProductSearchHit.sku == sku,
         )
@@ -159,14 +168,14 @@ def attach(session: Session, ingredient_key: str, sku: str, *, line_count: int =
     # not a search result competing on relevance.
     last = session.scalar(
         select(func.max(ProductSearchHit.result_rank)).where(
-            ProductSearchHit.retailer == HOST_RETAILER,
+            ProductSearchHit.retailer == retailer,
             ProductSearchHit.ingredient_key == ingredient_key,
         )
     )
     session.add(
         ProductSearchHit(
             product_id=product.id,
-            retailer=HOST_RETAILER,
+            retailer=retailer,
             ingredient_key=ingredient_key,
             search_term=product.name,
             term_rank=0,
@@ -187,6 +196,7 @@ def resolve_ingredient(
     each_to_grams: float | None = None,
     reviewer_notes: str | None = None,
     usage=None,
+    retailer: str = HOST_RETAILER,
 ) -> IngredientMapping:
     """One-shot: create the product, attach it, accept it, approve the mapping.
 
@@ -197,7 +207,7 @@ def resolve_ingredient(
     product = upsert_product(session, data)
     mapping = session.scalar(
         select(IngredientMapping).where(
-            IngredientMapping.retailer == HOST_RETAILER,
+            IngredientMapping.retailer == retailer,
             IngredientMapping.ingredient_key == ingredient_key,
         )
     )
@@ -207,13 +217,17 @@ def resolve_ingredient(
     name = mapping.name if mapping is not None else None
 
     def _gather():
-        ic = gather_candidates(session, ingredient_key, name=name, usage=usage)
+        ic = gather_candidates(
+            session, ingredient_key, name=name, usage=usage, retailer=retailer
+        )
         if not ic.line_count and mapping is not None:
             ic.line_count = mapping.line_count
         return ic
 
     ic = _gather()
-    attach(session, ingredient_key, product.sku, line_count=ic.line_count)
+    attach(
+        session, ingredient_key, product.sku, line_count=ic.line_count, retailer=retailer
+    )
     ic = _gather()
 
     # Keep any products already accepted, and put the manual one first: it is the
@@ -254,6 +268,7 @@ def resolve_ingredient(
             each_to_grams=each_to_grams,
             reviewer_notes=reviewer_notes,
         ),
+        retailer,
     )
     # The rowid reuse above can leave a previously-loaded collection cached, so
     # force callers to re-read the children they were just handed.

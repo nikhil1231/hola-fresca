@@ -36,6 +36,22 @@ import {
   useSearchCandidates,
   useSetAlias,
 } from '../hooks/useMappingQueries.js'
+import { useActiveRetailer } from '../hooks/useRetailer.js'
+import RetailerChip from '../components/RetailerChip.jsx'
+import {
+  canonicalUnitPriceBasis,
+  comparisonDescription,
+  comparisonPalette,
+  formatRating,
+  ratingDescription,
+  ratingQualityScore,
+  relativeQualityScores,
+} from './mappingComparison.js'
+
+//: The candidate tabs split "the shop sells this" from "sourced by hand". The
+//: first used to be spelled 'ocado'; it is the active shop now, whichever that
+//: is, so the tab value is a fixed token and only its label moves.
+const RETAILER_TAB = 'retailer'
 
 const MATCH_TYPES = [
   { value: 'exact', label: 'exact' },
@@ -52,6 +68,21 @@ const STATUS_BADGE_CLASSES = {
 
 function money(value) {
   return value == null ? '—' : `£${value.toFixed(2)}`
+}
+
+function MetricPill({ children, description, metric, score, unavailable = false }) {
+  const comparison = description ?? comparisonDescription(score)
+  const valueDescription = unavailable ? `${metric} unavailable` : `${metric} ${children}`
+  return (
+    <span
+      className={classes.metricPill}
+      style={comparisonPalette(score)}
+      aria-label={`${valueDescription}; ${comparison}`}
+      data-darkreader-ignore
+    >
+      {children}
+    </span>
+  )
 }
 
 export default function MappingReviewPage() {
@@ -73,6 +104,7 @@ export default function MappingReviewPage() {
   // The filtered list being browsed, for prev/next.
   const { data: siblings } = useMappingList(browseStatus, { pageSize: 1000, q: browseQ })
   const alias = useSetAlias(key)
+  const { label: retailerLabel } = useActiveRetailer()
 
   const [picks, setPicks] = useState({})
   const [eachToGrams, setEachToGrams] = useState('')
@@ -80,7 +112,7 @@ export default function MappingReviewPage() {
   const [pantryStaple, setPantryStaple] = useState(false)
   const [notes, setNotes] = useState('')
   const [term, setTerm] = useState('')
-  const [retailerTab, setRetailerTab] = useState('ocado')
+  const [retailerTab, setRetailerTab] = useState(RETAILER_TAB)
   const [sourcingManually, setSourcingManually] = useState(false)
   const resolveManual = useResolveWithManualProduct(key)
 
@@ -146,6 +178,29 @@ export default function MappingReviewPage() {
         .sort((a, b) => a.label.localeCompare(b.label)),
     [aliasTargets],
   )
+
+  const comparisonScores = useMemo(() => {
+    const candidates = data?.candidates ?? []
+    const options = {
+      keyOf: (candidate) => candidate.sku,
+      selectedOf: (candidate) => Boolean(picks[candidate.sku]?.accepted),
+    }
+    const rating = new Map()
+    for (const candidate of candidates) {
+      if (!options.selectedOf(candidate)) continue
+      const score = ratingQualityScore(candidate.avg_rating, candidate.ratings_count)
+      if (score != null) rating.set(candidate.sku, score)
+    }
+    return {
+      unitPrice: relativeQualityScores(candidates, {
+        ...options,
+        valueOf: (candidate) => candidate.unit_price,
+        groupOf: (candidate) => canonicalUnitPriceBasis(candidate.unit_price_basis),
+        higherIsBetter: false,
+      }),
+      rating,
+    }
+  }, [data, picks])
 
   if (isLoading) {
     return (
@@ -214,10 +269,10 @@ export default function MappingReviewPage() {
 
   // Candidates split by who sells them. Only the *display* is filtered — picks
   // are keyed by sku and submit() walks the full list, so accepting a manual
-  // product and then switching back to Ocado never silently drops it.
-  const ocadoCandidates = data.candidates.filter((c) => c.retailer !== 'manual')
+  // product and then switching back to the shop never silently drops it.
+  const retailerCandidates = data.candidates.filter((c) => c.retailer !== 'manual')
   const manualCandidates = data.candidates.filter((c) => c.retailer === 'manual')
-  const visibleCandidates = retailerTab === 'manual' ? manualCandidates : ocadoCandidates
+  const visibleCandidates = retailerTab === 'manual' ? manualCandidates : retailerCandidates
 
   // Rendered twice — under the header and at the foot of the candidate table —
   // so a quick approve never needs a scroll past the whole list.
@@ -300,6 +355,7 @@ export default function MappingReviewPage() {
             <div className={classes.titleBlock}>
               <Group gap="xs" align="center">
                 <Title order={2}>{data.name}</Title>
+                <RetailerChip />
                 {data.status && (
                   <Badge
                     className={`${classes.reviewStatus} ${STATUS_BADGE_CLASSES[data.status] ?? ''}`}
@@ -420,10 +476,10 @@ export default function MappingReviewPage() {
         </Alert>
       )}
 
-      <Paper withBorder radius="md" p="md">
+      <Paper withBorder radius="md" p="md" className={classes.mappingSurface}>
         <Group align="flex-end" gap="sm">
           <TextInput
-            label="Ocado search term"
+            label={`${retailerLabel ?? 'Retailer'} search term`}
             description="Reword and search again when the candidates miss."
             value={term}
             disabled={isAlias}
@@ -438,12 +494,13 @@ export default function MappingReviewPage() {
             loading={research.isPending}
             disabled={isAlias || !term.trim()}
           >
-            Search Ocado
+            Search {retailerLabel ?? 'the shop'}
           </Button>
         </Group>
         {research.isPending && (
           <Text size="xs" c="dimmed" mt="xs">
-            Searching Ocado - this drives a real browser session, so it takes a few seconds.
+            Searching {retailerLabel ?? 'the shop'} - this drives a real browser session, so it
+            takes a few seconds.
           </Text>
         )}
         {research.isError && (
@@ -464,16 +521,19 @@ export default function MappingReviewPage() {
         <Stack gap="lg">
           {data.candidates.length === 0 && (
         <Alert color="yellow" variant="light" title="No product candidates">
-          Ocado returned nothing for this ingredient's name — common for HelloFresh-specific wording
+          {retailerLabel ?? 'The shop'} returned nothing for this ingredient's name — common for
+          HelloFresh-specific wording
           ("21 Day Aged British Sirloin Steaks"). Reword the search above to find real products, or
           record what you buy instead below.
         </Alert>
       )}
 
       <Group justify="space-between" align="flex-end">
-        <Tabs value={retailerTab} onChange={(v) => setRetailerTab(v ?? 'ocado')}>
+        <Tabs value={retailerTab} onChange={(v) => setRetailerTab(v ?? RETAILER_TAB)}>
           <Tabs.List>
-            <Tabs.Tab value="ocado">Ocado ({ocadoCandidates.length})</Tabs.Tab>
+            <Tabs.Tab value={RETAILER_TAB}>
+              {retailerLabel ?? 'Retailer'} ({retailerCandidates.length})
+            </Tabs.Tab>
             <Tabs.Tab value="manual">Manual ({manualCandidates.length})</Tabs.Tab>
           </Tabs.List>
         </Tabs>
@@ -514,7 +574,7 @@ export default function MappingReviewPage() {
         </Paper>
       )}
 
-      <Paper withBorder radius="md">
+      <Paper withBorder radius="md" className={classes.mappingSurface}>
         <Table.ScrollContainer minWidth={820}>
           <Table verticalSpacing="xs">
             <Table.Thead>
@@ -533,7 +593,10 @@ export default function MappingReviewPage() {
               {visibleCandidates.map((c) => {
                 const pick = picks[c.sku] ?? {}
                 return (
-                  <Table.Tr key={c.sku} bg={pick.accepted ? 'teal.0' : undefined}>
+                  <Table.Tr
+                    key={c.sku}
+                    className={pick.accepted ? classes.selectedCandidateRow : undefined}
+                  >
                     <Table.Td>
                       <Checkbox
                         checked={!!pick.accepted}
@@ -563,10 +626,23 @@ export default function MappingReviewPage() {
                     <Table.Td>{c.pack_size_raw ?? '—'}</Table.Td>
                     <Table.Td>{money(c.price)}</Table.Td>
                     <Table.Td>
-                      {c.unit_price != null ? `£${c.unit_price}/${c.unit_price_basis}` : '—'}
+                      <MetricPill
+                        metric="Unit price"
+                        score={comparisonScores.unitPrice.get(c.sku)}
+                        unavailable={c.unit_price == null}
+                      >
+                        {c.unit_price != null ? `£${c.unit_price}/${c.unit_price_basis}` : '—'}
+                      </MetricPill>
                     </Table.Td>
                     <Table.Td>
-                      {c.avg_rating != null ? `${c.avg_rating}★ (${c.ratings_count})` : '—'}
+                      <MetricPill
+                        metric="Rating"
+                        score={comparisonScores.rating.get(c.sku)}
+                        description={ratingDescription(comparisonScores.rating.get(c.sku))}
+                        unavailable={c.avg_rating == null}
+                      >
+                        {formatRating(c.avg_rating, c.ratings_count)}
+                      </MetricPill>
                     </Table.Td>
                     <Table.Td>
                       {pick.accepted && (
@@ -600,7 +676,7 @@ export default function MappingReviewPage() {
                     <Text size="sm" c="dimmed" ta="center" py="md">
                       {retailerTab === 'manual'
                         ? 'No hand-entered products for this ingredient yet.'
-                        : 'No Ocado candidates for this ingredient.'}
+                        : `No ${retailerLabel ?? 'retailer'} candidates for this ingredient.`}
                     </Text>
                   </Table.Td>
                 </Table.Tr>

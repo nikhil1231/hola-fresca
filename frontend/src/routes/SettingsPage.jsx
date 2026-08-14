@@ -8,6 +8,7 @@ import {
   Loader,
   NumberInput,
   Paper,
+  SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
@@ -23,6 +24,7 @@ import {
   useSchedule,
   useUpdateScheduleSettings,
 } from '../hooks/useSchedule.js'
+import { useRetailers, useSetRetailer } from '../hooks/useRetailer.js'
 
 const CADENCE_OPTIONS = [
   { value: '1', label: 'Every week' },
@@ -71,6 +73,81 @@ function toDraft(settings) {
     default_portions: settings.default_portions,
     pack_shortfall_tolerance_pct: settings.pack_shortfall_tolerance_pct ?? 10,
   }
+}
+
+/** The retailer toggle.
+ *
+ *  Saved on change rather than through the draft/Save pair the rest of this page
+ *  uses. Switching shops is not a setting you tune alongside the others — it
+ *  re-prices every basket and swaps the mapping queue underneath you — so it
+ *  wants to take effect when you press it, and it has its own endpoint. */
+function WhereYouShop() {
+  const { data, isPending, isError, error } = useRetailers()
+  const setRetailer = useSetRetailer()
+
+  if (isPending) {
+    return (
+      <Paper withBorder radius="md" p="lg">
+        <Group gap="sm">
+          <Loader size="sm" color="fresh" />
+          <Text size="sm" c="dimmed">
+            Loading shops…
+          </Text>
+        </Group>
+      </Paper>
+    )
+  }
+
+  if (isError) {
+    return (
+      <Alert color="red" icon={<IconAlertCircle size={18} />}>
+        Couldn't load the list of shops: {error?.message}
+      </Alert>
+    )
+  }
+
+  const items = data?.items ?? []
+  const active = items.find((item) => item.id === data?.active)
+
+  return (
+    <Paper withBorder radius="md" p="lg">
+      <Stack gap="md">
+        <div>
+          <Title order={4}>Where you shop</Title>
+          <Text size="sm" c="dimmed">
+            Prices, pack sizes and ingredient mappings all come from the shop you pick here.
+          </Text>
+        </div>
+
+        <SegmentedControl
+          fullWidth
+          color="fresh"
+          value={data?.active ?? ''}
+          disabled={setRetailer.isPending}
+          onChange={(value) => setRetailer.mutate(value)}
+          data={items.map((item) => ({ value: item.id, label: item.label }))}
+        />
+
+        {setRetailer.isError && (
+          <Alert color="red" icon={<IconAlertCircle size={18} />}>
+            {setRetailer.error?.message}
+          </Alert>
+        )}
+
+        <Text size="xs" c="dimmed">
+          {active?.shoppable
+            ? 'Baskets can be sent straight to this shop\u2019s trolley.'
+            : 'This shop is priced and planned here, but has no trolley to send a basket to \u2014 ' +
+              'the basket page gives you a list to shop from instead.'}
+        </Text>
+
+        <Text size="xs" c="dimmed">
+          Every shop keeps its own approved ingredient mappings, so an ingredient reviewed at one
+          is not automatically reviewed at the other.
+        </Text>
+      </Stack>
+    </Paper>
+  )
 }
 
 export default function SettingsPage() {
@@ -130,7 +207,7 @@ export default function SettingsPage() {
           <Title order={2}>Settings</Title>
         </Group>
         <Text c="dimmed" size="sm">
-          How often you shop, and when each week's recipes have to be settled.
+          Where you shop, how often, and when each week's recipes have to be settled.
         </Text>
       </div>
 
@@ -139,6 +216,8 @@ export default function SettingsPage() {
           {updateSettings.error.message}
         </Alert>
       )}
+
+      <WhereYouShop />
 
       <Paper withBorder radius="md" p="lg">
         <Stack gap="md">

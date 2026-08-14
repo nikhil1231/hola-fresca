@@ -1,12 +1,22 @@
 """CLI for the ingredient→product mapping.
 
     python -m app.mapping propose [--limit N] [--only-missing] [--force] [--model M]
+    python -m app.mapping --retailer sainsburys propose
+    python -m app.mapping reorder
     python -m app.mapping status
     python -m app.mapping coverage [--include-proposed]
     python -m app.mapping basket <recipe_id> [<recipe_id> ...] [--include-proposed]
 
 ``propose`` calls OpenAI (key from the repo-root .env) and writes proposed
-mappings; nothing downstream trusts them until approved in the review UI.
+mappings; nothing downstream trusts them until approved in the review UI. The
+order those products are offered in is computed, not asked for (see
+:mod:`app.mapping.ordering`), so ``reorder`` re-applies a change to that balance
+across every untouched proposal without spending anything.
+
+Every subcommand is scoped to one retailer, defaulting to the app's own default.
+Mappings are per-shop rows — an ingredient approved at Ocado says nothing about
+Sainsbury's — so ``propose`` is run once per shop, and without ``--retailer`` it
+will report every ingredient as already mapped once the default shop is done.
 """
 from __future__ import annotations
 
@@ -20,10 +30,16 @@ from app.db.session import init_db, make_engine, make_session_factory
 from app.mapping import coverage as coverage_mod
 from app.mapping import propose as propose_mod
 from app.db.models import IngredientMapping
+from app.retailers import DEFAULT_RETAILER, RETAILER_IDS, is_known
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="app.mapping")
+    parser.add_argument(
+        "--retailer",
+        default=DEFAULT_RETAILER,
+        help=f"which shop to map for ({', '.join(RETAILER_IDS)})",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_propose = sub.add_parser("propose", help="LLM proposal pass over the ingredient worklist")
@@ -35,6 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gen = sub.add_parser("generate", help="add the next N ingredients to the review queue")
     p_gen.add_argument("--count", type=int, default=10)
     p_gen.add_argument("--model", default=None)
+
+    sub.add_parser(
+        "reorder",
+        help="re-sort proposed products under the current ordering rules (no LLM calls)",
+    )
 
     sub.add_parser("status", help="counts by mapping status")
 
@@ -58,6 +79,13 @@ def _statuses(include_proposed: bool) -> tuple[str, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    if not is_known(args.retailer):
+        print(
+            f"unknown retailer {args.retailer!r}; known: {', '.join(RETAILER_IDS)}",
+            file=sys.stderr,
+        )
+        return 2
+    retailer = args.retailer
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     # The OpenAI SDK logs one HTTP line per request at INFO; keep progress readable.
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -74,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 only_missing=args.only_missing,
                 force=args.force,
                 model=args.model,
+                retailer=retailer,
             )
         except Exception as exc:  # noqa: BLE001 - config/auth errors should print cleanly
             print(f"propose failed: {exc}", file=sys.stderr)
@@ -86,7 +115,9 @@ def main(argv: list[str] | None = None) -> int:
         from app.mapping import generate as generate_mod
 
         try:
-            job = generate_mod.generate(session_factory, count=args.count, model=args.model)
+            job = generate_mod.generate(
+                session_factory, count=args.count, model=args.model, retailer=retailer
+            )
         except Exception as exc:  # noqa: BLE001 - config/auth errors should print cleanly
             print(f"generate failed: {exc}", file=sys.stderr)
             return 1
@@ -95,19 +126,27 @@ def main(argv: list[str] | None = None) -> int:
             f"{job.no_match} no-match, {job.errors} errors"
         )
 
+    elif args.command == "reorder":
+        from app.mapping import service as service_mod
+
+        with session_factory() as session:
+            changed = service_mod.reorder_proposals(session, retailer=retailer)
+        print(f"reorder: {changed} mapping(s) re-ordered ({retailer})")
+
     elif args.command == "status":
         with session_factory() as session:
             rows = session.execute(
                 select(IngredientMapping.status, func.count())
+                .where(IngredientMapping.retailer == retailer)
                 .group_by(IngredientMapping.status)
             ).all()
-        print("ingredient mappings:")
+        print(f"ingredient mappings ({retailer}):")
         for status, count in sorted(rows):
             print(f"  {status:<14} {count}")
 
     elif args.command == "coverage":
         rep = coverage_mod.coverage_report(
-            session_factory, statuses=_statuses(args.include_proposed)
+            session_factory, statuses=_statuses(args.include_proposed), retailer=retailer
         )
         print(
             f"coverage: {rep.lines_resolved}/{rep.lines_total} curated ingredient lines "
@@ -124,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             args.recipe_ids,
             statuses=_statuses(args.include_proposed),
             include_staples=args.include_staples,
+            retailer=retailer,
         )
         print(f"basket for recipes {args.recipe_ids}:")
         for line in basket.lines:

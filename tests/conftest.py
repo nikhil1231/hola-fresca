@@ -24,23 +24,27 @@ def user_id(session) -> int:
     return session.scalar(select(User.id).order_by(User.id).limit(1))
 
 
-def seed_candidates(session, ingredient_key, name, products, *, line_count=100):
+def seed_candidates(
+    session, ingredient_key, name, products, *, line_count=100, retailer="ocado"
+):
     """Insert Product + ProductSearchHit rows for one ingredient.
 
     ``products`` is a list of dicts with at least ``sku`` and ``name``.
+    ``retailer`` is which shop's catalogue they belong to — the same ingredient
+    can be seeded twice, once per shop, which is what a multi-retailer test needs.
     """
     for rank, p in enumerate(products, start=1):
         # The same product can be a candidate for several ingredients (which is
         # exactly the alias case), so reuse an existing row rather than
         # re-inserting and tripping the retailer+sku unique constraint.
         product = session.scalar(
-            select(Product).where(Product.retailer == "ocado", Product.sku == p["sku"])
+            select(Product).where(Product.retailer == retailer, Product.sku == p["sku"])
         )
         if product is not None:
             session.add(
                 ProductSearchHit(
                     product_id=product.id,
-                    retailer="ocado",
+                    retailer=retailer,
                     ingredient_key=ingredient_key,
                     search_term=name,
                     term_rank=1,
@@ -51,7 +55,7 @@ def seed_candidates(session, ingredient_key, name, products, *, line_count=100):
             )
             continue
         product = Product(
-            retailer="ocado",
+            retailer=retailer,
             sku=p["sku"],
             name=p["name"],
             brand=p.get("brand"),
@@ -70,7 +74,7 @@ def seed_candidates(session, ingredient_key, name, products, *, line_count=100):
         session.add(
             ProductSearchHit(
                 product_id=product.id,
-                retailer="ocado",
+                retailer=retailer,
                 ingredient_key=ingredient_key,
                 search_term=name,
                 term_rank=1,

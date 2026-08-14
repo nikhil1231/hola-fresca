@@ -165,7 +165,7 @@ export function useDeleteManualProduct() {
   })
 }
 
-// "Ocado doesn't sell this": records what you buy instead and approves it.
+// "This shop doesn't sell it": records what you buy instead and approves it.
 export function useResolveWithManualProduct(key) {
   const qc = useQueryClient()
   return useMutation({

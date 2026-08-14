@@ -156,7 +156,7 @@ export default function MappingManualPage() {
         </Group>
       ) : items.length === 0 ? (
         <Text c="dimmed" ta="center" py="xl">
-          Nothing here yet. Add one above, or open an ingredient Ocado can't cover and use
+          Nothing here yet. Add one above, or open an ingredient the shop can't cover and use
           “Source this manually”.
         </Text>
       ) : (

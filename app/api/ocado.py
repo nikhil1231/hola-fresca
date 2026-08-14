@@ -68,6 +68,14 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ocado", tags=["ocado"])
 
+#: Every basket this module builds is one it is about to push into Ocado's own
+#: cart, so it is priced from Ocado's catalogue whatever shop the user has
+#: selected elsewhere. Deliberately not ``get_active_retailer``: pricing a
+#: Sainsbury's basket and then pushing its SKUs to Ocado would be nonsense, and
+#: the UI keeps these endpoints out of reach unless Ocado is the active shop
+#: (see ``Retailer.shoppable``).
+RETAILER = "ocado"
+
 #: Read cart -> merge -> write cart is not atomic, and the ledger written at the
 #: end describes the cart as the *last* writer left it. One live session and one
 #: cart, so serialising the whole push is both sufficient and cheap.
@@ -272,7 +280,7 @@ def _rebuild(
     snap_overrides: dict[str, bool] | None = None,
     shortfall_tolerance_pct: float = 10.0,
 ) -> tuple[PlanIndex, Basket]:
-    index: PlanIndex = _load_planner_index(factory, recipe_ids, csv_path)
+    index: PlanIndex = _load_planner_index(factory, recipe_ids, csv_path, RETAILER)
     return index, build_basket(
         index,
         selections,
@@ -368,7 +376,7 @@ def _out_lines(
                 session.execute(
                     select(Product.sku, Product.name)
                     .where(Product.sku.in_(missing))
-                    .where(Product.retailer == "ocado")
+                    .where(Product.retailer == RETAILER)
                 ).all()
             )
     # asdict, not vars: these dataclasses use slots and so have no __dict__.
@@ -467,7 +475,7 @@ def _checkout_items(
             product.sku: product
             for product in session.execute(
                 select(Product)
-                .where(Product.retailer == "ocado")
+                .where(Product.retailer == RETAILER)
                 .where(Product.sku.in_(skus))
             ).scalars()
         }
