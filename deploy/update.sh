@@ -50,6 +50,37 @@ ensure_npm() {
     command -v npm >/dev/null 2>&1
 }
 
+# The per-account Ocado keys are templated on OCADO_ACCOUNTS, so .env.example's
+# OCADO_MAIN_EMAIL and this box's OCADO_NIKHIL_EMAIL are one key wearing two
+# names. Fold the slug out before comparing the two files, or the check reports
+# seven missing keys that are all present.
+slug_filter() {
+    local file="$1" slug
+    local -a expr=(-e 's/^$//')
+    while read -r slug; do
+        [ -n "$slug" ] && expr+=(-e "s/^OCADO_${slug}_/OCADO_@_/")
+    done < <(sed -n 's/^OCADO_ACCOUNTS=//p' "$file" | tr ',' '\n' | tr -d ' ' \
+             | tr '[:lower:]' '[:upper:]')
+    sed "${expr[@]}"
+}
+
+env_keys() { sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' "$1" | slug_filter "$1" | sort -u; }
+
+# A config key this deploy *introduces* is a silent 500 at request time, and
+# worth a shout. A key that has been absent for months is either optional or
+# already known about — warning about those on every deploy is how a warning
+# stops being read, so only the diff counts.
+report_new_config_keys() {
+    [ "$config" -eq 1 ] && [ -f .env ] && [ -f .env.example ] || return 0
+    local added missing
+    added="$(git diff "$before" "$target" -- .env.example \
+             | sed -n 's/^+\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | slug_filter .env.example | sort -u)"
+    [ -n "$added" ] || return 0
+    missing="$(comm -23 <(printf '%s\n' "$added") <(env_keys .env))"
+    [ -n "$missing" ] && warn "this deploy added config that .env does not set: $(printf '%s' "$missing" | tr '\n' ' ')"
+    return 0
+}
+
 # --- refuse to deploy over local work -------------------------------------
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     git status --short --untracked-files=no >&2
@@ -76,12 +107,13 @@ if [ "$before" != "$target" ]; then
     git log --oneline --reverse "$before".."$target" | sed 's/^/    /'
 fi
 
-deps=0; lockfile=0; web=0; migrations=0
+deps=0; lockfile=0; web=0; migrations=0; config=0
 [ "$before" != "$target" ] && {
     changed requirements.txt          && deps=1
     changed frontend/package-lock.json && lockfile=1
     changed frontend                  && web=1
     changed alembic/versions          && migrations=1
+    changed .env.example              && config=1
 }
 [ "$FORCE" -eq 1 ] && { deps=1; web=1; }
 
@@ -135,13 +167,7 @@ systemctl --user restart "$SERVICE"
 for _ in $(seq 1 30); do
     if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
         say "healthy — now at $(git log --oneline -1 HEAD)"
-        # New config keys are a silent 500 at request time otherwise.
-        if [ -f .env ] && [ -f .env.example ]; then
-            missing="$(comm -23 \
-                <(sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' .env.example | sort -u) \
-                <(sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' .env | sort -u))"
-            [ -n "$missing" ] && warn "in .env.example but not .env: $(echo "$missing" | tr '\n' ' ')"
-        fi
+        report_new_config_keys
         exit 0
     fi
     sleep 1
