@@ -64,6 +64,40 @@ hf-deploy --force    # rebuild and restart even if already at head
 
 Push first. This deploys what GitHub has, not what is on your disk.
 
+### The backstop
+
+`holafresca-deploy.{service,timer}` poll `origin/main` every five minutes and
+run the same `update.sh --poll`, so a push still goes live when you cannot reach
+the box — sent from a phone, laptop shut, tailnet down. `hf-deploy` remains the
+normal path; this is the safety net, which is why it is five minutes and not
+one. Nothing needs to be running on the dev machine.
+
+```sh
+systemctl --user list-timers holafresca-deploy.timer   # when it next fires
+journalctl --user -u holafresca-deploy.service -f      # what it has been doing
+systemctl --user start holafresca-deploy.service       # do not wait for the tick
+```
+
+`--poll` differs from a manual run in what counts as a failure. A dirty tree, a
+diverged tree, the wrong branch, an unreachable origin: only a human clears
+those, so unattended they are skips. Failing the unit every five minutes for a
+condition the timer cannot fix turns `systemctl --user status` into noise and
+hides the deploys that broke for real — so a failed unit here always means a
+deploy that genuinely broke. It is also silent when there is nothing to do,
+which is the answer roughly 288 times a day.
+
+Both entry points take an `flock` on `.git/holafresca-deploy.lock`, since the
+timer and a manual `hf-deploy` can now fire at the same moment and two deploys
+interleaving over one working tree would be a bad afternoon. The lock is in
+`.git` rather than `$TMPDIR` because a systemd unit and a login shell need not
+agree on what `$TMPDIR` is, and two private lock files are the same as none.
+`--check` takes no lock, so a dry run never queues behind a running deploy.
+
+Note that "already deployed" means origin is an *ancestor* of `HEAD`, not equal
+to it: testing equality treats an unpushed local commit as a deploy, with
+nothing to merge but a service restart — which under a five-minute timer bounces
+the live site forever.
+
 Two things it does deliberately differently from `sync-integration.sh`:
 
 - **No `git reset --hard`.** That script owns its checkout; this one does not.
