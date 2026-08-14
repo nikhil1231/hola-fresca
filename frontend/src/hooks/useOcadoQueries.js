@@ -8,7 +8,6 @@ import {
   planOcadoBasket,
   pushOcadoBasket,
   refreshOcadoSession,
-  refreshOcadoStock,
   reserveOcadoSlot,
   startOcadoLogin,
   submitOcadoOtp,
@@ -103,17 +102,6 @@ export function useOcadoPushPlan(
     queryFn: () =>
       planOcadoBasket({ accountId, selections, ownedItemKeys, packOverrides, snapOverrides }),
     enabled: enabled && Boolean(accountId),
-  })
-}
-
-// Refreshing stock rewrites prices and availability in the catalogue, which
-// re-covers every affected ingredient - so the basket has to be re-fetched, not
-// just re-rendered.
-export function useOcadoStockRefresh() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: refreshOcadoStock,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-basket'] }),
   })
 }
 

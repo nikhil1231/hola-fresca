@@ -11,8 +11,12 @@ from app.mapping import ordering as O
 from app.mapping.candidates import Candidate
 
 
-def _candidate(sku, *, unit_price=None, basis="kg", rating=None, count=None, price=1.0):
+def _candidate(
+    sku, *, unit_price=None, basis="kg", rating=None, count=None, price=1.0,
+    base_unit_price=None,
+):
     return Candidate(
+        base_unit_price=base_unit_price,
         product_id=abs(hash(sku)) % 10_000,
         sku=sku,
         name=sku,
@@ -134,6 +138,27 @@ def test_within_a_tier_a_much_cheaper_unit_price_wins():
         _candidate("cheap", unit_price=3.0, rating=4.3, count=100),
     ]
     assert [a.sku for a in O.order_accepted(accepted, candidates)][0] == "cheap"
+
+
+def test_a_promotion_does_not_win_the_top_slot():
+    # The half-price one is cheaper today and dearer than its rival on the shelf.
+    # Ranking on today's price would freeze a three-week Nectar promotion into a
+    # stored rank that nothing re-sorts once the mapping is approved.
+    accepted = [_Accepted("promoted", llm_rank=1), _Accepted("plain", llm_rank=2)]
+    candidates = [
+        _candidate("promoted", unit_price=7.0, base_unit_price=14.0, rating=4.4, count=100),
+        _candidate("plain", unit_price=10.0, rating=4.4, count=100),
+    ]
+    assert [a.sku for a in O.order_accepted(accepted, candidates)][0] == "plain"
+    assert O.sort_unit_price(candidates[0]) == 14.0
+
+
+def test_a_product_with_no_promotion_ranks_on_the_price_it_has():
+    # Only a real offer sets a base price, so everything else must keep sorting
+    # exactly as it did rather than falling out of the comparison.
+    assert O.sort_unit_price(_candidate("plain", unit_price=10.0)) == 10.0
+    assert O.sort_unit_price(_candidate("unpriced")) is None
+    assert O.sort_unit_price(None) is None
 
 
 def test_a_tight_price_spread_lets_the_rating_decide():

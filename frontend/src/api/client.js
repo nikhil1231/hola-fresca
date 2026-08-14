@@ -73,6 +73,17 @@ export function fetchPlannerBasket(selections, packOverrides = {}, snapOverrides
   return postJSON('/api/planner/basket', { selections, pack_overrides: packOverrides, snap_overrides: snapOverrides })
 }
 
+// Re-reads stock and price at the active shop for every product this basket
+// could be covered from. Needs no login anywhere, so the basket page can offer
+// it to whoever is looking at it.
+export function refreshPlannerStock({ selections, packOverrides = {}, snapOverrides = {} }) {
+  return postJSON('/api/planner/stock/refresh', {
+    selections,
+    pack_overrides: packOverrides,
+    snap_overrides: snapOverrides,
+  })
+}
+
 export function fetchPlannerSuggestions({
   selections,
   filters = {},

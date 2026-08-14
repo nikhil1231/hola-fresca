@@ -261,12 +261,14 @@ def _candidate_from_product(mp: IngredientMappingProduct) -> Candidate | None:
         price=product.price,
         unit_price=product.unit_price,
         unit_price_basis=product.unit_price_basis,
+        base_unit_price=product.base_unit_price,
         # Treat 0 ratings as "no rating" rather than a real 0.0-star score.
         avg_rating=product.avg_rating if (product.ratings_count or 0) > 0 else None,
         ratings_count=product.ratings_count or None,
         url=product.url,
         result_rank=mp.rank,
         retailer=product.retailer,
+        is_frozen=bool(product.is_frozen),
     )
 
 

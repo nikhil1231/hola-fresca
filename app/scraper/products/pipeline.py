@@ -20,7 +20,7 @@ from app.db.models import Product, ProductScrapeState, ProductSearchHit
 from app.db.session import ensure_columns
 from app.retailers import DEFAULT_RETAILER
 from app.scraper.products import storage
-from app.scraper.products.base import chunks
+from app.scraper.products.base import base_price, chunks
 from app.scraper.products.browser import BrowserSession, is_dead_browser
 from app.scraper.products.registry import get_adapter
 from app.scraper.products.worklist import IngredientWorkItem, load_worklist
@@ -123,6 +123,60 @@ _PRODUCT_COLUMNS = {
     "shelf_life_raw": "VARCHAR(32)",
     "shelf_life_days": "INTEGER",
 }
+
+_BASE_PRICE_COLUMNS = {
+    "base_price": "FLOAT",
+    "base_unit_price": "FLOAT",
+}
+
+
+def backfill_prices(
+    session_factory: sessionmaker[Session], *, retailer: str = DEFAULT_RETAILER
+) -> ProductStageResult:
+    """Recover each cached product's pre-promotion price from its raw payload.
+
+    Both shops state the shelf price beside the offer, so this needs no re-fetch.
+
+    What it deliberately does *not* do is move ``price``. A stored payload is as
+    old as the scrape that wrote it, and adopting a promotional price out of a
+    three-week-old Ocado response would fill the catalogue with discounts that
+    ended a fortnight ago — worse than the shelf price it replaced, because it is
+    wrong in the direction that makes a basket look cheap. The base is therefore
+    written *relative to the price already on the row*: where the two agree there
+    is nothing on offer as far as this catalogue is concerned, and the answer is
+    NULL rather than a discount of zero. Today's price is the live refresh's job
+    (:mod:`app.catalogue.status`), which reads both halves at once.
+
+    Idempotent, and safe to run before either shop has been re-scraped.
+    """
+    adapter = get_adapter(retailer)
+    result = ProductStageResult()
+    with session_factory() as session:
+        ensure_columns(session, "products", _BASE_PRICE_COLUMNS)
+
+        products = session.scalars(
+            select(Product).where(
+                Product.retailer == adapter.RETAILER, Product.raw_json.is_not(None)
+            )
+        )
+        for product in products:
+            result.products += 1
+            try:
+                payload = json.loads(product.raw_json)
+                normalized = adapter.normalize_product(payload)
+            except (json.JSONDecodeError, ValueError):
+                result.errors += 1
+                continue
+            product.base_price = base_price(
+                product.price, normalized.base_price or normalized.price
+            )
+            product.base_unit_price = base_price(
+                product.unit_price, normalized.base_unit_price or normalized.unit_price
+            )
+            if product.base_price is not None or product.base_unit_price is not None:
+                result.normalized += 1
+        session.commit()
+    return result
 
 
 def backfill_shelf_life(
@@ -479,7 +533,10 @@ def upsert_product(session: Session, product) -> Product:
     existing.price = product.price
     existing.unit_price = product.unit_price
     existing.unit_price_basis = product.unit_price_basis
+    existing.base_price = product.base_price
+    existing.base_unit_price = product.base_unit_price
     existing.category = product.category
+    existing.is_frozen = product.is_frozen
     existing.in_stock = product.in_stock
     # A scrape *is* a stock reading, so it dates one - otherwise a basket built
     # straight after a scrape claims its stock has never been checked at all.

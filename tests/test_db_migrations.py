@@ -10,6 +10,8 @@ history, and regenerating it from the current models would test nothing.
 """
 from __future__ import annotations
 
+import threading
+
 from sqlalchemy import text
 
 from app.db.session import ALEMBIC_DIR, init_db, make_engine
@@ -221,6 +223,38 @@ def test_migrating_twice_changes_nothing(tmp_path):
         assert conn.execute(text("SELECT COUNT(*) FROM personal_recipe_ratings")).scalar() == 1
 
 
+def test_migrating_from_several_threads_at_once_changes_nothing(tmp_path):
+    """The API runs this from a threadpool, so several requests can arrive here
+    together on a cold start. Alembic publishes its environment through module
+    globals — one set per process — so two overlapping upgrades used to leave the
+    second tearing down a proxy the first had removed, and the request 500'd with
+    ``KeyError: 'script'`` before the endpoint was reached.
+    """
+    engine = _old_database(tmp_path / "old.db")
+    init_db(engine)
+
+    failures: list[BaseException] = []
+    start = threading.Barrier(4)
+
+    def migrate() -> None:
+        start.wait()
+        try:
+            init_db(make_engine(tmp_path / "old.db"))
+        except BaseException as exc:  # noqa: BLE001 - reported below, not swallowed
+            failures.append(exc)
+
+    threads = [threading.Thread(target=migrate) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not failures, failures
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == head_revision()
+        assert conn.execute(text("SELECT COUNT(*) FROM users")).scalar() == 1
+
+
 def test_a_fresh_database_is_stamped_at_head(tmp_path):
     """Otherwise the next start-up would replay migrations onto a current schema."""
     engine = make_engine(tmp_path / "fresh.db")
@@ -233,3 +267,40 @@ def test_a_fresh_database_is_stamped_at_head(tmp_path):
         assert conn.execute(
             text("SELECT COUNT(*) FROM recipe_cook_maps")
         ).scalar() == 0
+
+
+def test_frozen_products_backfill_existing_exact_mappings_as_form_differences(tmp_path):
+    """The stored Ocado chip fixes approved catalogue data without a re-scrape."""
+    from alembic import command
+    from alembic.config import Config
+
+    engine = make_engine(tmp_path / "frozen-form.db")
+    with engine.begin() as conn:
+        for statement in (
+            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)",
+            "INSERT INTO alembic_version VALUES ('0009_product_base_price')",
+            "CREATE TABLE products (id INTEGER PRIMARY KEY, category TEXT, raw_json TEXT)",
+            "CREATE TABLE ingredient_mappings (id INTEGER PRIMARY KEY, name TEXT)",
+            "CREATE TABLE ingredient_mapping_products ("
+            "id INTEGER PRIMARY KEY, mapping_id INTEGER, product_id INTEGER, match_type TEXT)",
+            "INSERT INTO products VALUES "
+            "(1, 'Frozen Food > Vegetables', NULL), "
+            "(2, 'Fresh & Chilled Food > Vegetables', NULL), "
+            "(3, NULL, '{\"iconAttributes\":[{\"label\":\"Frozen\",\"file\":\"frozen\"}]}')",
+            "INSERT INTO ingredient_mappings VALUES (1, 'Peas'), (2, 'Frozen Peas')",
+            "INSERT INTO ingredient_mapping_products VALUES "
+            "(1, 1, 1, 'exact'), (2, 1, 2, 'exact'), (3, 2, 3, 'exact')",
+        ):
+            conn.execute(text(statement))
+
+        cfg = Config(str(ALEMBIC_DIR.parent / "alembic.ini"))
+        cfg.attributes["connection"] = conn
+        cfg.attributes["configure_logger"] = False
+        command.upgrade(cfg, "head")
+
+        assert conn.execute(
+            text("SELECT id, is_frozen FROM products ORDER BY id")
+        ).all() == [(1, 1), (2, 0), (3, 1)]
+        assert conn.execute(
+            text("SELECT id, match_type FROM ingredient_mapping_products ORDER BY id")
+        ).all() == [(1, "form_differs"), (2, "exact"), (3, "exact")]

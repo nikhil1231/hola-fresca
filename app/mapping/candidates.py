@@ -53,10 +53,16 @@ class Candidate:
     ratings_count: int | None
     url: str | None
     result_rank: int
+    #: The shelf price behind a promotion, NULL when nothing is on offer. What
+    #: the ordering sorts on — see :func:`app.mapping.ordering.sort_unit_price`.
+    base_unit_price: float | None = None
     search_term: str | None = None
     # Who sells it. 'manual' marks a hand-entered product for something no
     # retailer stocks, which the shopping list has to separate out.
     retailer: str = RETAILER
+    # Storage form stated by the retailer (for Ocado, the explicit Frozen chip).
+    # A frozen candidate for a non-frozen ingredient is a conscious form change.
+    is_frozen: bool = False
 
 
 @dataclass
@@ -163,6 +169,7 @@ def gather_candidates(
                 price=product.price,
                 unit_price=product.unit_price,
                 unit_price_basis=product.unit_price_basis,
+                base_unit_price=product.base_unit_price,
                 # Treat 0 ratings as "no rating" rather than a real 0.0★ score.
                 avg_rating=product.avg_rating if (product.ratings_count or 0) > 0 else None,
                 ratings_count=product.ratings_count or None,
@@ -170,6 +177,7 @@ def gather_candidates(
                 result_rank=hit.result_rank,
                 search_term=hit.search_term,
                 retailer=product.retailer,
+                is_frozen=bool(product.is_frozen),
             )
         )
     return IngredientCandidates(

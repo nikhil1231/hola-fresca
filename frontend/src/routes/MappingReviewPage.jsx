@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
+  Accordion,
   Alert,
   Anchor,
   Badge,
@@ -19,9 +20,9 @@ import {
   Tabs,
   Text,
   TextInput,
-  Textarea,
   Title,
 } from '@mantine/core'
+import { IconSnowflake } from '@tabler/icons-react'
 
 import classes from './MappingReviewPage.module.css'
 import ManualProductForm from '../components/ManualProductForm.jsx'
@@ -46,6 +47,7 @@ import {
   ratingDescription,
   ratingQualityScore,
   relativeQualityScores,
+  sortUnitPrice,
 } from './mappingComparison.js'
 
 //: The candidate tabs split "the shop sells this" from "sourced by hand". The
@@ -112,6 +114,9 @@ export default function MappingReviewPage() {
   const [pantryStaple, setPantryStaple] = useState(false)
   const [notes, setNotes] = useState('')
   const [term, setTerm] = useState('')
+  const [candidateOrder, setCandidateOrder] = useState([])
+  const [draggedSku, setDraggedSku] = useState(null)
+  const [dropTarget, setDropTarget] = useState(null)
   const [retailerTab, setRetailerTab] = useState(RETAILER_TAB)
   const [sourcingManually, setSourcingManually] = useState(false)
   const resolveManual = useResolveWithManualProduct(key)
@@ -123,8 +128,7 @@ export default function MappingReviewPage() {
     for (const c of data.candidates) {
       initial[c.sku] = {
         accepted: c.accepted,
-        rank: c.rank ?? 0,
-        match_type: c.match_type ?? 'exact',
+        match_type: c.match_type ?? (c.is_frozen ? 'form_differs' : 'exact'),
         reason: c.reason ?? '',
       }
     }
@@ -134,6 +138,7 @@ export default function MappingReviewPage() {
     setPantryStaple(data.pantry_staple)
     setNotes(data.reviewer_notes ?? '')
     setTerm(data.search_term ?? data.name ?? '')
+    setCandidateOrder(data.candidates.map((candidate) => candidate.sku))
   }, [data])
 
   // The next ingredient still awaiting review, in the same spend-sorted order as
@@ -194,7 +199,7 @@ export default function MappingReviewPage() {
     return {
       unitPrice: relativeQualityScores(candidates, {
         ...options,
-        valueOf: (candidate) => candidate.unit_price,
+        valueOf: (candidate) => sortUnitPrice(candidate),
         groupOf: (candidate) => canonicalUnitPriceBasis(candidate.unit_price_basis),
         higherIsBetter: false,
       }),
@@ -227,11 +232,7 @@ export default function MappingReviewPage() {
   const isAlias = Boolean(data.alias_of)
 
   function toggle(sku, checked) {
-    setPicks((prev) => {
-      const nextRank =
-        Object.values(prev).reduce((m, p) => (p.accepted ? Math.max(m, p.rank) : m), 0) + 1
-      return { ...prev, [sku]: { ...prev[sku], accepted: checked, rank: checked ? nextRank : 0 } }
-    })
+    setPicks((prev) => ({ ...prev, [sku]: { ...prev[sku], accepted: checked } }))
   }
 
   function update(sku, field, value) {
@@ -239,13 +240,16 @@ export default function MappingReviewPage() {
   }
 
   function submit(status) {
-    const accepted = data.candidates
-      .filter((c) => picks[c.sku]?.accepted)
-      .map((c) => ({
-        sku: c.sku,
-        rank: picks[c.sku].rank || 1,
-        match_type: picks[c.sku].match_type,
-        reason: picks[c.sku].reason,
+    const orderedSkus = candidateOrder.length
+      ? candidateOrder
+      : data.candidates.map((candidate) => candidate.sku)
+    const accepted = orderedSkus
+      .filter((sku) => picks[sku]?.accepted)
+      .map((sku, index) => ({
+        sku,
+        rank: index + 1,
+        match_type: picks[sku].match_type,
+        reason: picks[sku].reason,
       }))
     save.mutate(
       {
@@ -272,13 +276,111 @@ export default function MappingReviewPage() {
   // product and then switching back to the shop never silently drops it.
   const retailerCandidates = data.candidates.filter((c) => c.retailer !== 'manual')
   const manualCandidates = data.candidates.filter((c) => c.retailer === 'manual')
-  const visibleCandidates = retailerTab === 'manual' ? manualCandidates : retailerCandidates
+  const candidatesBySku = new Map(data.candidates.map((candidate) => [candidate.sku, candidate]))
+  const orderedCandidates = candidateOrder
+    .map((sku) => candidatesBySku.get(sku))
+    .filter(Boolean)
+  const visibleCandidates = orderedCandidates.filter((candidate) =>
+    retailerTab === 'manual' ? candidate.retailer === 'manual' : candidate.retailer !== 'manual',
+  )
+
+  function reorderCandidate(sourceSku, targetSku, position) {
+    if (!sourceSku || sourceSku === targetSku) return
+    setCandidateOrder((current) => {
+      const next = current.filter((sku) => sku !== sourceSku)
+      const targetIndex = next.indexOf(targetSku)
+      if (targetIndex === -1) return current
+      next.splice(targetIndex + (position === 'after' ? 1 : 0), 0, sourceSku)
+      return next
+    })
+  }
+
+  function beginCandidateDrag(event, sourceSku) {
+    if (event.button !== 0) return
+
+    const pointerId = event.pointerId
+    const sourceRow = event.currentTarget
+    const start = { x: event.clientX, y: event.clientY }
+    const previousUserSelect = document.body.style.userSelect
+    let active = false
+    let target = null
+
+    function clearDrag() {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerCancel)
+      if (sourceRow.hasPointerCapture(pointerId)) sourceRow.releasePointerCapture(pointerId)
+      document.body.style.userSelect = previousUserSelect
+      setDraggedSku(null)
+      setDropTarget(null)
+    }
+
+    function handlePointerMove(pointerEvent) {
+      if (pointerEvent.pointerId !== pointerId) return
+      if (!active) {
+        const distance = Math.hypot(
+          pointerEvent.clientX - start.x,
+          pointerEvent.clientY - start.y,
+        )
+        if (distance < 6) return
+        active = true
+        sourceRow.setPointerCapture(pointerId)
+        document.body.style.userSelect = 'none'
+        setDraggedSku(sourceSku)
+      }
+
+      pointerEvent.preventDefault()
+      const targetRow = document
+        .elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)
+        ?.closest('[data-candidate-sku]')
+      const targetSku = targetRow?.dataset.candidateSku
+      if (!targetSku || targetSku === sourceSku) {
+        target = null
+        setDropTarget(null)
+        return
+      }
+
+      const bounds = targetRow.getBoundingClientRect()
+      target = {
+        sku: targetSku,
+        position: pointerEvent.clientY >= bounds.top + bounds.height / 2 ? 'after' : 'before',
+      }
+      setDropTarget(target)
+    }
+
+    function handlePointerUp(pointerEvent) {
+      if (pointerEvent.pointerId !== pointerId) return
+      if (active && target) reorderCandidate(sourceSku, target.sku, target.position)
+      if (active) {
+        // A drag that starts over a checkbox, link or select must not also
+        // activate that control when the pointer is released.
+        const suppressClick = (clickEvent) => {
+          clickEvent.preventDefault()
+          clickEvent.stopPropagation()
+        }
+        window.addEventListener('click', suppressClick, { capture: true, once: true })
+        window.setTimeout(() => window.removeEventListener('click', suppressClick, true), 0)
+      }
+      clearDrag()
+    }
+
+    function handlePointerCancel(pointerEvent) {
+      if (pointerEvent.pointerId === pointerId) clearDrag()
+    }
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false })
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerCancel)
+  }
 
   // Rendered twice — under the header and at the foot of the candidate table —
   // so a quick approve never needs a scroll past the whole list.
-  function actionButtons() {
+  function actionButtons({ header = false } = {}) {
     return (
-      <Group className={classes.decisionActions}>
+      <Group
+        className={`${classes.decisionActions} ${header ? classes.headerDecisionActions : ''}`}
+        wrap="nowrap"
+      >
         <Button
           className={`${classes.decisionButton} ${classes.rejectButton}`}
           variant="default"
@@ -343,7 +445,7 @@ export default function MappingReviewPage() {
       </Group>
 
       <Paper withBorder radius="md" p="md" className={classes.summaryPanel}>
-        <Group justify="space-between" align="flex-start" gap="lg" className={classes.summaryHeader}>
+        <div className={classes.summaryHeader}>
           <Group align="flex-start" gap="md" wrap="nowrap" className={classes.identityGroup}>
             <div className={classes.ingredientIcon}>
               {data.ingredient_icon_url ? (
@@ -354,7 +456,9 @@ export default function MappingReviewPage() {
             </div>
             <div className={classes.titleBlock}>
               <Group gap="xs" align="center">
-                <Title order={2}>{data.name}</Title>
+                <Title order={3} className={classes.ingredientTitle}>
+                  {data.name}
+                </Title>
                 <RetailerChip />
                 {data.status && (
                   <Badge
@@ -379,8 +483,8 @@ export default function MappingReviewPage() {
               )}
             </div>
           </Group>
-          {!isAlias && actionButtons()}
-        </Group>
+          {!isAlias && actionButtons({ header: true })}
+        </div>
 
         <div className={classes.reviewGrid}>
           <div className={classes.reviewCell}>
@@ -455,60 +559,77 @@ export default function MappingReviewPage() {
       )}
 
       {data.example_recipes?.length > 0 && (
-        <Stack gap="sm">
-          <Group justify="space-between" align="baseline">
-            <Title order={3}>Example recipes</Title>
-            <Text size="sm" c="dimmed">
-              {data.example_recipes.length} examples
-            </Text>
+        <Accordion variant="contained" radius="md" className={classes.exampleRecipes}>
+          <Accordion.Item value="example-recipes">
+            <Accordion.Control>
+              <Group justify="space-between" align="baseline" wrap="nowrap" pr="xs">
+                <Text fw={650}>Example recipes</Text>
+                <Text size="sm" c="dimmed">
+                  {data.example_recipes.length} examples
+                </Text>
+              </Group>
+            </Accordion.Control>
+            <Accordion.Panel>
+              <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing="md">
+                {data.example_recipes.map((recipe) => (
+                  <RecipeCard key={recipe.id} recipe={recipe} showStats={false} />
+                ))}
+              </SimpleGrid>
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion>
+      )}
+
+      <div className={classes.searchProposalRow}>
+        <Paper
+          withBorder
+          radius="md"
+          p="md"
+          className={`${classes.mappingSurface} ${!data.llm_notes ? classes.searchOnly : ''}`}
+        >
+          <Group align="flex-end" gap="sm" wrap="nowrap" className={classes.searchControls}>
+            <TextInput
+              label={`${retailerLabel ?? 'Retailer'} search term`}
+              description="Reword and search again when the candidates miss."
+              value={term}
+              disabled={isAlias}
+              onChange={(e) => setTerm(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && term.trim()) research.mutate(term.trim())
+              }}
+              className={classes.searchInput}
+            />
+            <Button
+              onClick={() => research.mutate(term.trim())}
+              loading={research.isPending}
+              disabled={isAlias || !term.trim()}
+            >
+              Search {retailerLabel ?? 'the shop'}
+            </Button>
           </Group>
-          <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing="md">
-            {data.example_recipes.map((recipe) => (
-              <RecipeCard key={recipe.id} recipe={recipe} showStats={false} />
-            ))}
-          </SimpleGrid>
-        </Stack>
-      )}
-
-      {data.llm_notes && (
-        <Alert color="blue" variant="light" title={`Proposal note${data.model ? ` (${data.model})` : ''}`}>
-          {data.llm_notes}
-        </Alert>
-      )}
-
-      <Paper withBorder radius="md" p="md" className={classes.mappingSurface}>
-        <Group align="flex-end" gap="sm">
-          <TextInput
-            label={`${retailerLabel ?? 'Retailer'} search term`}
-            description="Reword and search again when the candidates miss."
-            value={term}
-            disabled={isAlias}
-            onChange={(e) => setTerm(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && term.trim()) research.mutate(term.trim())
-            }}
-            style={{ flex: 1 }}
-          />
-          <Button
-            onClick={() => research.mutate(term.trim())}
-            loading={research.isPending}
-            disabled={isAlias || !term.trim()}
+          {research.isPending && (
+            <Text size="xs" c="dimmed" mt="xs">
+              Searching {retailerLabel ?? 'the shop'} - this drives a real browser session, so it
+              takes a few seconds.
+            </Text>
+          )}
+          {research.isError && (
+            <Text size="xs" c="red" mt="xs">
+              Search failed: {research.error?.message}
+            </Text>
+          )}
+        </Paper>
+        {data.llm_notes && (
+          <Alert
+            color="blue"
+            variant="light"
+            title={`Proposal note${data.model ? ` (${data.model})` : ''}`}
+            className={classes.proposalNote}
           >
-            Search {retailerLabel ?? 'the shop'}
-          </Button>
-        </Group>
-        {research.isPending && (
-          <Text size="xs" c="dimmed" mt="xs">
-            Searching {retailerLabel ?? 'the shop'} - this drives a real browser session, so it
-            takes a few seconds.
-          </Text>
+            {data.llm_notes}
+          </Alert>
         )}
-        {research.isError && (
-          <Text size="xs" c="red" mt="xs">
-            Search failed: {research.error?.message}
-          </Text>
-        )}
-      </Paper>
+      </div>
 
       <div
         style={
@@ -529,14 +650,19 @@ export default function MappingReviewPage() {
       )}
 
       <Group justify="space-between" align="flex-end">
-        <Tabs value={retailerTab} onChange={(v) => setRetailerTab(v ?? RETAILER_TAB)}>
-          <Tabs.List>
-            <Tabs.Tab value={RETAILER_TAB}>
-              {retailerLabel ?? 'Retailer'} ({retailerCandidates.length})
-            </Tabs.Tab>
-            <Tabs.Tab value="manual">Manual ({manualCandidates.length})</Tabs.Tab>
-          </Tabs.List>
-        </Tabs>
+        <Stack gap={4}>
+          <Tabs value={retailerTab} onChange={(v) => setRetailerTab(v ?? RETAILER_TAB)}>
+            <Tabs.List>
+              <Tabs.Tab value={RETAILER_TAB}>
+                {retailerLabel ?? 'Retailer'} ({retailerCandidates.length})
+              </Tabs.Tab>
+              <Tabs.Tab value="manual">Manual ({manualCandidates.length})</Tabs.Tab>
+            </Tabs.List>
+          </Tabs>
+          <Text size="xs" c="dimmed">
+            Accepted products are ranked from top to bottom. Drag any row to change the order.
+          </Text>
+        </Stack>
         <Button
           variant={sourcingManually ? 'filled' : 'light'}
           size="xs"
@@ -585,7 +711,6 @@ export default function MappingReviewPage() {
                 <Table.Th>Price</Table.Th>
                 <Table.Th>Unit price</Table.Th>
                 <Table.Th>Rating</Table.Th>
-                <Table.Th w={90}>Rank</Table.Th>
                 <Table.Th w={140}>Match</Table.Th>
               </Table.Tr>
             </Table.Thead>
@@ -595,7 +720,21 @@ export default function MappingReviewPage() {
                 return (
                   <Table.Tr
                     key={c.sku}
-                    className={pick.accepted ? classes.selectedCandidateRow : undefined}
+                    data-candidate-sku={c.sku}
+                    onPointerDown={(event) => beginCandidateDrag(event, c.sku)}
+                    title="Drag to reorder"
+                    className={[
+                      classes.draggableCandidateRow,
+                      pick.accepted ? classes.selectedCandidateRow : '',
+                      draggedSku === c.sku ? classes.draggingCandidateRow : '',
+                      dropTarget?.sku === c.sku
+                        ? dropTarget.position === 'after'
+                          ? classes.dropAfterCandidateRow
+                          : classes.dropBeforeCandidateRow
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
                   >
                     <Table.Td>
                       <Checkbox
@@ -604,9 +743,20 @@ export default function MappingReviewPage() {
                       />
                     </Table.Td>
                     <Table.Td>
-                      <Anchor href={c.url ?? '#'} target="_blank" fw={600} size="sm">
-                        {c.name}
-                      </Anchor>
+                      <Group gap={6} align="center" wrap="nowrap">
+                        <Anchor href={c.url ?? '#'} target="_blank" fw={600} size="sm">
+                          {c.name}
+                        </Anchor>
+                        {c.is_frozen && (
+                          <span
+                            className={classes.frozenIcon}
+                            aria-label="Frozen"
+                            title="Frozen"
+                          >
+                            <IconSnowflake size={16} stroke={2} aria-hidden="true" />
+                          </span>
+                        )}
+                      </Group>
                       {c.brand && (
                         <Text size="xs" c="dimmed">
                           {c.brand}
@@ -626,13 +776,25 @@ export default function MappingReviewPage() {
                     <Table.Td>{c.pack_size_raw ?? '—'}</Table.Td>
                     <Table.Td>{money(c.price)}</Table.Td>
                     <Table.Td>
-                      <MetricPill
-                        metric="Unit price"
-                        score={comparisonScores.unitPrice.get(c.sku)}
-                        unavailable={c.unit_price == null}
-                      >
-                        {c.unit_price != null ? `£${c.unit_price}/${c.unit_price_basis}` : '—'}
-                      </MetricPill>
+                      <Stack gap={4} align="flex-start">
+                        <MetricPill
+                          metric="Unit price"
+                          score={comparisonScores.unitPrice.get(c.sku)}
+                          unavailable={sortUnitPrice(c) == null}
+                        >
+                          {sortUnitPrice(c) != null
+                            ? `£${sortUnitPrice(c)}/${c.unit_price_basis}`
+                            : '—'}
+                        </MetricPill>
+                        {/* Ranked on the shelf price, so a promotion has to be
+                            stated rather than silently priced in — otherwise this
+                            column looks wrong against the shop's own page. */}
+                        {c.base_unit_price != null && (
+                          <Badge size="xs" variant="light" color="grape" tt="none">
+                            £{c.unit_price}/{c.unit_price_basis}
+                          </Badge>
+                        )}
+                      </Stack>
                     </Table.Td>
                     <Table.Td>
                       <MetricPill
@@ -643,17 +805,6 @@ export default function MappingReviewPage() {
                       >
                         {formatRating(c.avg_rating, c.ratings_count)}
                       </MetricPill>
-                    </Table.Td>
-                    <Table.Td>
-                      {pick.accepted && (
-                        <NumberInput
-                          value={pick.rank || 1}
-                          onChange={(v) => update(c.sku, 'rank', Number(v) || 1)}
-                          min={1}
-                          size="xs"
-                          w={70}
-                        />
-                      )}
                     </Table.Td>
                     <Table.Td>
                       {pick.accepted && (
@@ -672,7 +823,7 @@ export default function MappingReviewPage() {
               })}
               {visibleCandidates.length === 0 && (
                 <Table.Tr>
-                  <Table.Td colSpan={8}>
+                  <Table.Td colSpan={7}>
                     <Text size="sm" c="dimmed" ta="center" py="md">
                       {retailerTab === 'manual'
                         ? 'No hand-entered products for this ingredient yet.'
@@ -685,14 +836,6 @@ export default function MappingReviewPage() {
           </Table>
         </Table.ScrollContainer>
       </Paper>
-
-      <Textarea
-        label="Reviewer notes"
-        value={notes}
-        onChange={(e) => setNotes(e.currentTarget.value)}
-        autosize
-        minRows={2}
-      />
 
       <Group justify="space-between">
         <Text size="sm" c="dimmed">

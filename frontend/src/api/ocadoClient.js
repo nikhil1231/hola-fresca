@@ -83,12 +83,6 @@ export function planOcadoBasket({ accountId, selections, ownedItemKeys = [], pac
   })
 }
 
-// Re-reads stock and price for every product this basket could be covered from.
-// Needs no Ocado login, so the basket page can offer it unconditionally.
-export function refreshOcadoStock({ selections, packOverrides = {}, snapOverrides = {} }) {
-  return postJSON('/api/ocado/stock/refresh', { selections, pack_overrides: packOverrides, snap_overrides: snapOverrides })
-}
-
 export function fetchOcadoBasket(accountId) {
   return getJSON(`/api/ocado/basket${accountQuery(accountId)}`)
 }

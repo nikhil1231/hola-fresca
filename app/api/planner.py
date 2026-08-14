@@ -36,9 +36,11 @@ from app.api.schemas import (
     PackPreferenceOut,
     PlannerSuggestionsOut,
     RecipeSuggestionCard,
+    StockRefreshOut,
     SuggestionsIn,
 )
 from app.api.schedule import pack_shortfall_tolerance_pct
+from app import catalogue
 from app.db.models import IngredientMapping, Recipe, User
 from app.planner.basket import (
     Basket,
@@ -284,6 +286,79 @@ def basket(
         pack_preferences=pack_preferences(session, user.id, retailer=retailer),
         pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session, user.id),
     ))
+
+
+@router.post("/stock/refresh", response_model=StockRefreshOut)
+def stock_refresh(
+    body: BasketIn,
+    session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    csv_path: Path | None = Depends(get_planner_csv_path),
+    user: User = Depends(get_current_user),
+    retailer: str = Depends(get_active_retailer),
+) -> StockRefreshOut:
+    """Re-read stock and price for everything this basket could be covered from.
+
+    Everything, not just the packs it chose: a substitute is only reachable if
+    its stock is known, and one marked sold out weeks ago never comes back
+    without being asked again. Checking the whole shortlist is what lets the
+    planner move between them — and what makes the prices behind the total the
+    prices being charged today, promotions included.
+
+    Lives here rather than under ``/ocado`` because the answer depends on which
+    shop the basket is priced at, not on being signed in to any of them.
+    """
+    if not catalogue.supports_live_status(retailer):
+        raise HTTPException(
+            status_code=501, detail=f"{retailer} has no live stock and price check"
+        )
+    recipe_ids = _selection_ids(body.selections)
+    _require_curated(session, recipe_ids)
+    selections = [_planner_selection(selection) for selection in body.selections]
+    index = _load_planner_index(factory, recipe_ids, csv_path, retailer)
+    basket = build_basket(
+        index,
+        selections,
+        pack_overrides=body.pack_overrides,
+        snap_overrides=body.snap_overrides,
+        pack_preferences=pack_preferences(session, user.id, retailer=retailer),
+        pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session, user.id),
+    )
+    try:
+        result = catalogue.refresh_stock(
+            factory, candidate_skus(index, basket), retailer=retailer
+        )
+    except Exception as exc:  # noqa: BLE001 - the shop's failure, not the app's
+        raise HTTPException(
+            status_code=502, detail=f"{retailer} stock check failed: {exc}"
+        ) from exc
+    return StockRefreshOut(
+        checked_at=result.checked_at,
+        checked=result.checked,
+        available=result.available,
+        sold_out=result.sold_out,
+        restocked=result.restocked,
+        repriced=result.repriced,
+        changed=result.changed,
+    )
+
+
+def candidate_skus(index: PlanIndex, basket: Basket) -> list[str]:
+    """Every product the basket's ingredients are allowed to be covered from.
+
+    Not just the packs it chose: a substitute is only reachable if its stock is
+    known, and one marked sold out weeks ago never comes back without being
+    asked again. Checking the whole shortlist is what lets the planner move
+    between them.
+    """
+    skus: list[str] = []
+    keys = {line.key for line in basket.lines}
+    for key in sorted(keys):
+        ingredient = index.ingredient(key)
+        if ingredient is None:
+            continue
+        skus.extend(pack.sku for pack in ingredient.packs if not pack.external)
+    return list(dict.fromkeys(skus))
 
 
 @router.put("/preferences/pack", response_model=PackPreferenceOut)

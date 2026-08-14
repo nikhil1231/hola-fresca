@@ -87,6 +87,43 @@ def test_normalize_product_reads_guaranteed_product_life():
     assert normalized.shelf_life_days == 14
 
 
+def test_normalize_product_reads_frozen_chip_as_a_storage_form():
+    frozen = normalize_product(
+        {
+            "productId": "frozen-garlic",
+            "name": "Chopped Garlic",
+            "iconAttributes": [
+                {"label": "Suitable for freezing", "file": "freezable"},
+                {"label": "Frozen", "file": "frozen"},
+            ],
+        }
+    )
+    merely_freezable = normalize_product(
+        {
+            "productId": "fresh-garlic",
+            "name": "Fresh Garlic",
+            "iconAttributes": [
+                {"label": "Suitable for freezing", "file": "freezable"},
+            ],
+        }
+    )
+
+    assert frozen.is_frozen is True
+    assert merely_freezable.is_frozen is False
+
+
+def test_normalize_product_uses_frozen_category_when_the_chip_is_absent():
+    product = normalize_product(
+        {
+            "productId": "frozen-peas",
+            "name": "Garden Peas",
+            "categoryPath": ["Frozen Food", "Frozen Vegetables"],
+        }
+    )
+
+    assert product.is_frozen is True
+
+
 def test_product_url_falls_back_to_retailer_product_id():
     # Real Ocado payloads carry no url field; the UUID productId is not a valid
     # path (404), but /products/<retailerProductId> 301s to the canonical page.
@@ -121,6 +158,114 @@ def test_unit_price_parser_common_forms():
     assert parse_unit_price("£1.50 per kg") == (1.5, "kg")
     assert parse_unit_price("95p/100g") == (0.95, "100g")
     assert parse_unit_price("£2.20 per litre") == (2.2, "l")
+
+
+def _promoted(**overrides) -> dict:
+    node = {
+        "productId": "p1",
+        "name": "Nishaan Minced Garlic 210g",
+        "price": {"amount": "1.90", "currency": "GBP"},
+        "promoPrice": {"amount": "1.60", "currency": "GBP"},
+        "unitPrice": {
+            "price": {"amount": "6.71", "currency": "GBP"},
+            "unit": "fop.price.per.kg",
+            "unitName": "PER_1KG",
+        },
+        "promoUnitPrice": {
+            "price": {"amount": "5.65", "currency": "GBP"},
+            "unit": "fop.price.per.kg",
+            "unitName": "PER_1KG",
+        },
+    }
+    node.update(overrides)
+    return node
+
+
+def test_a_promotional_price_is_what_the_basket_pays():
+    # Ocado states promoPrice beside price rather than replacing it, so the
+    # shelf price used to be the only one read and every offer counted for
+    # nothing — the opposite of the Sainsbury's payload.
+    product = normalize_product(_promoted())
+    assert (product.price, product.base_price) == (1.6, 1.9)
+    assert (product.unit_price, product.unit_price_basis) == (5.65, "kg")
+    assert product.base_unit_price == 6.71
+
+
+def test_a_multibuy_leaves_the_shelf_price_alone():
+    # "Buy any 3 for £5" sets no promo price, and buying one of something is not
+    # three of it. Nothing on offer as far as a single pack is concerned.
+    product = normalize_product(
+        _promoted(
+            promoPrice=None,
+            promoUnitPrice=None,
+            promotions=[{"description": "Buy any 3 for £5", "requiredProductQuantity": 3}],
+        )
+    )
+    assert (product.price, product.base_price) == (1.9, None)
+    assert (product.unit_price, product.base_unit_price) == (6.71, None)
+
+
+def test_a_promotional_unit_price_on_another_basis_is_not_taken():
+    # Ocado restates the basis alongside it, and £5.65 per kg is not an
+    # improvement on £6.71 per each.
+    product = normalize_product(
+        _promoted(
+            unitPrice={
+                "price": {"amount": "6.71", "currency": "GBP"},
+                "unit": "fop.price.per.each",
+                "unitName": "EACH",
+            }
+        )
+    )
+    assert (product.unit_price, product.unit_price_basis) == (6.71, "each")
+    assert product.base_unit_price is None
+
+
+def test_backfill_prices_never_invents_a_discount_off_a_stale_payload(tmp_path):
+    # The payload is as old as the scrape. Adopting its promotional price would
+    # fill the catalogue with offers that ended a fortnight ago, so the base is
+    # written relative to the price already on the row: agreeing with it means
+    # nothing is on offer, and the answer is NULL rather than a discount of zero.
+    db_path = tmp_path / "products.db"
+    engine = make_engine(db_path)
+    init_db(engine)
+    factory = make_session_factory(engine)
+
+    with factory() as session:
+        session.add_all(
+            [
+                Product(
+                    retailer=RETAILER,
+                    sku="stale-promo",
+                    name="Nishaan Minced Garlic 210g",
+                    # The shelf price the scrape stored, from a payload whose
+                    # promotion has since lapsed.
+                    price=1.9,
+                    unit_price=6.71,
+                    raw_json=json.dumps(_promoted()),
+                ),
+                Product(
+                    retailer=RETAILER,
+                    sku="live-promo",
+                    name="Nishaan Minced Garlic 210g",
+                    # A row already repriced to the offer by a live refresh.
+                    price=1.6,
+                    unit_price=5.65,
+                    raw_json=json.dumps(_promoted()),
+                ),
+            ]
+        )
+        session.commit()
+
+    result = pipeline.backfill_prices(factory)
+
+    assert (result.products, result.normalized, result.errors) == (2, 1, 0)
+    with factory() as session:
+        rows = {p.sku: p for p in session.query(Product).all()}
+        assert (rows["stale-promo"].price, rows["stale-promo"].base_price) == (1.9, None)
+        assert rows["stale-promo"].base_unit_price is None
+        assert (rows["live-promo"].price, rows["live-promo"].base_price) == (1.6, 1.9)
+        assert rows["live-promo"].base_unit_price == 6.71
 
 
 def test_backfill_shelf_life_reparses_stored_raw_json(tmp_path):

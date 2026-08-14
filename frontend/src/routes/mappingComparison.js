@@ -60,6 +60,17 @@ export function canonicalUnitPriceBasis(basis) {
 }
 
 /**
+ * The unit price to compare on: the shelf price, with any promotion stripped
+ * back off. Mirrors `app.mapping.ordering.sort_unit_price`, which computes the
+ * order these pills are colouring — an order that gets stored and, once
+ * approved, outlives the fortnight a promotion runs for.
+ */
+export function sortUnitPrice(candidate) {
+  if (candidate?.base_unit_price != null) return candidate.base_unit_price
+  return candidate?.unit_price ?? null
+}
+
+/**
  * Return a quality score (0 = worse/red, 1 = better/green) for comparable,
  * selected values. The selected range determines position, while its size
  * relative to the minimum controls how strongly endpoints leave neutral.

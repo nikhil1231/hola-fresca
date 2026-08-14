@@ -48,6 +48,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "backfill-shelf-life",
         help="re-derive shelf life from cached raw payloads (no re-fetch)",
     )
+    sub.add_parser(
+        "backfill-prices",
+        help="recover pre-promotion prices from cached raw payloads (no re-fetch)",
+    )
     sub.add_parser("status", help="print product-cache status")
     return parser
 
@@ -94,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"backfill-shelf-life: {res.normalized} of {res.products} products "
             f"have a stated shelf life, {res.errors} errors"
+        )
+    elif args.command == "backfill-prices":
+        res = pipeline.backfill_prices(session_factory, retailer=retailer)
+        print(
+            f"backfill-prices: {res.normalized} of {res.products} products are on "
+            f"offer against their shelf price, {res.errors} errors"
         )
     elif args.command == "status":
         counts = pipeline.status_counts(session_factory, retailer=retailer)

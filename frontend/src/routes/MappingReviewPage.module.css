@@ -1,14 +1,16 @@
 .decisionActions {
-  color-scheme: only light;
+  flex: 0 0 auto;
+  justify-content: flex-end;
 }
 
-.decisionButton,
 .reviewStatus {
   forced-color-adjust: none;
   color-scheme: only light;
 }
 
 .decisionButton {
+  forced-color-adjust: none;
+  color-scheme: dark;
   min-width: 110px;
   border-radius: var(--mantine-radius-md);
   font-weight: 700;
@@ -24,53 +26,53 @@
 }
 
 .rejectButton {
-  --button-bg: #ffffff !important;
-  --button-hover: #f8fafc !important;
-  --button-color: #334155 !important;
-  --button-bd: 1px solid #cbd5e1 !important;
+  --button-bg: #252c27 !important;
+  --button-hover: #303933 !important;
+  --button-color: #e7ece8 !important;
+  --button-bd: 1px solid #465149 !important;
 
-  background-color: #ffffff !important;
-  border-color: #cbd5e1 !important;
-  color: #334155 !important;
+  background-color: #252c27 !important;
+  border-color: #465149 !important;
+  color: #e7ece8 !important;
 }
 
 .rejectButton:hover {
-  background-color: #f8fafc !important;
-  border-color: #94a3b8 !important;
-  color: #1e293b !important;
+  background-color: #303933 !important;
+  border-color: #5c695f !important;
+  color: #ffffff !important;
 }
 
 .needsReviewButton {
-  --button-bg: #fff3bf !important;
-  --button-hover: #ffe066 !important;
-  --button-color: #7c4d00 !important;
-  --button-bd: 1px solid #ffd43b !important;
+  --button-bg: #3b321d !important;
+  --button-hover: #4a3d20 !important;
+  --button-color: #f3d27a !important;
+  --button-bd: 1px solid #735d29 !important;
 
-  background-color: #fff3bf !important;
-  border-color: #ffd43b !important;
-  color: #7c4d00 !important;
+  background-color: #3b321d !important;
+  border-color: #735d29 !important;
+  color: #f3d27a !important;
 }
 
 .needsReviewButton:hover {
-  background-color: #ffe066 !important;
-  border-color: #fab005 !important;
-  color: #5f3b00 !important;
+  background-color: #4a3d20 !important;
+  border-color: #9a7c32 !important;
+  color: #ffe39a !important;
 }
 
 .approveButton {
-  --button-bg: #12b886 !important;
-  --button-hover: #0ca678 !important;
+  --button-bg: #237a49 !important;
+  --button-hover: #2b9258 !important;
   --button-color: #ffffff !important;
-  --button-bd: 1px solid #12b886 !important;
+  --button-bd: 1px solid #34965f !important;
 
-  background-color: #12b886 !important;
-  border-color: #12b886 !important;
+  background-color: #237a49 !important;
+  border-color: #34965f !important;
   color: #ffffff !important;
 }
 
 .approveButton:hover {
-  background-color: #0ca678 !important;
-  border-color: #0ca678 !important;
+  background-color: #2b9258 !important;
+  border-color: #45b774 !important;
   color: #ffffff !important;
 }
 
@@ -110,6 +112,11 @@
 }
 
 .summaryHeader {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
+  gap: var(--mantine-spacing-lg);
   padding-bottom: var(--mantine-spacing-md);
   border-bottom: 1px solid var(--hf-border);
 }
@@ -133,6 +140,43 @@
 
 .titleBlock {
   min-width: 0;
+}
+
+.ingredientTitle {
+  overflow-wrap: anywhere;
+}
+
+.headerDecisionActions {
+  align-self: start;
+  justify-self: end;
+}
+
+.exampleRecipes {
+  background: var(--hf-surface);
+}
+
+.searchProposalRow {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.2fr) minmax(260px, 0.8fr);
+  align-items: stretch;
+  gap: var(--mantine-spacing-md);
+}
+
+.searchOnly {
+  grid-column: 1 / -1;
+}
+
+.proposalNote {
+  margin: 0;
+}
+
+.searchControls,
+.searchInput {
+  min-width: 0;
+}
+
+.searchInput {
+  flex: 1;
 }
 
 .reviewGrid {
@@ -172,22 +216,86 @@
   box-shadow: inset 4px 0 0 var(--mantine-color-fresh-6);
 }
 
+.frozenIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--mantine-color-cyan-5);
+}
+
+.draggableCandidateRow {
+  cursor: grab;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease;
+}
+
+.draggableCandidateRow:active {
+  cursor: grabbing;
+}
+
+.draggingCandidateRow {
+  opacity: 0.42;
+}
+
+.dropBeforeCandidateRow > td {
+  box-shadow: inset 0 3px 0 var(--hf-accent);
+}
+
+.dropAfterCandidateRow > td {
+  box-shadow: inset 0 -3px 0 var(--hf-accent);
+}
+
+.selectedCandidateRow.dropBeforeCandidateRow > td:first-child {
+  box-shadow:
+    inset 4px 0 0 var(--mantine-color-fresh-6),
+    inset 0 3px 0 var(--hf-accent);
+}
+
+.selectedCandidateRow.dropAfterCandidateRow > td:first-child {
+  box-shadow:
+    inset 4px 0 0 var(--mantine-color-fresh-6),
+    inset 0 -3px 0 var(--hf-accent);
+}
+
 .optionCheckbox {
   margin-top: 26px;
 }
 
 @media (max-width: 62em) {
-  .summaryHeader {
-    align-items: stretch;
-  }
-
   .reviewGrid,
   .optionsCell {
+    grid-template-columns: 1fr;
+  }
+
+  .searchProposalRow {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 36em) {
+  .summaryHeader {
+    grid-template-columns: 1fr;
+    padding-top: 44px;
+  }
+
+  .headerDecisionActions {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+
+  .decisionActions {
+    gap: 4px;
+  }
+
+  .decisionButton {
+    min-width: 0;
+    padding-inline: 9px;
+    font-size: var(--mantine-font-size-xs);
+  }
+
   .ingredientIcon {
     width: 58px;
     height: 58px;

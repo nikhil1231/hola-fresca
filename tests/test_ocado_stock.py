@@ -181,7 +181,7 @@ def test_refreshing_stock_moves_the_basket_onto_what_is_in_stock(stock_client, m
     client, recipe_id, _ = stock_client
     _shelves(monkeypatch, sold_out=[CHEAP])
 
-    refresh = client.post("/api/ocado/stock/refresh", json=_selections(recipe_id)).json()
+    refresh = client.post("/api/planner/stock/refresh", json=_selections(recipe_id)).json()
     assert refresh["checked"] == 2 and refresh["sold_out"] == [CHEAP]
 
     line = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
@@ -195,7 +195,7 @@ def test_the_basket_reports_how_fresh_its_stock_is(stock_client, monkeypatch):
     client, recipe_id, _ = stock_client
     _shelves(monkeypatch)
 
-    client.post("/api/ocado/stock/refresh", json=_selections(recipe_id))
+    client.post("/api/planner/stock/refresh", json=_selections(recipe_id))
     checked_at = client.post("/api/planner/basket", json=_selections(recipe_id)).json()[
         "stock_checked_at"
     ]
@@ -222,7 +222,7 @@ def test_an_ingredient_with_nothing_in_stock_is_reported_apart(stock_client, mon
     client, recipe_id, _ = stock_client
     _shelves(monkeypatch, sold_out=[CHEAP, DEARER])
 
-    client.post("/api/ocado/stock/refresh", json=_selections(recipe_id))
+    client.post("/api/planner/stock/refresh", json=_selections(recipe_id))
     data = client.post("/api/planner/basket", json=_selections(recipe_id)).json()
 
     assert data["sold_out"] == ["Rice"]

@@ -26,6 +26,7 @@ from app.api.planner import (
     _require_curated,
     _round_money,
     _stock_checked_at,
+    candidate_skus,
 )
 from app.api.schemas import (
     BasketIn,
@@ -45,7 +46,6 @@ from app.api.schemas import (
     OcadoReserveOut,
     OcadoSlotOut,
     OcadoSlotsOut,
-    OcadoStockRefreshOut,
     OcadoSwapOut,
     PushLineOut,
 )
@@ -253,24 +253,6 @@ def otp(body: OcadoOtpIn) -> OcadoLoginOut:
     return _login_out(runtime, state)
 
 
-def _candidate_skus(index: PlanIndex, basket: Basket) -> list[str]:
-    """Every product the basket's ingredients are allowed to be covered from.
-
-    Not just the packs it chose: a substitute is only reachable if its stock is
-    known, and one marked sold out weeks ago never comes back without being
-    asked again. Checking the whole shortlist is what lets the planner move
-    between them.
-    """
-    skus: list[str] = []
-    keys = {line.key for line in basket.lines}
-    for key in sorted(keys):
-        ingredient = index.ingredient(key)
-        if ingredient is None:
-            continue
-        skus.extend(pack.sku for pack in ingredient.packs if not pack.external)
-    return list(dict.fromkeys(skus))
-
-
 def _rebuild(
     factory: sessionmaker[Session],
     recipe_ids: list[int],
@@ -302,7 +284,7 @@ def _refresh_basket_stock(
     and recover from that instead.
     """
     try:
-        refresh_stock(factory, _candidate_skus(index, basket))
+        refresh_stock(factory, candidate_skus(index, basket))
     except Exception as exc:  # noqa: BLE001
         log.warning("ocado stock refresh failed, pushing from the cached catalogue: %s", exc)
 
@@ -320,42 +302,6 @@ def _swaps(basket: Basket) -> list[OcadoSwapOut]:
         for line in basket.substituted_lines
         if line.cover is not None and line.substitution is not None
     ]
-
-
-@router.post("/stock/refresh", response_model=OcadoStockRefreshOut)
-def stock_refresh(
-    body: BasketIn,
-    session: Session = Depends(get_session),
-    factory: sessionmaker[Session] = Depends(get_session_factory),
-    csv_path: Path | None = Depends(get_planner_csv_path),
-    user: User = Depends(get_current_user),
-) -> OcadoStockRefreshOut:
-    """Re-read stock and price for everything this basket could be covered from.
-
-    Needs no Ocado login: the products endpoint answers an anonymous session, so
-    this works from the basket page whether or not you have signed in yet.
-    """
-    recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
-    _require_curated(session, recipe_ids)
-    selections = [_planner_selection(selection) for selection in body.selections]
-    tolerance = pack_shortfall_tolerance_pct(session, user.id)
-    index, basket = _rebuild(
-        factory, recipe_ids, csv_path, selections, body.pack_overrides,
-        body.snap_overrides, tolerance,
-    )
-    try:
-        result = refresh_stock(factory, _candidate_skus(index, basket))
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Ocado stock check failed: {exc}") from exc
-    return OcadoStockRefreshOut(
-        checked_at=result.checked_at,
-        checked=result.checked,
-        available=result.available,
-        sold_out=result.sold_out,
-        restocked=result.restocked,
-        repriced=result.repriced,
-        changed=result.changed,
-    )
 
 
 def _out_lines(

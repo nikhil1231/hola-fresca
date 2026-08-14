@@ -34,7 +34,11 @@ from urllib.parse import quote, urlencode
 from app import config
 from app.scraper.products.base import (
     NormalizedProduct,
+    ProductStatus,
+    category_is_frozen,
+    base_price,
     basis,
+    chunks,
     pack_count_from_name,
     pack_size_from_name,
     parse_pack_size,
@@ -55,6 +59,14 @@ PAGE_SIZE = 60
 MAX_PRODUCTS_TO_DECORATE = PAGE_SIZE
 #: How many ids the bulk ``uids=`` endpoint is asked for at once.
 PRODUCT_BATCH_SIZE = 50
+
+#: Whether a live call here can be made from a headless browser. It cannot:
+#: Akamai serves this profile "Access Denied" for every request — the warm-up
+#: page included — when Chrome runs headless, and answers the identical call
+#: from the identical profile when it does not. Nothing is being forged either
+#: way; the flag simply records which of the two the shop is willing to talk to,
+#: and the scrape has always been run headed for the same reason.
+BROWSER_HEADLESS = False
 
 #: "Typical life 14 days", "Typical life 3 months". The unit is spelled out.
 _LIFE_LABEL_RE = re.compile(
@@ -134,6 +146,7 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
     name = name.strip()
 
     unit_price, unit_basis = _unit_price(payload)
+    base_unit = _base_unit_price(payload, unit_price, unit_basis)
     pack_raw = pack_size_from_name(name)
     pack_value, pack_unit = parse_pack_size(pack_raw)
     if pack_value is None and _priced_by_each(payload):
@@ -146,6 +159,7 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
             pack_raw, pack_value, pack_unit = f"x{count:g}", count, "each"
     life_raw, life_days = parse_shelf_life(payload.get("labels"))
 
+    category = _category(payload)
     return NormalizedProduct(
         retailer=RETAILER,
         sku=sku,
@@ -157,7 +171,10 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
         price=_price(payload),
         unit_price=unit_price,
         unit_price_basis=unit_basis,
-        category=_category(payload),
+        base_price=_base_price(payload),
+        base_unit_price=base_unit,
+        category=category,
+        is_frozen=category_is_frozen(category),
         in_stock=_in_stock(payload),
         shelf_life_raw=life_raw,
         shelf_life_days=life_days,
@@ -167,6 +184,65 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
         url=_url(payload, sku),
         raw_json=json.dumps(payload, ensure_ascii=False),
     )
+
+
+def product_status(node: dict[str, Any]) -> ProductStatus | None:
+    """One product's live stock and prices, from a bulk-endpoint node."""
+    sku = _sku(node)
+    if not sku:
+        return None
+    unit_price, unit_basis = _unit_price(node)
+    available = _in_stock(node)
+    name = node.get("name")
+    return ProductStatus(
+        sku=sku,
+        available=True if available is None else available,
+        price=_price(node),
+        base_price=_base_price(node),
+        unit_price=unit_price,
+        unit_price_basis=unit_basis,
+        base_unit_price=_base_unit_price(node, unit_price, unit_basis),
+        name=name if isinstance(name, str) else None,
+    )
+
+
+def fetch_statuses(skus: list[str]) -> dict[str, ProductStatus]:
+    """Live stock and prices for ``skus``, read through a real browser.
+
+    Unlike Ocado's, this endpoint cannot be called with an HTTP client: every
+    path on the host — the bulk API, the SPA, even a product page — answers a
+    bare request with an Akamai 403, so the read goes through the same warm
+    Chromium session the live search uses (:mod:`app.mapping.live_search`). The
+    browser starts on the first call and closes itself after an idle period, so
+    a basket refresh usually costs one in-page ``fetch`` per fifty ids.
+
+    An id the shop does not answer for is reported ``unlisted`` rather than
+    dropped: a delisted product looks exactly like a sold-out one to a basket.
+    """
+    from app.mapping.live_search import get_runner
+
+    wanted = [sku for sku in dict.fromkeys(skus) if sku]
+    if not wanted:
+        return {}
+
+    runner = get_runner(RETAILER)
+    statuses: dict[str, ProductStatus] = {}
+    answered = False
+    for batch in chunks(wanted, PRODUCT_BATCH_SIZE):
+        payload = runner.run(lambda client, batch=batch: client.products(batch, runner.throttle))
+        answered = True
+        for node in extract_product_objects(payload):
+            status = product_status(node)
+            if status is not None:
+                statuses[status.sku] = status
+
+    if not answered:
+        raise RuntimeError("Sainsbury's answered none of the stock requests")
+
+    for sku in wanted:
+        if sku not in statuses:
+            statuses[sku] = ProductStatus(sku=sku, available=False, unlisted=True)
+    return statuses
 
 
 def parse_shelf_life(labels: Any) -> tuple[str | None, int | None]:
@@ -274,13 +350,59 @@ def _price(node: dict[str, Any]) -> float | None:
 
     ``retail_price`` already carries the promotional price where one applies —
     ``promotions[].original_price`` is the struck-through figure — so a basket is
-    priced at what would actually be charged.
+    priced at what would actually be charged. That includes Nectar prices, which
+    are only charged to a shopper who scans a card; :func:`_base_price` is the
+    other half of that bargain, and what the mapping sorts on.
     """
     return _money(node.get("retail_price"))
 
 
+def _base_price(node: dict[str, Any]) -> float | None:
+    """The list price, from the dearest promotion that undercuts today's.
+
+    Dearest rather than first: a product can carry several promotions at once
+    (a Nectar price *and* a multibuy), and the one that says what the shelf
+    charges without any of them is the highest original price on offer.
+    """
+    price = _price(node)
+    promotions = node.get("promotions")
+    if price is None or not isinstance(promotions, list):
+        return None
+    originals = [
+        float(promotion["original_price"])
+        for promotion in promotions
+        if isinstance(promotion, dict)
+        and isinstance(promotion.get("original_price"), (int, float))
+        and not isinstance(promotion.get("original_price"), bool)
+    ]
+    return base_price(price, max(originals)) if originals else None
+
+
+def _base_unit_price(
+    node: dict[str, Any], unit_price: float | None, unit_basis: str | None
+) -> float | None:
+    """The list unit price, which Sainsbury's states outright.
+
+    Only believed when it is quoted on the same basis as the price it would be
+    compared against: ``original_unit_price`` is a separate object with its own
+    measure, and £14 per litre against £7 per 100 ml is not a discount.
+    """
+    original = node.get("original_unit_price")
+    stated = _money(original)
+    if stated is None or not isinstance(original, dict):
+        return None
+    _, stated_basis = _unit_money(original)
+    if stated_basis != unit_basis:
+        return None
+    return base_price(unit_price, stated)
+
+
 def _unit_price(node: dict[str, Any]) -> tuple[float | None, str | None]:
-    unit = node.get("unit_price")
+    return _unit_money(node.get("unit_price"))
+
+
+def _unit_money(unit: Any) -> tuple[float | None, str | None]:
+    """One of Sainsbury's unit-price objects, as an amount and a basis."""
     price = _money(unit)
     if price is None or not isinstance(unit, dict):
         return None, None

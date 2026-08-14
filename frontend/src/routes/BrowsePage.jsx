@@ -13,6 +13,7 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  Tooltip,
 } from '@mantine/core'
 import { useDisclosure, useIntersection, useMediaQuery } from '@mantine/hooks'
 import {
@@ -27,6 +28,7 @@ import FilterPanel from '../components/FilterPanel.jsx'
 import { DEFAULT_FACETS } from '../data/defaultFacets.js'
 import RecipeCard, { RecipeCardSkeleton } from '../components/RecipeCard.jsx'
 import { useFilters, countActiveFilters } from '../hooks/useFilters.js'
+import { useActiveRetailer } from '../hooks/useRetailer.js'
 import {
   useFacets,
   usePlannerBasket,
@@ -77,6 +79,97 @@ function useBrowseRowSize() {
   return GRID_COLS.base
 }
 
+// What the week costs so far. A failed pricing call used to render as
+// "Basket £0.00", which reads like an answer — an empty week and a broken
+// backend looked identical. Say it is unavailable instead, and keep the reason
+// a hover away.
+function BasketBadge({ loading, error, cost }) {
+  const badge = (
+    <Badge
+      // Outline in red is nearly white in dark mode, which is the one thing this
+      // badge must not look like — the point is that it stops reading as a price.
+      variant={error ? 'light' : 'outline'}
+      color={error ? 'red' : 'fresh'}
+      radius="sm"
+      size="lg"
+      styles={{ root: { textTransform: 'none', letterSpacing: 0 } }}
+    >
+      {error ? 'Basket unavailable' : loading ? 'Basket ...' : `Basket ${formatMoney(cost)}`}
+    </Badge>
+  )
+  if (!error) return badge
+  return (
+    <Tooltip
+      label={error.message ?? 'Please check the backend is running and try again.'}
+      multiline
+      w={260}
+      withArrow
+      events={{ hover: true, focus: true, touch: true }}
+    >
+      {badge}
+    </Tooltip>
+  )
+}
+
+// Why there is nothing left to browse. "No recipes match these filters" is only
+// the answer when a filter is what emptied the page; at a shop whose catalogue
+// is still being mapped it is browse's own default — hide what cannot be priced
+// — and clearing the filters would not bring a single recipe back, because that
+// default survives Clear. So name the cause, count it, and offer the two things
+// that actually change it.
+function NothingToBrowse({
+  narrowed,
+  hiddenAsUnmapped,
+  unmappedCount,
+  retailerLabel,
+  onClearFilters,
+  onShowUnmapped,
+}) {
+  const at = retailerLabel ? ` at ${retailerLabel}` : ''
+  // Only blame coverage when nothing else could be to blame: a search term or a
+  // filter the user chose is the likelier reason for an empty page, and being
+  // told the shop is unmapped when you typed a typo would be a wrong answer.
+  const coverage = hiddenAsUnmapped && !narrowed
+  return (
+    <Center mih={280}>
+      <Stack align="center" gap="xs" maw={440}>
+        <IconMoodEmpty size={40} stroke={1.5} />
+        <Text fw={600} ta="center">
+          {coverage ? `Nothing can be priced${at} yet` : 'No recipes match these filters'}
+        </Text>
+        {hiddenAsUnmapped && (
+          <Text size="sm" c="dimmed" ta="center">
+            {coverage
+              ? `All ${unmappedCount.toLocaleString()} recipes carry an ingredient with no approved product${at}, and browse hides what it cannot price.`
+              : `${unmappedCount.toLocaleString()} more are hidden because they carry an ingredient with no approved product${at}.`}
+          </Text>
+        )}
+        <Group gap="xs" justify="center">
+          {narrowed && (
+            <Button variant="light" color="fresh" onClick={onClearFilters}>
+              Clear filters
+            </Button>
+          )}
+          {hiddenAsUnmapped && (
+            <>
+              <Button
+                variant={narrowed ? 'subtle' : 'light'}
+                color="fresh"
+                onClick={onShowUnmapped}
+              >
+                Show them anyway
+              </Button>
+              <Button variant="subtle" color="gray" component={Link} to="/mapping">
+                Review mappings
+              </Button>
+            </>
+          )}
+        </Group>
+      </Stack>
+    </Center>
+  )
+}
+
 // Which week these picks land in: the one the "+" block was clicked for, or the
 // week currently being planned when browsing straight off the nav.
 function EditingWeekBar({ week, skipped, onPlanAnyway, planPending }) {
@@ -118,6 +211,7 @@ function EditingWeekBar({ week, skipped, onPlanAnyway, planPending }) {
 
 export default function BrowsePage() {
   const { filters, setScalar, setArray, toggleArrayValue, clearAll } = useFilters()
+  const { label: retailerLabel } = useActiveRetailer()
   const [searchParams] = useSearchParams()
   const rowSize = useBrowseRowSize()
   const {
@@ -150,7 +244,11 @@ export default function BrowsePage() {
     [upcomingRecipes],
   )
   const plannerSelections = useMemo(() => toPlannerSelections(upcomingRecipes), [upcomingRecipes])
-  const { data: basket, isLoading: basketLoading } = usePlannerBasket(plannerSelections)
+  const {
+    data: basket,
+    isLoading: basketLoading,
+    error: basketError,
+  } = usePlannerBasket(plannerSelections)
   const basePageSize = rowSize * PAGE_ROWS
   const pinnedRemainder = upcomingRecipes.length % rowSize
   const firstPageSize = pinnedRemainder === 0 ? basePageSize : basePageSize - pinnedRemainder
@@ -202,6 +300,15 @@ export default function BrowsePage() {
   const total = data?.pages[0]?.total ?? 0
   const activeCount = countActiveFilters(filters)
   const filterFacets = facets ?? DEFAULT_FACETS
+  // Browse hides recipes it cannot price, which is a sensible default at a shop
+  // whose catalogue is mapped and an empty page at one that is not — a new
+  // retailer starts with no approved mappings, so every recipe is hidden and the
+  // list looks like a filter nobody set. Read off the same facet the filter
+  // panel counts, so the two never disagree.
+  const hidingUnmapped = (filters.exclude ?? []).includes('unmapped')
+  const unmappedCount =
+    filterFacets.excludes?.find((facet) => facet.value === 'unmapped')?.count ?? 0
+  const hiddenAsUnmapped = hidingUnmapped && unmappedCount > 0
   const sortOptions = filterFacets.sorts.map((s) => ({ value: s.value, label: s.label }))
   const sortValue = bestFitRequested ? 'popular' : requestedSort
   const loadingTiles = Array.from({ length: firstPageSize })
@@ -298,15 +405,7 @@ export default function BrowsePage() {
             </Text>
           </Group>
           <Group gap="xs" wrap="nowrap">
-            <Badge
-              variant="outline"
-              color="fresh"
-              radius="sm"
-              size="lg"
-              styles={{ root: { textTransform: 'none', letterSpacing: 0 } }}
-            >
-              {basketLoading ? 'Basket ...' : `Basket ${formatMoney(basket?.cost)}`}
-            </Badge>
+            <BasketBadge loading={basketLoading} error={basketError} cost={basket?.cost} />
             <Button
               variant={bestFitActive ? 'filled' : 'default'}
               color={bestFitActive ? 'fresh' : 'gray'}
@@ -345,15 +444,7 @@ export default function BrowsePage() {
             </Text>
           </Group>
           <Group gap="xs" wrap="nowrap">
-            <Badge
-              variant="outline"
-              color="fresh"
-              radius="sm"
-              size="lg"
-              styles={{ root: { textTransform: 'none', letterSpacing: 0 } }}
-            >
-              {basketLoading ? 'Basket ...' : `Basket ${formatMoney(basket?.cost)}`}
-            </Badge>
+            <BasketBadge loading={basketLoading} error={basketError} cost={basket?.cost} />
             <Button
               variant={bestFitActive ? 'filled' : 'default'}
               color={bestFitActive ? 'fresh' : 'gray'}
@@ -388,16 +479,25 @@ export default function BrowsePage() {
               <RecipeCardSkeleton key={i} />
             ))}
           </SimpleGrid>
-        ) : displayRecipes.length === 0 ? (
-          <Center mih={280}>
-            <Stack align="center" gap="xs">
-              <IconMoodEmpty size={40} stroke={1.5} />
-              <Text fw={600}>No recipes match these filters</Text>
-              <Button variant="light" color="fresh" onClick={clearAll}>
-                Clear filters
-              </Button>
-            </Stack>
-          </Center>
+        ) : recipes.length === 0 ? (
+          // The week's own picks still belong on screen — they are pinned, not
+          // found — so the notice explains the *rest* of the page being empty
+          // rather than replacing everything.
+          <>
+            {upcomingRecipes.length > 0 && (
+              <SimpleGrid cols={GRID_COLS} spacing={{ base: 'md', sm: 'lg' }}>
+                {upcomingRecipes.map((entry) => renderRecipeCard(entry.recipe))}
+              </SimpleGrid>
+            )}
+            <NothingToBrowse
+              narrowed={activeCount > 0 || Boolean(filters.q)}
+              hiddenAsUnmapped={hiddenAsUnmapped}
+              unmappedCount={unmappedCount}
+              retailerLabel={retailerLabel}
+              onClearFilters={clearAll}
+              onShowUnmapped={() => toggleArrayValue('exclude', 'unmapped')}
+            />
+          </>
         ) : (
           <>
             <SimpleGrid cols={GRID_COLS} spacing={{ base: 'md', sm: 'lg' }}>

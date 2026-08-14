@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,7 +47,8 @@ SYSTEM_PROMPT = (
     "(grams per single unit); otherwise leave it null.\n"
     "- 'match_type': 'exact' (is the ingredient), 'substitute' (a stand-in), or 'form_differs' "
     "(right ingredient, different prep/form). This decides the top-level grouping of the "
-    "offered products, so be precise with it. Every accepted sku must be one of the given skus."
+    "offered products, so be precise with it. A frozen candidate is 'form_differs' unless the "
+    "ingredient explicitly asks for frozen. Every accepted sku must be one of the given skus."
 )
 
 PROPOSAL_SCHEMA = {
@@ -104,10 +106,16 @@ def _candidate_line(c: Candidate) -> dict:
         line["pack"] = pack
     if c.price is not None:
         line["price_gbp"] = round(c.price, 2)
-    if c.unit_price is not None and c.unit_price_basis:
-        line["unit_price"] = f"£{c.unit_price:g}/{c.unit_price_basis}"
+    # The shelf price, matching what the order is computed from: the model is
+    # asked which pack suits the ingredient, and a temporary half-price should
+    # not make a 5 kg sack look like the sensible size.
+    unit_price = ordering.sort_unit_price(c)
+    if unit_price is not None and c.unit_price_basis:
+        line["unit_price"] = f"£{unit_price:g}/{c.unit_price_basis}"
     if c.avg_rating is not None:
         line["rating"] = f"{c.avg_rating:g} ({c.ratings_count})"
+    if c.is_frozen:
+        line["storage_form"] = "frozen"
     return line
 
 
@@ -136,6 +144,8 @@ def build_prompt(ic: IngredientCandidates) -> tuple[str, str]:
 
 def parse_proposal(raw: dict, ic: IngredientCandidates) -> ProposedMapping:
     valid_skus = {c.sku for c in ic.candidates}
+    by_sku = {c.sku: c for c in ic.candidates}
+    ingredient_requests_frozen = bool(re.search(r"\bfrozen\b", ic.name, re.I))
     accepted: list[AcceptedProduct] = []
     seen: set[str] = set()
     for entry in raw.get("accepted") or []:
@@ -146,12 +156,20 @@ def parse_proposal(raw: dict, ic: IngredientCandidates) -> ProposedMapping:
         match_type = entry.get("match_type")
         if match_type not in MATCH_TYPES:
             match_type = "exact"
+        reason = str(entry.get("reason") or "")
+        if by_sku[sku].is_frozen and not ingredient_requests_frozen:
+            # This is catalogue fact, not model judgement. Without the guard a
+            # model can still call frozen peas exact even though the Frozen chip
+            # never made it into its natural-language reasoning.
+            match_type = "form_differs"
+            if "frozen" not in reason.lower():
+                reason = f"{reason.rstrip('.')} — frozen form" if reason else "Frozen form"
         accepted.append(
             AcceptedProduct(
                 sku=sku,
                 rank=int(entry.get("rank") or (len(accepted) + 1)),
                 match_type=match_type,
-                reason=str(entry.get("reason") or ""),
+                reason=reason,
             )
         )
     # Normalise the model's ordering to 1..n and keep it, then let the

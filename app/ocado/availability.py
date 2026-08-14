@@ -1,36 +1,33 @@
-"""Live stock and price for a set of SKUs, and the write-back into the catalogue.
+"""Ocado's live stock and price read.
 
-``products.in_stock`` is a *scrape cache*: it records what Ocado stocked the last
-time the product pipeline ran, which may be weeks ago, and the planner believes it
-when it picks which pack to buy. That is how a week gets built around a product
-Ocado will not sell you, with the drop only surfacing at push time — too late for
-the planner to have chosen differently.
-
-This module is the fresh read. ``PUT /api/webproductpagews/v6/products`` takes a
-bare array of product ids and answers with price and availability. It needs no
-login, only the CSRF token any page carries, so the basket page can call it on
-demand; fifty ids per call is the batch size Ocado's own web client uses.
-
-The results are written back onto ``products`` rather than kept beside them. That
-is what makes this cheap: the planner index is a pure function of the database
-and :mod:`app.planner.cache` rebuilds whenever the file is touched, so writing a
-sold-out flag re-covers every affected ingredient on the next basket build — no
-substitution machinery of its own required.
+``PUT /api/webproductpagews/v6/products`` takes a bare array of product ids and
+answers with price and availability. It needs no login, only the CSRF token any
+page carries, so the basket page can call it on demand; fifty ids per call is the
+batch size Ocado's own web client uses. That is the whole of what is Ocado-shaped
+about a refresh — Sainsbury's asks the same question through a browser session —
+so the write-back into ``products`` lives in :mod:`app.catalogue`. What stays
+here is the read, plus the thin ``refresh_stock`` that pairs it with one
+account's session; ``mark_unavailable`` is re-exported for the callers that have
+always reached for it at this address.
 """
 from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Iterable, Sequence
+from dataclasses import dataclass
+from typing import Any, Sequence
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import Product
+from app import catalogue
+from app.catalogue import (  # noqa: F401  (re-exported for existing callers)
+    MAX_UNLISTED_SHARE,
+    StockRefresh,
+    mark_unavailable,
+)
 from app.ocado.session import OcadoSession, get_shared_session
-from app.scraper.products.ocado import _in_stock, _price, _sku
+from app.scraper.products.base import ProductStatus
+from app.scraper.products.ocado import product_status as _status
 
 log = logging.getLogger(__name__)
 
@@ -45,34 +42,6 @@ BATCH_SIZE = 50
 MAX_SKUS = 750
 
 _PRODUCT_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
-
-
-@dataclass(frozen=True, slots=True)
-class ProductStatus:
-    """What Ocado says about one product right now."""
-
-    sku: str
-    available: bool
-    price: float | None = None
-    name: str | None = None
-    #: Set when Ocado did not return the id at all — retired, or never valid.
-    unlisted: bool = False
-
-
-@dataclass(slots=True)
-class StockRefresh:
-    """The outcome of one refresh, in the terms the UI reports it."""
-
-    checked_at: datetime
-    checked: int = 0
-    available: int = 0
-    sold_out: list[str] = field(default_factory=list)
-    restocked: list[str] = field(default_factory=list)
-    repriced: list[str] = field(default_factory=list)
-
-    @property
-    def changed(self) -> int:
-        return len(self.sold_out) + len(self.restocked) + len(self.repriced)
 
 
 def fetch_statuses(
@@ -164,110 +133,18 @@ def refresh_stock(
     session: OcadoSession | None = None,
     retailer: str = RETAILER,
 ) -> StockRefresh:
-    """Refresh ``skus`` against the live site and write the answer to the catalogue."""
-    checked_at = datetime.now(timezone.utc)
-    statuses = _trustworthy(fetch_statuses(skus, session=session))
-    if not statuses:
-        return StockRefresh(checked_at=checked_at)
+    """Refresh ``skus`` against the live site and write the answer to the catalogue.
 
-    with factory() as db:
-        rows = db.scalars(
-            select(Product).where(
-                Product.retailer == retailer, Product.sku.in_(list(statuses))
-            )
-        ).all()
-        result = _apply_statuses(rows, statuses, checked_at)
-        db.commit()
-
-    log.info(
-        "ocado stock: checked %d, %d available, %d sold out, %d restocked, %d repriced",
-        result.checked,
-        result.available,
-        len(result.sold_out),
-        len(result.restocked),
-        len(result.repriced),
-    )
-    return result
-
-
-#: Above this share of ids Ocado would not answer for, the run is read as a
-#: partial outage rather than as a shelf full of delistings. Real delistings in
-#: an approved shortlist are a handful; a fifth of it is a broken connection.
-MAX_UNLISTED_SHARE = 0.2
-
-
-def _trustworthy(statuses: dict[str, ProductStatus]) -> dict[str, ProductStatus]:
-    """Drop the "never answered" verdicts when there are too many to believe.
-
-    Writing them would mark a quarter of the catalogue sold out on the strength
-    of a wobble, and the planner would then price a week around substitutes for
-    products that are sitting on the shelf.
+    The generic refresh reaches Ocado through this module anyway; what this adds
+    is ``session``, so a caller already holding one account's session refreshes
+    with it rather than with the shared one.
     """
-    unlisted = [sku for sku, status in statuses.items() if status.unlisted]
-    if not unlisted or len(unlisted) <= MAX_UNLISTED_SHARE * len(statuses):
-        return statuses
-    log.warning(
-        "ocado stock: %d of %d ids went unanswered - treating the run as unreliable "
-        "and leaving their stock alone",
-        len(unlisted),
-        len(statuses),
+    return catalogue.refresh_stock(
+        factory,
+        skus,
+        retailer=retailer,
+        fetch=lambda ids: fetch_statuses(ids, session=session),
     )
-    return {sku: status for sku, status in statuses.items() if not status.unlisted}
-
-
-def mark_unavailable(
-    factory: sessionmaker[Session],
-    skus: Iterable[str],
-    *,
-    retailer: str = RETAILER,
-) -> int:
-    """Record that Ocado refused these products, so the next cover avoids them.
-
-    The push is the most authoritative availability signal there is — the cart
-    itself declined the item — and it arrives for free. Believing it costs one
-    write and spares the next basket the same drop.
-    """
-    wanted = [sku for sku in dict.fromkeys(skus) if sku]
-    if not wanted:
-        return 0
-    now = datetime.now(timezone.utc)
-    with factory() as db:
-        rows = db.scalars(
-            select(Product).where(Product.retailer == retailer, Product.sku.in_(wanted))
-        ).all()
-        for row in rows:
-            row.in_stock = 0
-            row.stock_checked_at = now
-        db.commit()
-        return len(rows)
-
-
-def _apply_statuses(
-    rows: Sequence[Product], statuses: dict[str, ProductStatus], checked_at: datetime
-) -> StockRefresh:
-    result = StockRefresh(checked_at=checked_at)
-    for row in rows:
-        status = statuses.get(row.sku)
-        if status is None:
-            continue
-        result.checked += 1
-        result.available += 1 if status.available else 0
-
-        was_in_stock = row.in_stock is None or bool(row.in_stock)
-        if status.available and not was_in_stock:
-            result.restocked.append(row.sku)
-        elif not status.available and was_in_stock:
-            result.sold_out.append(row.sku)
-
-        # A price that moved matters as much as one that vanished: the pack
-        # arithmetic is priced in pounds, so a stale price picks the wrong pack.
-        if status.price is not None and row.price != status.price:
-            result.repriced.append(row.sku)
-            row.price = status.price
-
-        row.in_stock = 1 if status.available else 0
-        row.stock_checked_at = checked_at
-    return result
 
 
 def _is_product_id(sku: str | None) -> bool:
@@ -289,19 +166,3 @@ def _product_nodes(payload: Any) -> list[dict[str, Any]]:
         if isinstance(value, list):
             return [node for node in value if isinstance(node, dict)]
     return []
-
-
-def _status(node: dict[str, Any]) -> ProductStatus | None:
-    sku = _sku(node)
-    if not sku:
-        return None
-    available = _in_stock(node)
-    name = node.get("name")
-    return ProductStatus(
-        sku=sku,
-        # Ocado states availability on every product it returns; a payload that
-        # somehow omits it is taken at its word that the product exists.
-        available=True if available is None else available,
-        price=_price(node),
-        name=name if isinstance(name, str) else None,
-    )

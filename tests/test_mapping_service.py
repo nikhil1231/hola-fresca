@@ -110,6 +110,20 @@ def test_get_detail_overlays_all_candidates(factory):
         assert all(c.candidate.avg_rating is None for c in detail.candidates)
 
 
+def test_candidate_detail_carries_the_frozen_storage_form(factory):
+    with factory() as s:
+        seed_candidates(
+            s,
+            "name:peas",
+            "Peas",
+            [{"sku": "frozen-peas", "name": "Garden Peas", "is_frozen": True}],
+        )
+    with factory() as s:
+        detail = service.get_detail(s, gather_candidates(s, "name:peas"))
+
+    assert detail.candidates[0].candidate.is_frozen is True
+
+
 def test_bulk_approve(factory):
     _seed(factory)
     with factory() as s:

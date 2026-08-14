@@ -22,11 +22,13 @@ on the first search and closed after an idle period.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any, Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,36 +48,74 @@ IDLE_TIMEOUT_S = 600.0
 SEARCH_TIMEOUT_S = 90.0
 
 
+def browser_headless(retailer: str) -> bool:
+    """Whether this shop's browser calls can be made without a visible window.
+
+    The shop decides, not us: Sainsbury's Akamai profile refuses a headless
+    Chrome outright (see ``sainsburys.BROWSER_HEADLESS``), and a live search or
+    price refresh there fails with "Access Denied" until it is run headed. The
+    environment gets the last word, because a host with no display cannot open a
+    window whatever the shop would prefer — there the honest failure is the
+    request erroring rather than a browser that never appears.
+    """
+    override = os.environ.get("HOLAFRESCA_LIVE_BROWSER_HEADLESS")
+    if override is not None and override.strip():
+        return override.strip().lower() not in {"0", "false", "no"}
+    return bool(getattr(get_adapter(retailer), "BROWSER_HEADLESS", True))
+
+
 @dataclass
 class _Job:
-    term: str
+    """One call to make on the browser thread. ``call`` takes the client."""
+
+    call: Callable[[Any], Any]
     future: Future
 
 
 class LiveSearchRunner:
-    """Serialises live searches onto one long-lived headless browser session."""
+    """Serialises live retailer calls onto one long-lived headless browser session.
+
+    Named for its first caller, but it is now the shared browser worker for
+    anything the app has to ask a shop in the moment: the review page's
+    re-searches, and the basket page's stock and price refresh at a retailer
+    whose API will not answer an HTTP client. :meth:`run` is the general form and
+    :meth:`search` the shorthand.
+    """
 
     def __init__(
         self,
         *,
         retailer: str = DEFAULT_RETAILER,
-        headless: bool = True,
+        headless: bool | None = None,
         idle_timeout: float = IDLE_TIMEOUT_S,
     ):
         self.retailer = retailer
-        self.headless = headless
+        self.headless = browser_headless(retailer) if headless is None else headless
         self.idle_timeout = idle_timeout
         self._queue: queue.Queue[_Job] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._throttle = AdaptiveThrottle(workers=1, delay=0.0, max_delay=20.0)
 
-    def search(self, term: str, timeout: float = SEARCH_TIMEOUT_S) -> dict:
-        job = _Job(term=term, future=Future())
+    @property
+    def throttle(self) -> AdaptiveThrottle:
+        """The backoff this retailer's calls share, so one caller slows them all."""
+        return self._throttle
+
+    def run(self, call: Callable[[Any], Any], timeout: float = SEARCH_TIMEOUT_S):
+        """Run ``call(client)`` on the browser thread and return its result.
+
+        Playwright's sync API is thread-affine, so every call has to arrive here
+        rather than touch the client directly.
+        """
+        job = _Job(call=call, future=Future())
         with self._lock:
             self._ensure_thread()
             self._queue.put(job)
         return job.future.result(timeout=timeout)
+
+    def search(self, term: str, timeout: float = SEARCH_TIMEOUT_S) -> dict:
+        return self.run(lambda client: client.search(term, self._throttle), timeout=timeout)
 
     # -- worker -----------------------------------------------------------
 
@@ -106,7 +146,7 @@ class LiveSearchRunner:
                             headless=self.headless
                         )
                         client.__enter__()
-                    job.future.set_result(client.search(job.term, self._throttle))
+                    job.future.set_result(job.call(client))
                 except Exception as exc:  # noqa: BLE001 - surface to the caller
                     job.future.set_exception(exc)
                     # A failed search may mean a dead browser; drop it so the

@@ -7,6 +7,7 @@ import {
   formatRating,
   ratingQualityScore,
   relativeQualityScores,
+  sortUnitPrice,
 } from './mappingComparison.js'
 
 function scoresFor(items, options = {}) {
@@ -101,4 +102,17 @@ test('the palette provides distinct light and dark theme colours', () => {
 
   assert.notEqual(palette['--metric-pill-light-bg'], palette['--metric-pill-dark-bg'])
   assert.notEqual(palette['--metric-pill-light-color'], palette['--metric-pill-dark-color'])
+})
+
+// Mirrors tests/test_mapping_ordering.py: the pills have to colour on the same
+// number the stored order was computed from, or the review page would explain
+// an order it disagrees with.
+test('a promoted product is compared on its shelf price', () => {
+  assert.equal(sortUnitPrice({ unit_price: 7, base_unit_price: 14 }), 14)
+})
+
+test('a product with no promotion is compared on the price it has', () => {
+  assert.equal(sortUnitPrice({ unit_price: 10 }), 10)
+  assert.equal(sortUnitPrice({ unit_price: null, base_unit_price: null }), null)
+  assert.equal(sortUnitPrice(null), null)
 })

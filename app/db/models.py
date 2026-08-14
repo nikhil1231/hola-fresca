@@ -507,11 +507,22 @@ class Product(Base):
     pack_size_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     pack_size_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
+    # What you would pay today, promotions included, against what the shelf
+    # charges without them. The base columns are NULL unless something is on
+    # offer, so ``base_price is not None`` is the test for "this is a promotion".
+    # The planner spends ``price``; the mapping sorts on ``base_unit_price``,
+    # because a rank outlives the fortnight a promotion runs for.
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     unit_price_basis: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    base_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    base_unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Explicit retailer storage form. This is separate from category because
+    # Ocado exposes it as a "Frozen" product chip, and mapping decisions need a
+    # stable fact rather than trying to infer it from a product name.
+    is_frozen: Mapped[bool] = mapped_column(Integer, default=0, server_default="0")
     # Stock is a cache of what the retailer said, so it is only as good as its
     # timestamp: NULL means never checked live, and the planner treats an old
     # reading as a reason to re-ask rather than as fact. See app.ocado.availability.

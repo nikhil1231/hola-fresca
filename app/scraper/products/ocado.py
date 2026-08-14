@@ -11,7 +11,10 @@ from app import config
 from app.scraper.products.browser import BrowserJsonClient
 from app.scraper.products.base import (
     NormalizedProduct,
+    ProductStatus,
+    base_price as _base_of,
     basis as _basis,
+    category_is_frozen,
     chunks,
     metric as _metric,
     pack_size_from_name,
@@ -45,6 +48,11 @@ PRODUCTS_PATH = "/api/webproductpagews/v6/products"
 MAX_PRODUCTS_TO_DECORATE = 50
 #: How many ids the bulk product endpoint is asked for at once.
 PRODUCT_BATCH_SIZE = 50
+
+#: Ocado is happy to answer a headless browser, and the live stock read here
+#: needs no browser at all. Contrast :data:`app.scraper.products.sainsburys
+#: .BROWSER_HEADLESS`.
+BROWSER_HEADLESS = True
 
 _UUID_RE = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I
@@ -132,9 +140,11 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
     pack_raw = _pack_size_raw(payload, name)
     pack_value, pack_unit = parse_pack_size(pack_raw)
     unit_price, unit_basis = _unit_price(payload)
+    base_unit = _base_unit_price(payload, unit_price, unit_basis)
     avg_rating, ratings_count = _rating(payload)
     life_raw, life_days = parse_shelf_life(payload.get("guaranteedProductLife"))
 
+    category = _category(payload)
     return NormalizedProduct(
         retailer=RETAILER,
         sku=sku,
@@ -146,7 +156,10 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
         price=_price(payload),
         unit_price=unit_price,
         unit_price_basis=unit_basis,
-        category=_category(payload),
+        base_price=_base_price(payload),
+        base_unit_price=base_unit,
+        category=category,
+        is_frozen=_is_frozen(payload, category),
         in_stock=_in_stock(payload),
         shelf_life_raw=life_raw,
         shelf_life_days=life_days,
@@ -156,6 +169,40 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
         url=_url(payload, sku),
         raw_json=json.dumps(payload, ensure_ascii=False),
     )
+
+
+def product_status(node: dict[str, Any]) -> ProductStatus | None:
+    """One product's live stock and prices, from a products-endpoint node."""
+    sku = _sku(node)
+    if not sku:
+        return None
+    unit_price, unit_basis = _unit_price(node)
+    available = _in_stock(node)
+    name = node.get("name")
+    return ProductStatus(
+        sku=sku,
+        # Ocado states availability on every product it returns; a payload that
+        # somehow omits it is taken at its word that the product exists.
+        available=True if available is None else available,
+        price=_price(node),
+        base_price=_base_price(node),
+        unit_price=unit_price,
+        unit_price_basis=unit_basis,
+        base_unit_price=_base_unit_price(node, unit_price, unit_basis),
+        name=name if isinstance(name, str) else None,
+    )
+
+
+def fetch_statuses(skus: list[str]) -> dict[str, ProductStatus]:
+    """Live stock and prices for ``skus``.
+
+    Ocado's products endpoint answers an anonymous httpx session — no browser and
+    no login — so this is a plain HTTP call. Imported where it is used because
+    :mod:`app.ocado.availability` reads this module in turn.
+    """
+    from app.ocado.availability import fetch_statuses as _fetch
+
+    return _fetch(skus)
 
 
 def parse_shelf_life(raw: Any) -> tuple[str | None, int | None]:
@@ -256,8 +303,37 @@ def _pack_size_raw(node: dict[str, Any], name: str) -> str | None:
     return value or pack_size_from_name(name)
 
 
+#: Where the shelf price is, in the order the field names have been seen.
+_PRICE_KEYS = ("price", "currentPrice", "nowPrice", "displayPrice")
+#: Where the promotional price is when one is running. Ocado states it beside the
+#: shelf price rather than replacing it, which is the opposite of Sainsbury's.
+_PROMO_PRICE_KEYS = ("promoPrice",)
+_UNIT_PRICE_KEYS = ("unitPrice", "pricePerUnit", "unitPriceText")
+_PROMO_UNIT_PRICE_KEYS = ("promoUnitPrice",)
+
+
 def _price(node: dict[str, Any]) -> float | None:
-    for key in ("price", "currentPrice", "nowPrice", "displayPrice"):
+    """What it costs today.
+
+    ``promoPrice`` when Ocado is running one, so a basket is priced at what the
+    trolley will actually charge; multibuys ("any 3 for £5") set no promo price
+    and are correctly left at the shelf price, since buying one of something is
+    not three of it.
+    """
+    listed = _money_at(node, _PRICE_KEYS)
+    promo = _money_at(node, _PROMO_PRICE_KEYS)
+    if promo is not None and (listed is None or promo < listed):
+        return promo
+    return listed
+
+
+def _base_price(node: dict[str, Any]) -> float | None:
+    """The shelf price, kept only when a promotion is undercutting it."""
+    return _base_of(_price(node), _money_at(node, _PRICE_KEYS))
+
+
+def _money_at(node: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
         value = node.get(key)
         if isinstance(value, (int, float)):
             return float(value)
@@ -273,7 +349,32 @@ def _price(node: dict[str, Any]) -> float | None:
 
 
 def _unit_price(node: dict[str, Any]) -> tuple[float | None, str | None]:
-    for key in ("unitPrice", "pricePerUnit", "unitPriceText"):
+    """Today's unit price, on the same terms as :func:`_price`.
+
+    A promotional unit price is only taken when it is quoted on the same basis as
+    the shelf one: Ocado restates the basis alongside it, and £5.65 per kg is not
+    an improvement on £6.71 per each.
+    """
+    listed = _unit_money_at(node, _UNIT_PRICE_KEYS)
+    promo = _unit_money_at(node, _PROMO_UNIT_PRICE_KEYS)
+    if promo[0] is not None and promo[1] == listed[1] and (listed[0] is None or promo[0] < listed[0]):
+        return promo
+    return listed
+
+
+def _base_unit_price(
+    node: dict[str, Any], unit_price: float | None, unit_basis: str | None
+) -> float | None:
+    stated, stated_basis = _unit_money_at(node, _UNIT_PRICE_KEYS)
+    if stated_basis != unit_basis:
+        return None
+    return _base_of(unit_price, stated)
+
+
+def _unit_money_at(
+    node: dict[str, Any], keys: tuple[str, ...]
+) -> tuple[float | None, str | None]:
+    for key in keys:
         value = node.get(key)
         if isinstance(value, str):
             parsed = parse_unit_price(value)
@@ -315,6 +416,27 @@ def _category(node: dict[str, Any]) -> str | None:
                     parts.append(name)
         return " > ".join(parts) if parts else None
     return None
+
+
+def _is_frozen(node: dict[str, Any], category: str | None = None) -> bool:
+    """Read Ocado's explicit Frozen chip, with its aisle as a fallback.
+
+    ``Suitable for freezing`` is deliberately not frozen: the website gives it
+    a different ``freezable`` icon, while frozen stock uses label/file
+    ``Frozen``/``frozen``.
+    """
+    for key in ("iconAttributes", "icons"):
+        values = node.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            label = str(value.get("label") or "").strip().lower()
+            file_name = str(value.get("file") or "").strip().lower()
+            if label == "frozen" or file_name == "frozen":
+                return True
+    return category_is_frozen(category if category is not None else _category(node))
 
 
 def _rating(node: dict[str, Any]) -> tuple[float | None, int | None]:

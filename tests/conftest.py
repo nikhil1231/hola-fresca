@@ -65,6 +65,8 @@ def seed_candidates(
             price=p.get("price"),
             unit_price=p.get("unit_price"),
             unit_price_basis=p.get("unit_basis"),
+            category=p.get("category"),
+            is_frozen=p.get("is_frozen", False),
             avg_rating=p.get("rating"),
             ratings_count=p.get("count"),
             url=p.get("url"),

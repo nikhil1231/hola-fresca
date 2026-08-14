@@ -681,6 +681,9 @@ class MappingCandidateOut(BaseModel):
     price: float | None = None
     unit_price: float | None = None
     unit_price_basis: str | None = None
+    #: The shelf price behind a promotion, and what the order is computed from.
+    #: NULL unless this product is on offer.
+    base_unit_price: float | None = None
     avg_rating: float | None = None
     ratings_count: int | None = None
     url: str | None = None
@@ -688,6 +691,7 @@ class MappingCandidateOut(BaseModel):
     search_term: str | None = None
     # 'ocado' or 'manual'; the review UI tabs on this.
     retailer: str = "ocado"
+    is_frozen: bool = False
     # Decision overlay
     accepted: bool = False
     rank: int | None = None
@@ -971,7 +975,9 @@ class OcadoPushPlanOut(BaseModel):
     checkout_items: list[OcadoCheckoutItemOut] = Field(default_factory=list)
 
 
-class OcadoStockRefreshOut(BaseModel):
+class StockRefreshOut(BaseModel):
+    """The result of a live stock and price check, at whichever shop."""
+
     checked_at: datetime
     checked: int = 0
     available: int = 0
@@ -979,6 +985,10 @@ class OcadoStockRefreshOut(BaseModel):
     restocked: list[str] = Field(default_factory=list)
     repriced: list[str] = Field(default_factory=list)
     changed: int = 0
+
+
+#: The name this had while only Ocado could be refreshed.
+OcadoStockRefreshOut = StockRefreshOut
 
 
 class OcadoBasketOut(BaseModel):

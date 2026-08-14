@@ -1,6 +1,8 @@
 """LLM proposal pass: prompt building, response parsing, and orchestration."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.mapping.candidates import Candidate, IngredientCandidates, UsageStats, gather_candidates
 from app.mapping import propose as P
 from app.mapping import service
@@ -44,6 +46,16 @@ def test_build_prompt_includes_usage_and_candidates():
     assert "Chicken Breast" in user
     assert "sku-a" in user and "sku-b" in user
     assert "450" in user  # median usage grams
+
+
+def test_build_prompt_exposes_the_retailers_frozen_form():
+    ic = _ic()
+    ic.candidates[0] = replace(ic.candidates[0], is_frozen=True)
+
+    system, user = P.build_prompt(ic)
+
+    assert "frozen candidate is 'form_differs'" in system
+    assert '"storage_form": "frozen"' in user
 
 
 def test_parse_proposal_drops_hallucinated_skus_and_keeps_the_model_ordering():
@@ -92,6 +104,44 @@ def test_parse_proposal_invalid_match_type_defaults_to_exact():
     parsed = P.parse_proposal(raw, ic)
     assert parsed.accepted[0].match_type == "exact"
     assert parsed.each_to_grams == 67.0
+
+
+def test_frozen_candidate_is_deterministically_a_form_difference():
+    ic = _ic()
+    ic.candidates[0] = replace(ic.candidates[0], is_frozen=True)
+    raw = {
+        "accepted": [
+            {"sku": "sku-a", "rank": 1, "match_type": "exact", "reason": "fillets"}
+        ],
+        "each_to_grams": None,
+        "needs_substitution": False,
+        "note": "",
+    }
+
+    parsed = P.parse_proposal(raw, ic)
+
+    assert parsed.accepted[0].match_type == "form_differs"
+    assert "frozen" in parsed.accepted[0].reason.lower()
+
+
+def test_explicitly_frozen_ingredient_keeps_an_exact_frozen_match():
+    ic = IngredientCandidates(
+        ingredient_key="name:frozen peas",
+        name="Frozen Peas",
+        line_count=10,
+        usage=None,
+        candidates=[replace(_candidate("peas", "Frozen Garden Peas"), is_frozen=True)],
+    )
+    raw = {
+        "accepted": [
+            {"sku": "peas", "rank": 1, "match_type": "exact", "reason": "exact"}
+        ],
+        "each_to_grams": None,
+        "needs_substitution": False,
+        "note": "",
+    }
+
+    assert P.parse_proposal(raw, ic).accepted[0].match_type == "exact"
 
 
 def test_run_propose_writes_proposed_rows_and_is_idempotent(factory):

@@ -17,6 +17,7 @@ databases predating alembic still need them; anything new belongs in a migration
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 from sqlalchemy import create_engine, select, text
@@ -37,6 +38,15 @@ ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 #: The revision an existing pre-accounts database is stamped with before it is
 #: upgraded. See alembic/versions/0001_baseline.py.
 BASELINE_REVISION = "0001_baseline"
+
+#: Held for the whole of :func:`init_db`. FastAPI runs sync dependencies in a
+#: threadpool, so the first few requests after a cold start all call this at
+#: once — and alembic's ``EnvironmentContext`` publishes itself through module
+#: globals, one set per process. Two overlapping runs leave the second one
+#: tearing down a proxy the first already removed (``KeyError: 'script'``), which
+#: surfaces as a 500 before the endpoint is even entered. Serialising the whole
+#: function also keeps ``create_all`` and the ALTER TABLEs below from racing.
+_INIT_LOCK = threading.Lock()
 
 
 def make_engine(db_path: Path | None = None) -> Engine:
@@ -146,7 +156,14 @@ def init_db(engine: Engine) -> None:
     a database that already has a ``recipes`` table, so a new model without a
     migration will exist in tests and be missing in production. Write the
     migration.
+
+    One caller at a time — see ``_INIT_LOCK``.
     """
+    with _INIT_LOCK:
+        _init_db(engine)
+
+
+def _init_db(engine: Engine) -> None:
     with engine.begin() as conn:
         fresh = _is_fresh(conn)
 

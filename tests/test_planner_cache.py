@@ -20,7 +20,8 @@ from app.db.models import (
 )
 from app.db.planner_revision import INGREDIENT_TABLES, RECIPE_TABLES, trigger_name
 from app.db.session import init_db, make_engine, make_session_factory
-from app.planner import cache
+from app import retailers
+from app.planner import cache, warmup
 from tests.test_planner_basket import write_freq_csv
 
 
@@ -249,3 +250,28 @@ def test_standalone_prices_are_cached_per_requested_recipe(cache_db, monkeypatch
 
     assert scored == ids
     assert set(prices) == set(ids)
+
+
+def test_warm_up_loads_every_shop_so_no_request_has_to(cache_db, monkeypatch):
+    """The point of the start-up warm: the first browse pays nothing.
+
+    Both catalogued shops, not only the active one — switching retailer in
+    settings re-prices the whole library, and paying the load for that switch is
+    the same slow first request somewhere else.
+    """
+    _engine, factory, _csv_path, _ids = cache_db
+    loaded: list[str] = []
+    real_load = cache.load_catalogue
+
+    def load_catalogue(*args, retailer, **kwargs):
+        loaded.append(retailer)
+        return real_load(*args, retailer=retailer, **kwargs)
+
+    monkeypatch.setattr(cache, "load_catalogue", load_catalogue)
+
+    warmup.warm(factory)
+    assert loaded == [r for r in retailers.RETAILER_IDS if retailers.get(r).catalogued]
+
+    for retailer in retailers.RETAILER_IDS:
+        cache.get_index(factory, retailer=retailer)
+    assert loaded == [r for r in retailers.RETAILER_IDS if retailers.get(r).catalogued]

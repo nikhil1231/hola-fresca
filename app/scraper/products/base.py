@@ -43,6 +43,13 @@ class NormalizedProduct:
     guaranteed minimum life and Sainsbury's does not, so a NULL there means "this
     shop does not say", never "it goes off today". :func:`app.planner.waste`
     reads it that way.
+
+    ``price``/``unit_price`` are **what you would pay today**, promotions
+    included; ``base_price``/``base_unit_price`` are the same product at its list
+    price, and are NULL when nothing is on offer. Two numbers because two
+    questions are being asked: what a basket costs is a live figure and wants the
+    promotion, while which product is better value has to survive a promotion
+    ending — see :mod:`app.mapping.ordering`.
     """
 
     retailer: str
@@ -55,7 +62,12 @@ class NormalizedProduct:
     price: float | None = None
     unit_price: float | None = None
     unit_price_basis: str | None = None
+    base_price: float | None = None
+    base_unit_price: float | None = None
     category: str | None = None
+    # A storage form, not merely a long shelf life. Retailer adapters prefer an
+    # explicit "Frozen" badge/label and fall back to the category path.
+    is_frozen: bool = False
     in_stock: bool | None = None
     shelf_life_raw: str | None = None
     shelf_life_days: int | None = None
@@ -64,6 +76,41 @@ class NormalizedProduct:
     image_url: str | None = None
     url: str | None = None
     raw_json: str | None = None
+
+
+def category_is_frozen(category: str | None) -> bool:
+    """Whether a retailer category path explicitly identifies frozen stock."""
+    if not category:
+        return False
+    return any("frozen" in part.strip().lower() for part in category.split(">"))
+
+
+@dataclass(frozen=True)
+class ProductStatus:
+    """What a shop says about one product *right now*.
+
+    The live counterpart to :class:`NormalizedProduct`, and deliberately much
+    smaller. A refresh re-reads what goes stale between scrapes — stock and the
+    four prices — and writes only those back, because a live response is not
+    always as decorated as the search response the catalogue was built from and
+    overwriting a good brand or category with a missing one would be a downgrade.
+
+    Every price field may be ``None`` for "the shop did not say", which is left
+    alone rather than written as a null price. ``unlisted`` is the exception that
+    is not a fact about the product at all: it means the shop never answered for
+    this id, which reads as unavailable but is worth telling apart — see
+    ``app.catalogue.refresh_stock``.
+    """
+
+    sku: str
+    available: bool
+    price: float | None = None
+    base_price: float | None = None
+    unit_price: float | None = None
+    unit_price_basis: str | None = None
+    base_unit_price: float | None = None
+    name: str | None = None
+    unlisted: bool = False
 
 
 def parse_pack_size(raw: str | None) -> tuple[float | None, str | None]:
@@ -134,6 +181,20 @@ def parse_unit_price(raw: str | None) -> tuple[float | None, str | None]:
     if not match:
         return None, None
     return parse_money(match.group("money")), basis(match.group("basis"))
+
+
+def base_price(current: float | None, stated: float | None) -> float | None:
+    """A list price, kept only where it is really one.
+
+    Both shops state a was-price on some products that are not actually cheaper
+    today — a multibuy quotes the single-unit price it has always charged, and a
+    just-ended promotion can leave its own original price behind. Anything not
+    strictly above what you would pay now is discarded, so ``base_price is not
+    None`` means "this is on offer" everywhere it is read.
+    """
+    if current is None or stated is None:
+        return None
+    return stated if stated > current else None
 
 
 def parse_money(value: str | int | float | None) -> float | None:

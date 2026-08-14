@@ -41,12 +41,11 @@ import {
 
 import CheckoutPanel from '../components/CheckoutPanel.jsx'
 import RecipeCard from '../components/RecipeCard.jsx'
-import { useOcadoStockRefresh } from '../hooks/useOcadoQueries.js'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
 import RetailerChip from '../components/RetailerChip.jsx'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
-import { usePackPreference, usePlannerBasket } from '../hooks/useRecipeQueries.js'
+import { usePackPreference, usePlannerBasket, useStockRefresh } from '../hooks/useRecipeQueries.js'
 import {
   isPastWeekStart,
   resolveTargetWeek,
@@ -775,8 +774,8 @@ function shortWeekLabel(value) {
 
 function stockStatusText(stockRefresh, stockAge, retailerLabel) {
   if (stockRefresh.isPending) return `Checking ${retailerLabel ?? 'the shop'}...`
-  if (stockAge) return `Stock checked ${stockAge}`
-  return 'Stock not checked'
+  if (stockAge) return `Prices checked ${stockAge}`
+  return 'Prices not checked'
 }
 
 function BasketSummary({
@@ -1092,7 +1091,7 @@ function OrderPanelHeader({
           disabled={!selections.length}
           onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
         >
-          Refresh stock
+          Refresh prices
         </Button>
       </Group>
     </Group>
@@ -1166,7 +1165,7 @@ export default function BasketPage() {
     setWeekSnap,
     setWeekPackAndSnap,
   } = useWeekPackChoices(weekStart)
-  const stockRefresh = useOcadoStockRefresh()
+  const stockRefresh = useStockRefresh()
   const { label: retailerLabel, shoppable: retailerShoppable } = useActiveRetailer()
   // A ?view=checkout link survives a switch to a shop with no trolley, so the
   // view falls back rather than leaving an empty panel with no way out of it.

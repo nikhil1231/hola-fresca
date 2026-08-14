@@ -64,6 +64,82 @@ def test_price_is_the_promotional_one_not_the_struck_through_original(by_sku):
     assert chorizo.price == 2.25
 
 
+def test_the_shelf_price_behind_a_promotion_is_kept_beside_it(by_sku):
+    # What the mapping ranks on. Sainsbury's states both: retail_price is today's
+    # 2.25, and the promotion's original_price and original_unit_price are the
+    # 2.60 / £11.56 per kg the shelf goes back to when the offer ends.
+    chorizo = by_sku["7317686"]
+    assert (chorizo.price, chorizo.base_price) == (2.25, 2.6)
+    assert (chorizo.unit_price, chorizo.base_unit_price) == (10.0, 11.56)
+
+
+def test_a_product_with_no_promotion_has_no_base_price(by_sku):
+    # NULL rather than a copy of the price, so `base_price is not None` reads as
+    # "this is on offer" everywhere downstream instead of "0% off".
+    beans = by_sku["536"]
+    assert (beans.base_price, beans.base_unit_price) == (None, None)
+
+
+def test_a_was_price_that_is_not_actually_higher_is_ignored():
+    # Multibuys quote the single-unit price they have always charged, and an
+    # ended promotion can leave its original behind. Believing either would
+    # advertise a discount off a price nobody is charging.
+    payload = {
+        "product_uid": "1",
+        "name": "Sainsbury's Chickpeas 400g",
+        "retail_price": {"price": 0.75},
+        "unit_price": {"price": 1.88, "measure": "kg", "measure_amount": 1},
+        "original_unit_price": {"price": 1.88, "measure": "kg", "measure_amount": 1},
+        "promotions": [{"original_price": 0.75, "promo_type": "MULTIBUY_BUY_X_OF_VARIABLE_PRICE_FOR_Y"}],
+    }
+    product = sainsburys.normalize_product(payload)
+    assert (product.base_price, product.base_unit_price) == (None, None)
+
+
+def test_a_was_price_on_another_basis_is_not_a_discount():
+    # £14 per litre against £7 per 100ml is dearer, not half price. Comparing the
+    # bare numbers would read it as a 50% offer.
+    payload = {
+        "product_uid": "2",
+        "name": "Olive Oil 500ml",
+        "retail_price": {"price": 3.5},
+        "unit_price": {"price": 7.0, "measure": "ltr", "measure_amount": 1},
+        "original_unit_price": {"price": 14.0, "measure": "g", "measure_amount": 100},
+        "promotions": [{"original_price": 7.0, "is_nectar": True}],
+    }
+    product = sainsburys.normalize_product(payload)
+    assert product.base_price == 7.0
+    assert product.base_unit_price is None
+
+
+def test_the_dearest_original_wins_when_promotions_stack(by_sku):
+    # A Nectar price and a multibuy can run together, and only the highest
+    # original says what the shelf charges with neither applied.
+    payload = {
+        "product_uid": "3",
+        "name": "Coffee 200g",
+        "retail_price": {"price": 3.0},
+        "promotions": [
+            {"original_price": 4.0, "promo_type": "MULTIBUY_BUY_X_OF_VARIABLE_PRICE_FOR_Y"},
+            {"original_price": 6.0, "is_nectar": True},
+        ],
+    }
+    assert sainsburys.normalize_product(payload).base_price == 6.0
+
+
+def test_product_status_reads_stock_and_both_prices(by_sku):
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    node = next(
+        obj for obj in sainsburys.extract_product_objects(payload)
+        if obj["product_uid"] == "7317686"
+    )
+    status = sainsburys.product_status(node)
+    assert (status.sku, status.available) == ("7317686", True)
+    assert (status.price, status.base_price) == (2.25, 2.6)
+    assert (status.unit_price, status.unit_price_basis) == (10.0, "kg")
+    assert status.base_unit_price == 11.56
+
+
 def test_unavailable_products_are_marked_not_dropped(by_sku):
     assert by_sku["3300787"].in_stock is False
 
@@ -148,6 +224,57 @@ def test_search_and_bulk_urls():
     assert sainsburys.products_url(["536", "671682"]).endswith("uids=536%2C671682")
 
 
+class _FakeRunner:
+    """Stands in for the Playwright-backed browser runner. Records its batches."""
+
+    def __init__(self, nodes, *, throttle=None):
+        self.nodes = {node["product_uid"]: node for node in nodes}
+        self.throttle = throttle
+        self.batches: list[list[str]] = []
+
+    def run(self, call, timeout=None):
+        return call(self)
+
+    def products(self, skus, throttle):
+        self.batches.append(list(skus))
+        return {"products": [self.nodes[sku] for sku in skus if sku in self.nodes]}
+
+
+def test_live_statuses_come_back_keyed_by_sku(payload, monkeypatch):
+    nodes = sainsburys.extract_product_objects(payload)
+    runner = _FakeRunner(nodes)
+    monkeypatch.setattr("app.mapping.live_search.get_runner", lambda retailer: runner)
+
+    statuses = sainsburys.fetch_statuses(["7317686", "536"])
+
+    assert statuses["7317686"].price == 2.25
+    assert statuses["7317686"].base_price == 2.6
+    assert statuses["536"].available is True
+    assert runner.batches == [["7317686", "536"]]
+
+
+def test_an_id_sainsburys_will_not_talk_about_counts_as_unavailable(payload, monkeypatch):
+    # A delisted product reads exactly like a sold-out one from the basket's
+    # view, so it is reported rather than quietly dropped from the answer.
+    runner = _FakeRunner(sainsburys.extract_product_objects(payload))
+    monkeypatch.setattr("app.mapping.live_search.get_runner", lambda retailer: runner)
+
+    statuses = sainsburys.fetch_statuses(["7317686", "retired", "7317686"])
+
+    assert statuses["retired"].available is False
+    assert statuses["retired"].unlisted is True
+    assert runner.batches == [["7317686", "retired"]], "asked once each"
+
+
+def test_live_statuses_are_read_in_batches(payload, monkeypatch):
+    runner = _FakeRunner(sainsburys.extract_product_objects(payload))
+    monkeypatch.setattr("app.mapping.live_search.get_runner", lambda retailer: runner)
+
+    sainsburys.fetch_statuses([f"sku{n}" for n in range(120)])
+
+    assert [len(batch) for batch in runner.batches] == [50, 50, 20]
+
+
 def test_registry_resolves_both_adapters():
     assert set(ADAPTER_IDS) == {"ocado", "sainsburys"}
     assert get_adapter("sainsburys") is sainsburys
@@ -171,5 +298,9 @@ def test_every_adapter_exposes_the_same_surface():
             "normalize_product",
             "product_url",
             "search_url",
+            # The basket page's live refresh dispatches on these, and a shop
+            # missing them can only ever be priced from the last scrape.
+            "product_status",
+            "fetch_statuses",
         ):
             assert hasattr(adapter, name), f"{retailer} adapter has no {name}"

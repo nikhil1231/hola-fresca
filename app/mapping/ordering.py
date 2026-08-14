@@ -15,6 +15,11 @@ explains itself. Keep the two in step — the constants and the shape of
 :func:`relative_quality_scores` and :func:`rating_quality_score` are meant to
 match, and ``tests/test_mapping_ordering.py`` mirrors the JS test cases.
 
+The price it compares is the *shelf* price, with any promotion stripped back off
+(:func:`sort_unit_price`). An order is not a quote — it is stored, and approving
+it freezes it — so it has to be built on the number that will still be true next
+month. The basket is priced separately, and does spend the promotion.
+
 Two things are deliberately *not* a weighted term:
 
 * **Match type** is a hard primary key (exact → form_differs → substitute). No
@@ -77,6 +82,27 @@ class Accepted(Protocol):
 
 def _finite(value: float | None) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def sort_unit_price(candidate: Candidate | None) -> float | None:
+    """The unit price to rank on: the shelf price, not the promotional one.
+
+    An order is not a price quote. It is written into
+    ``ingredient_mapping_products.rank`` and, once a reviewer approves it, stays
+    there — ``reorder_proposals`` deliberately never moves a mapping a human has
+    ordered. A half-price Nectar promotion runs for three weeks; the rank it
+    would win outlives it by however long the mapping does, and nothing would
+    ever re-sort it back.
+
+    So the promotion is stripped here and only here. The basket still spends
+    ``price``, which is what the shop will actually charge — see
+    :attr:`app.db.models.Product.base_price`.
+    """
+    if candidate is None:
+        return None
+    if candidate.base_unit_price is not None:
+        return candidate.base_unit_price
+    return candidate.unit_price
 
 
 def canonical_unit_price_basis(basis: str | None) -> str | None:
@@ -204,7 +230,7 @@ def score_accepted(
     unit_price = relative_quality_scores(
         [row for row in rows if row[1] is not None],
         key_of=lambda row: row[0].sku,
-        value_of=lambda row: row[1].unit_price,
+        value_of=lambda row: sort_unit_price(row[1]),
         group_of=lambda row: canonical_unit_price_basis(row[1].unit_price_basis),
         higher_is_better=False,
     )

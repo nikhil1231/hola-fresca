@@ -12,6 +12,7 @@ import {
   fetchRecipes,
   flagRecipe,
   hideRecipe,
+  refreshPlannerStock,
   revertRecipeEdits,
   retryCookMap,
   setPackPreference,
@@ -82,6 +83,17 @@ export function usePlannerBasket(selections, packOverrides = {}, snapOverrides =
     // A week's pack choice re-prices the same basket, so keep the previous
     // answer on screen while the new one lands instead of blanking the table.
     placeholderData: (previous) => previous,
+  })
+}
+
+// Refreshing stock rewrites prices and availability in the catalogue, which
+// re-covers every affected ingredient — so the basket has to be re-fetched, not
+// just re-rendered.
+export function useStockRefresh() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: refreshPlannerStock,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-basket'] }),
   })
 }
 

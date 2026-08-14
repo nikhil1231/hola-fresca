@@ -29,23 +29,28 @@ for _namespace in ("holafresca", "app"):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Install the auth-event sink, then start the Ocado heartbeat.
+    """Install the auth-event sink, warm the planner, start the Ocado heartbeat.
 
-    In that order, and both here rather than at import time: the sink needs the
+    In that order, and all here rather than at import time: each needs the
     session factory this process will actually use, and the heartbeat talks to
-    Ocado — neither belongs in a module that the scraper CLIs and the test suite
-    import. The heartbeat is off unless HOLAFRESCA_OCADO_HEARTBEAT is set, so a
-    developer running the server locally does not quietly start probing Ocado.
+    Ocado — none of it belongs in a module that the scraper CLIs and the test
+    suite import. The heartbeat is off unless HOLAFRESCA_OCADO_HEARTBEAT is set,
+    so a developer running the server locally does not quietly start probing
+    Ocado. The warm-up only reads the local catalogue, so it is on by default;
+    see app/planner/warmup.py for what it costs and what turns it off.
     """
     from app.api.deps import get_session_factory
     from app.ocado import events, heartbeat
+    from app.planner import warmup
 
     events.set_sink(events.db_sink(get_session_factory))
+    warmup.start(get_session_factory)
     heartbeat.start()
     try:
         yield
     finally:
         heartbeat.stop()
+        warmup.stop()
         events.set_sink(None)
 
 
