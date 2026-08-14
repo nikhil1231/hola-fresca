@@ -1,0 +1,19 @@
+[Unit]
+Description=Cloudflare Tunnel for HolaFresca
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Config and credentials live in ~/.cloudflared (written by setup-tunnel.sh),
+# outside the repo, because the credentials file is a bearer token for the
+# tunnel. --no-autoupdate because the binary is user-installed in ~/.local/bin
+# and an unattended self-replace is not what a background unit should do.
+ExecStart=%h/.local/bin/cloudflared --no-autoupdate tunnel run
+Restart=on-failure
+RestartSec=5
+# The connection is outbound, so a laptop that sleeps or changes network just
+# reconnects; failures here are transient far more often than they are fatal.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=default.target

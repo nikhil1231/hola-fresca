@@ -7,4 +7,5 @@ alembic
 playwright
 python-dotenv
 openai
+pyjwt[crypto]
 rapidfuzz

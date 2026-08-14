@@ -10,11 +10,12 @@ from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import Depends, HTTPException
-from sqlalchemy import select
+from fastapi import Depends, HTTPException, Request
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app import retailers
+from app import config, retailers
+from app.api import access
 from app.db.models import User
 from app.db.session import ensure_runtime_schema, make_engine, make_session_factory
 
@@ -37,21 +38,67 @@ def get_session_factory() -> sessionmaker[Session]:
     return _session_factory()
 
 
-def get_current_user(session: Session = Depends(get_session)) -> User:
+def get_current_user(
+    request: Request, session: Session = Depends(get_session)
+) -> User:
     """Whose data this request is about.
 
-    There is no login yet, so this is the account the app bootstrapped — the
-    lowest user id, which on any existing database is the person who has been
-    running it. Every personal read and write goes through here rather than
-    reaching for "the one row", so adding Google sign-in is a change to this
-    function and nothing else.
+    Two ways in, and which one applies is decided by
+    :func:`app.api.access.authenticated_email`:
+
+    * Through the Cloudflare Tunnel, Access has already done the Google sign-in
+      and checked the email against its allowlist, and the request carries a
+      signed assertion of the address. That address is the account.
+    * Over the LAN or Tailscale — or in local dev and the tests, where Access is
+      not configured at all — there is no assertion, and this stays what it has
+      always been: the account the app bootstrapped, the lowest user id, which
+      on any existing database is the person who has been running it.
+
+    Every personal read and write goes through here rather than reaching for
+    "the one row", which is why sign-in landed as a change to this function.
     """
+    email = access.authenticated_email(request)
+    if email is not None:
+        return _user_for_email(session, email)
+
     user = session.scalar(select(User).order_by(User.id).limit(1))
     if user is None:
         # init_db creates this row, so its absence means the API is pointed at a
         # database nothing has initialised — worth saying plainly rather than
         # failing later on a foreign key.
         raise HTTPException(status_code=500, detail="No user account exists in this database")
+    return user
+
+
+def _user_for_email(session: Session, email: str) -> User:
+    """The account for a verified Access identity, creating it if new.
+
+    Creating on first sight is safe here precisely because the address is one
+    Access already let through: the allowlist in the Access policy is the guest
+    list, so adding a household member is a change there and not a database
+    chore. New accounts are never admin — catalogue edits stay with the owner.
+
+    The owner is the exception the bootstrap row needs. That row predates having
+    an email, so without this the first sign-in would create a *second* account
+    and silently leave the plan, hides and pack preferences behind on the first.
+    """
+    user = session.scalar(select(User).where(func.lower(User.email) == email.lower()))
+    if user is not None:
+        return user
+
+    owner = (config.ACCESS_OWNER_EMAIL or "").strip().lower()
+    if owner and email.lower() == owner:
+        unclaimed = session.scalar(
+            select(User).where(User.email.is_(None)).order_by(User.id).limit(1)
+        )
+        if unclaimed is not None:
+            unclaimed.email = email
+            session.commit()
+            return unclaimed
+
+    user = User(email=email, is_admin=0)
+    session.add(user)
+    session.commit()
     return user
 
 

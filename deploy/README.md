@@ -1,4 +1,4 @@
-# deploy/ — LAN testing deployment and backups
+# deploy/ — LAN testing deployment, public access, and backups
 
 Runs the cumulative **Testing stack** of HolaFresca on the laptop at
 `http://<laptop-ip>:8100`, always pinned to the head of the local
@@ -41,6 +41,85 @@ systemctl --user enable --now holafresca-testing.service holafresca-testing-sync
 
 `sync-integration.sh` runs from this `deploy/` dir inside the testing checkout;
 because it is tracked, `git reset --hard` restores it instead of losing it.
+
+## Getting to it from outside the house — Cloudflare Tunnel + Access
+
+`cloudflared` runs on the laptop and dials *out* to Cloudflare, so there is no
+port forwarded, no inbound firewall rule and no public IP anywhere. Cloudflare
+Access sits in front of the hostname doing Google sign-in against an email
+allowlist, which is why the app has no login page of its own.
+
+- `cloudflared.service` — the tunnel (user unit, like the others here).
+- `setup-tunnel.sh` — creates the tunnel, writes `~/.cloudflared/config.yml`
+  pointing at `localhost:8100`, adds the DNS record, installs the unit.
+- `~/.cloudflared/` holds the config and the tunnel credentials. Outside the
+  repo deliberately: that JSON file is a bearer token for the tunnel.
+
+The binary is user-installed at `~/.local/bin/cloudflared` (same arrangement as
+`rclone` — there is no passwordless sudo on this box).
+
+### One-time setup
+
+```sh
+cloudflared tunnel login          # browser: pick the zone to authorise
+deploy/setup-tunnel.sh hola.example.com
+```
+
+Then in the Cloudflare dashboard, **Zero Trust → Access → Applications**: add a
+self-hosted app for that hostname, with a policy of *Allow* / *Emails* listing
+who gets in, and Google as the login method. Free for up to 50 users.
+
+Finally, tell the app which Access instance to trust — in the gitignored `.env`
+at the repo root, then `systemctl --user restart holafresca-dev.service`:
+
+```
+HOLAFRESCA_ACCESS_TEAM_DOMAIN=yourteam.cloudflareaccess.com
+HOLAFRESCA_ACCESS_AUD=<the application's Audience tag>
+HOLAFRESCA_ACCESS_HOSTNAME=hola.example.com
+HOLAFRESCA_ACCESS_OWNER_EMAIL=you@example.com
+```
+
+Set the Access session duration to something long (a month) — it is short by
+default, and every lapse costs a round trip through Google.
+
+Lapses themselves are handled: `frontend/src/api/session.js` tags API calls with
+`X-Requested-With`, which is what makes the edge answer an expired request with
+a same-origin 401 instead of a cross-origin 302 that `fetch` follows and then
+cannot read (a redirect surfaces as a bare `TypeError`, indistinguishable from
+being offline, and the tab just fills with errors). On a 401 it reloads, because
+only a document load can follow the chain out to Google and back. Nothing else
+in this API returns 401, which is what makes the signal safe to act on.
+
+### What actually authenticates a request
+
+`app/api/access.py`, and it is worth being precise about, because the laptop
+still answers on `0.0.0.0:8100` for the LAN and Tailscale.
+
+- The `Cf-Access-Authenticated-User-Email` header is **never read**. Cloudflare
+  sets it, but so can anyone else on the LAN — it is a claim, not a proof. Only
+  the signed assertion is trusted, checked against the team's published keys for
+  signature, audience, issuer and expiry.
+- A request addressed to the public hostname *without* a valid assertion is
+  refused, not fallen back on. That is the case that matters if the Access
+  policy is ever off or misconfigured: otherwise a stranger arrives as the owner.
+- A request to the laptop's own address without an assertion is still the
+  bootstrap account, exactly as before. The home network is trusted; that is a
+  decision, not an oversight, and it is the thing to revisit by binding `run.py`
+  to `127.0.0.1` if it ever stops being true.
+- Leave `HOLAFRESCA_ACCESS_TEAM_DOMAIN` or `_AUD` unset and none of it is
+  enforced — which is what local dev and the test suite run as.
+
+A verified address that has no account gets one created, because Access already
+vetted it at the edge: adding a household member is a change to the Access
+policy, not a database chore. New accounts are never admin. The one exception is
+`HOLAFRESCA_ACCESS_OWNER_EMAIL`, whose first sign-in *claims* the bootstrap row
+rather than starting a second account beside years of plan history.
+
+```sh
+systemctl --user status cloudflared.service
+journalctl --user -u cloudflared.service -f      # connections, reconnects
+cloudflared tunnel list
+```
 
 ## Backups
 

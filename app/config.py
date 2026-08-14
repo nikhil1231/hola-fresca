@@ -28,6 +28,26 @@ DB_PATH = Path(os.environ.get("HOLAFRESCA_DB_PATH", DATA_DIR / "holafresca.db"))
 # request whatever transformation size it needs.
 HELLOFRESH_IMAGE_BASE = "https://img.hellofresh.com/hellofresh_s3"
 
+# Cloudflare Access — who is allowed in, and who this request is. The app is
+# published through a Cloudflare Tunnel; Access sits in front of it doing the
+# Google sign-in and the email allowlist, and forwards a signed assertion of the
+# identity. See app/api/access.py for how that assertion is checked.
+#
+# Leave ACCESS_TEAM_DOMAIN or ACCESS_AUD unset and none of it is enforced, which
+# is what local dev and the test suite run as: every request is the bootstrap
+# account, exactly as before this existed.
+ACCESS_TEAM_DOMAIN = os.environ.get("HOLAFRESCA_ACCESS_TEAM_DOMAIN")
+ACCESS_AUD = os.environ.get("HOLAFRESCA_ACCESS_AUD")
+# The public hostname the tunnel serves. Requests arriving *for that name* must
+# carry a valid assertion; requests to the LAN address are still let through as
+# the bootstrap user, because the laptop keeps answering on 0.0.0.0:8100. Unset
+# it and that distinction cannot be drawn — see app/api/access.py.
+ACCESS_HOSTNAME = os.environ.get("HOLAFRESCA_ACCESS_HOSTNAME")
+# The address that owns the existing data. The bootstrap user predates having an
+# email, so the first sign-in by this address claims that row rather than making
+# a second account and leaving the plan, hides and preferences behind.
+ACCESS_OWNER_EMAIL = os.environ.get("HOLAFRESCA_ACCESS_OWNER_EMAIL")
+
 # OpenAI settings for the ingredient→product mapping proposal pass. The key is
 # never committed — it lives in the gitignored .env. The model is overridable so
 # a different id can be used without a code change.

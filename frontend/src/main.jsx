@@ -8,6 +8,7 @@ import '@mantine/core/styles.css'
 import './index.css'
 
 import { theme } from './theme.js'
+import { installAccessSessionHandling } from './api/session.js'
 import App from './App.jsx'
 import BasketPage from './routes/BasketPage.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
@@ -20,6 +21,9 @@ import MappingAliasesPage from './routes/MappingAliasesPage.jsx'
 import MappingManualPage from './routes/MappingManualPage.jsx'
 import MappingPage from './routes/MappingPage.jsx'
 import MappingReviewPage from './routes/MappingReviewPage.jsx'
+
+// Before anything can issue a request, so no API call escapes unwrapped.
+installAccessSessionHandling()
 
 const queryClient = new QueryClient({
   defaultOptions: {
