@@ -37,10 +37,19 @@ def has_adapter(retailer: str) -> bool:
     return retailer in _ADAPTERS
 
 
-def browser_client(retailer: str, *, headless: bool = False):
-    """A ready-to-enter browser client for this retailer's product API.
+def client(retailer: str, *, headless: bool = True):
+    """A ready-to-enter client for this retailer's product API.
 
-    Every adapter exports its client as ``BrowserClient`` as well as under its
-    own name, so this needs no per-retailer branch.
+    Every adapter exports its client as ``Client`` as well as under its own
+    name, and the two transports present the same surface — a context manager
+    with ``search`` and ``products`` — so callers neither know nor care which
+    one they were handed.
+
+    ``headless`` reaches only the shops that actually drive a browser, which is
+    what ``USES_BROWSER`` records. A browser-free adapter is not asked to accept
+    an argument about a window it will never open.
     """
-    return get_adapter(retailer).BrowserClient(headless=headless)
+    adapter = get_adapter(retailer)
+    if getattr(adapter, "USES_BROWSER", False):
+        return adapter.Client(headless=headless)
+    return adapter.Client()

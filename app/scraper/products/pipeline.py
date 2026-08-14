@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.models import Product, ProductScrapeState, ProductSearchHit
 from app.db.session import ensure_columns
 from app.retailers import DEFAULT_RETAILER
-from app.scraper.products import storage
+from app.scraper.products import registry, storage
 from app.scraper.products.base import base_price, chunks
 from app.scraper.products.browser import BrowserSession, is_dead_browser
 from app.scraper.products.registry import get_adapter
@@ -94,8 +94,10 @@ def fetch(
     throttle = throttle or AdaptiveThrottle(workers=1, delay=1.5, max_delay=20.0)
     # A BrowserSession rather than a bare client: Chrome does not reliably
     # survive a few hundred searches, and a crash used to fail every remaining
-    # item in the worklist rather than costing one relaunch.
-    with BrowserSession(lambda: adapter.BrowserClient(headless=headless)) as browser:
+    # item in the worklist rather than costing one relaunch. For a shop fetched
+    # over HTTP there is no browser to lose, and this wrapper costs one function
+    # call — it stays in the shared path rather than becoming a branch.
+    with BrowserSession(lambda: registry.client(retailer, headless=headless)) as browser:
         _fetch_searches(adapter, browser, session_factory, result, limit, retry_errors, throttle)
         _fetch_products(adapter, browser, session_factory, result, limit, retry_errors, throttle)
         result.notes.append(f"{browser.restarts} browser restarts")

@@ -291,7 +291,7 @@ def test_every_adapter_exposes_the_same_surface():
         for name in (
             "RETAILER",
             "BASE_URL",
-            "BrowserClient",
+            "Client",
             "PRODUCT_BATCH_SIZE",
             "extract_product_ids",
             "extract_product_objects",

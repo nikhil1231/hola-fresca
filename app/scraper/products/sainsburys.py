@@ -13,6 +13,16 @@ Underneath it, the older ``/gol-ui`` SPA — which is what a fresh session is
 actually served — talks to a plain REST API that has been stable for years. That
 is what this module uses. It is the same catalogue.
 
+Reaching that API needs no browser, which took two goes to establish. The
+endpoints are served to a caller with no cookies, no session and no warm-up
+navigation; what the Akamai edge refuses is the *TLS handshake* of a Python HTTP
+client, and it refuses it identically whether the request is cold or arrives on
+the back of a perfectly good browser profile. That is why driving a headed
+Chrome worked and every attempt to trim it down did not — the browser was never
+supplying trust, only a handshake. Presenting a browser's handshake directly
+(:mod:`app.scraper.products.http_session`) is answered the same way, from a
+headless host, in about half a second.
+
 Two shapes differ from Ocado and are easy to get wrong:
 
 * There is **no pack-size field**. The weight is in the product title
@@ -27,11 +37,9 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from app import config
 from app.scraper.products.base import (
     NormalizedProduct,
     ProductStatus,
@@ -43,7 +51,7 @@ from app.scraper.products.base import (
     pack_size_from_name,
     parse_pack_size,
 )
-from app.scraper.products.browser import BrowserJsonClient
+from app.scraper.products.http_session import HttpJsonClient
 from app.scraper.ratelimit import AdaptiveThrottle
 
 RETAILER = "sainsburys"
@@ -60,13 +68,10 @@ MAX_PRODUCTS_TO_DECORATE = PAGE_SIZE
 #: How many ids the bulk ``uids=`` endpoint is asked for at once.
 PRODUCT_BATCH_SIZE = 50
 
-#: Whether a live call here can be made from a headless browser. It cannot:
-#: Akamai serves this profile "Access Denied" for every request — the warm-up
-#: page included — when Chrome runs headless, and answers the identical call
-#: from the identical profile when it does not. Nothing is being forged either
-#: way; the flag simply records which of the two the shop is willing to talk to,
-#: and the scrape has always been run headed for the same reason.
-BROWSER_HEADLESS = False
+#: Whether this shop's calls need a browser driven for them. They do not — see
+#: the module docstring — so nothing here launches Chrome, and the scrape runs
+#: on a headless host. Contrast :data:`app.scraper.products.ocado.USES_BROWSER`.
+USES_BROWSER = False
 
 #: "Typical life 14 days", "Typical life 3 months". The unit is spelled out.
 _LIFE_LABEL_RE = re.compile(
@@ -207,14 +212,13 @@ def product_status(node: dict[str, Any]) -> ProductStatus | None:
 
 
 def fetch_statuses(skus: list[str]) -> dict[str, ProductStatus]:
-    """Live stock and prices for ``skus``, read through a real browser.
+    """Live stock and prices for ``skus``.
 
-    Unlike Ocado's, this endpoint cannot be called with an HTTP client: every
-    path on the host — the bulk API, the SPA, even a product page — answers a
-    bare request with an Akamai 403, so the read goes through the same warm
-    Chromium session the live search uses (:mod:`app.mapping.live_search`). The
-    browser starts on the first call and closes itself after an idle period, so
-    a basket refresh usually costs one in-page ``fetch`` per fifty ids.
+    One HTTP request per fifty ids, sharing the retailer's session and backoff
+    with the live search through :mod:`app.mapping.live_search` — so a basket
+    refresh and a reviewer's re-search cannot separately decide how hard to push
+    the shop. Nothing is launched to serve it; the runner is there for the
+    shared throttle and connection, not for a browser.
 
     An id the shop does not answer for is reported ``unlisted`` rather than
     dropped: a delisted product looks exactly like a sold-out one to a basket.
@@ -275,16 +279,10 @@ def shelf_life_from_payload(payload: dict[str, Any]) -> tuple[str | None, int | 
     return parse_shelf_life(payload.get("labels"))
 
 
-class SainsburysBrowserClient(BrowserJsonClient):
-    """Fetch Sainsbury's JSON from a real browser session without bypassing WAF."""
+class SainsburysClient(HttpJsonClient):
+    """Fetch Sainsbury's JSON over HTTP, fingerprinted as a browser."""
 
-    warmup_url = f"{BASE_URL}/gol-ui/groceries"
-
-    def __init__(self, *, profile_dir: Path | None = None, headless: bool = False):
-        super().__init__(
-            profile_dir=profile_dir or (config.DATA_DIR / "sainsburys" / "browser-profile"),
-            headless=headless,
-        )
+    referer = f"{BASE_URL}/gol-ui/groceries"
 
     def search(self, term: str, throttle: AdaptiveThrottle) -> dict[str, Any]:
         return self.json_fetch("GET", search_url(term), None, throttle)
@@ -294,8 +292,8 @@ class SainsburysBrowserClient(BrowserJsonClient):
         return self.json_fetch("GET", products_url(skus), None, throttle)
 
 
-#: The name :func:`app.scraper.products.registry.browser_client` resolves.
-BrowserClient = SainsburysBrowserClient
+#: The name :func:`app.scraper.products.registry.client` resolves.
+Client = SainsburysClient
 
 
 def _products(payload: Any) -> list[dict[str, Any]]:

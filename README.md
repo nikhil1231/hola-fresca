@@ -104,13 +104,32 @@ out rather than read as 415 g), and **shelf life is a display label**
 Note *typical* against Ocado's guaranteed *minimum* — the two are not the same
 promise, so Sainsbury's figures run slightly optimistic for the same food.
 
-Both retailers sit behind Akamai and refuse a plain HTTP client, so both are
-fetched from inside a real browser session with a persistent per-retailer profile
-— see `app/scraper/products/browser.py`. Chrome does not reliably survive a few
-hundred searches, so `BrowserSession` relaunches it and retries; without that,
-one crash marked every remaining item in the worklist as its own failure. Run the
-fetch **headed** (the default) — headless is challenged harder and has been seen
-to hang rather than fail.
+### Two transports, and why Sainsbury's stopped needing a browser
+
+Both retailers sit behind Akamai, and neither answers `httpx`. That was long
+taken to mean both needed a browser driven for them, and Sainsbury's needed a
+**headed** one — headless was refused outright, from the same profile, on the
+same machine.
+
+The refusal was never about the session. Akamai's edge on these endpoints checks
+the **TLS handshake**, not a cookie: a request carrying no cookies at all is
+answered, and the identical URL is denied the moment it arrives over Python's
+TLS stack, warm profile or not. The browser was supplying a handshake, and
+nothing else. So `app/scraper/products/http_session.py` presents a browser's
+handshake directly (`curl_cffi`, libcurl built against the browser TLS/HTTP-2
+profiles) and asks over plain HTTP. Same catalogue, no browser, ~0.5s per
+search against several seconds, and it runs on a display-less host.
+
+Sainsbury's uses that. Ocado is still fetched from a real browser session with a
+persistent profile (`app/scraper/products/browser.py`) — it is happy headless,
+and its live stock read already needed no browser at all. Chrome does not
+reliably survive a few hundred searches, so `BrowserSession` relaunches it and
+retries; without that, one crash marked every remaining worklist item as its own
+failure.
+
+Adapters declare which transport they want with `USES_BROWSER`, and both clients
+present the same surface — a context manager with `search` and `products` — so
+`registry.client(retailer)` is the only thing that has to know.
 
 ### Shelf life and the waste model
 

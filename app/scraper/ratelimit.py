@@ -14,6 +14,7 @@ politeness delay.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 
@@ -50,3 +51,26 @@ class AdaptiveThrottle:
         """Register a rate-limit/server-error signal and slow down."""
         async with self._lock:
             self.delay = min(self.max_delay, self.delay * self.backoff_factor + self.backoff_floor)
+
+    # -- synchronous forms ------------------------------------------------
+    #
+    # The product fetchers are a single-threaded walk rather than an asyncio
+    # pool, so they need the same three moves without a coroutine or a lock to
+    # take. Kept here beside the async pair so the backoff arithmetic is
+    # written once: it had been duplicated in the browser client, and a second
+    # copy in the HTTP client would have been the point where the two could
+    # start disagreeing about what "backing off" means.
+
+    def pace(self) -> None:
+        """Synchronous :meth:`before_request`."""
+        if self.delay > 0:
+            time.sleep(self.delay)
+
+    def note_success(self) -> None:
+        """Synchronous :meth:`on_success`."""
+        if self.delay > 0:
+            self.delay = max(0.0, self.delay * self.recover_factor - 0.01)
+
+    def note_throttle(self) -> None:
+        """Synchronous :meth:`on_throttle`."""
+        self.delay = min(self.max_delay, self.delay * self.backoff_factor + self.backoff_floor)

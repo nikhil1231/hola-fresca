@@ -7,17 +7,18 @@ cubes, which are a fine (and cheaper) stand-in. This module lets the reviewer
 re-search with their own wording and pick from the results by hand, with no LLM
 involved.
 
-One runner per retailer, each owning its own browser and profile: the profiles
-are what the sites trust, and sharing one context between two shops would throw
-away that trust on every switch.
+One runner per retailer, each owning its own session: where that session is a
+browser profile it is what the site trusts, and sharing one context between two
+shops would throw away that trust on every switch.
 
 Results are persisted exactly like the batch scrape (raw cache + ``products`` +
 ``product_search_hits``), so a re-search permanently enriches the candidate pool
 and everything downstream keeps working off product ids.
 
-Playwright's sync API is thread-affine, so the browser lives in one dedicated
-worker thread and searches are dispatched to it. The browser is started lazily
-on the first search and closed after an idle period.
+The session lives in one dedicated worker thread and searches are dispatched to
+it — Playwright's sync API is thread-affine, so a browser-backed shop has no
+choice. It is started lazily on the first search and closed after an idle
+period.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import IngredientMapping, Product, ProductSearchHit
 from app.retailers import DEFAULT_RETAILER
-from app.scraper.products import storage
+from app.scraper.products import registry, storage
 from app.scraper.products.pipeline import upsert_product
 from app.scraper.products.registry import get_adapter
 from app.scraper.ratelimit import AdaptiveThrottle
@@ -51,12 +52,10 @@ SEARCH_TIMEOUT_S = 90.0
 def browser_headless(retailer: str) -> bool:
     """Whether this shop's browser calls can be made without a visible window.
 
-    The shop decides, not us: Sainsbury's Akamai profile refuses a headless
-    Chrome outright (see ``sainsburys.BROWSER_HEADLESS``), and a live search or
-    price refresh there fails with "Access Denied" until it is run headed. The
-    environment gets the last word, because a host with no display cannot open a
-    window whatever the shop would prefer — there the honest failure is the
-    request erroring rather than a browser that never appears.
+    Only consulted for a shop that drives a browser at all — Sainsbury's no
+    longer does, so this decides nothing there. The shop gets the default and
+    the environment gets the last word, because a host with no display cannot
+    open a window whatever the shop would prefer.
     """
     override = os.environ.get("HOLAFRESCA_LIVE_BROWSER_HEADLESS")
     if override is not None and override.strip():
@@ -73,13 +72,18 @@ class _Job:
 
 
 class LiveSearchRunner:
-    """Serialises live retailer calls onto one long-lived headless browser session.
+    """Serialises live retailer calls onto one long-lived session.
 
-    Named for its first caller, but it is now the shared browser worker for
-    anything the app has to ask a shop in the moment: the review page's
-    re-searches, and the basket page's stock and price refresh at a retailer
-    whose API will not answer an HTTP client. :meth:`run` is the general form and
+    Named for its first caller, but it is now the shared worker for anything the
+    app has to ask a shop in the moment: the review page's re-searches, and the
+    basket page's stock and price refresh. :meth:`run` is the general form and
     :meth:`search` the shorthand.
+
+    The dedicated thread is Playwright's requirement, not everyone's — a shop
+    fetched over HTTP would be safe called from anywhere. It keeps the thread
+    regardless, because what the runner is really for is that one shop is asked
+    one thing at a time behind one shared throttle, and that is worth having
+    whichever transport is underneath.
     """
 
     def __init__(
@@ -137,14 +141,8 @@ class LiveSearchRunner:
                     return  # idle: close the browser and let the thread exit
                 try:
                     if client is None:
-                        log.info(
-                            "starting %s browser session (headless=%s)",
-                            self.retailer,
-                            self.headless,
-                        )
-                        client = get_adapter(self.retailer).BrowserClient(
-                            headless=self.headless
-                        )
+                        log.info("opening %s live session", self.retailer)
+                        client = registry.client(self.retailer, headless=self.headless)
                         client.__enter__()
                     job.future.set_result(job.call(client))
                 except Exception as exc:  # noqa: BLE001 - surface to the caller

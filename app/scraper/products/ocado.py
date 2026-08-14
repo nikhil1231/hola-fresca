@@ -29,6 +29,7 @@ __all__ = [
     "BASE_URL",
     "MAX_PRODUCTS_TO_DECORATE",
     "NormalizedProduct",
+    "Client",
     "OcadoBrowserClient",
     "chunks",
     "extract_product_ids",
@@ -49,9 +50,11 @@ MAX_PRODUCTS_TO_DECORATE = 50
 #: How many ids the bulk product endpoint is asked for at once.
 PRODUCT_BATCH_SIZE = 50
 
-#: Ocado is happy to answer a headless browser, and the live stock read here
-#: needs no browser at all. Contrast :data:`app.scraper.products.sainsburys
-#: .BROWSER_HEADLESS`.
+#: Ocado's search and decorate endpoints are still fetched from a browser, and
+#: are happy with a headless one. The live stock read needs no browser at all.
+#: Contrast :data:`app.scraper.products.sainsburys.USES_BROWSER`, which is False
+#: for the whole shop.
+USES_BROWSER = True
 BROWSER_HEADLESS = True
 
 _UUID_RE = re.compile(
@@ -254,8 +257,8 @@ class OcadoBrowserClient(BrowserJsonClient):
         return self.json_fetch("PUT", f"{BASE_URL}{PRODUCTS_PATH}", skus, throttle)
 
 
-#: The name :func:`app.scraper.products.registry.browser_client` resolves.
-BrowserClient = OcadoBrowserClient
+#: The name :func:`app.scraper.products.registry.client` resolves.
+Client = OcadoBrowserClient
 
 
 def _looks_product_id_key(key: str) -> bool:

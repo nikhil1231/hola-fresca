@@ -1,12 +1,16 @@
 """Fetch retailer JSON from inside a real browser session.
 
-Both Ocado and Sainsbury's sit behind Akamai, and neither will answer an httpx
-client: a bare request is met with an edge 403 before it reaches the origin, and
-Sainsbury's additionally A/B-buckets the caller into one of two entirely
-different front-ends depending on cookies it only sets for a real browser. Rather
-than forge tokens, this drives Chromium with a persistent profile and issues the
-API call with ``fetch`` from inside the page, so every cookie, header and WAF
-challenge is whatever the site itself just negotiated.
+The heavyweight of the two transports, and now the minority case: it is what
+Ocado uses, while Sainsbury's turned out to need only a browser's TLS handshake
+and moved to :mod:`app.scraper.products.http_session`. Reach for this one when a
+shop wants something a request cannot carry — a session the site itself
+negotiated, cookies it set, a challenge it cleared. Where the requirement is
+merely "be a browser at the handshake", the HTTP client is a thirtieth of the
+cost.
+
+Rather than forge tokens, this drives Chromium with a persistent profile and
+issues the API call with ``fetch`` from inside the page, so every cookie, header
+and WAF challenge is whatever the site itself just negotiated.
 
 The profile is persistent and per-retailer, which is what makes this affordable:
 the expensive part is the first visit, and every later run starts already
@@ -20,7 +24,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
@@ -116,8 +119,7 @@ class BrowserJsonClient:
         if self._page is None:
             raise RuntimeError(f"{type(self).__name__} must be used as a context manager")
 
-        if throttle.delay > 0:
-            time.sleep(throttle.delay)
+        throttle.pace()
 
         result = self._page.evaluate(
             """async ({ method, url, body, headers, timeoutMs }) => {
@@ -154,7 +156,7 @@ class BrowserJsonClient:
             },
         )
         if result.get("aborted"):
-            _on_throttle(throttle)
+            throttle.note_throttle()
             raise RuntimeError(
                 f"{url} did not respond within {timeout_s:g}s ({result.get('reason')})"
             )
@@ -162,14 +164,14 @@ class BrowserJsonClient:
         content_type = result["contentType"]
         text = result["text"]
         if status != 200 or "json" not in content_type.lower():
-            _on_throttle(throttle)
+            throttle.note_throttle()
             raise RuntimeError(f"{url} returned {status} {content_type or 'unknown content-type'}")
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
-            _on_throttle(throttle)
+            throttle.note_throttle()
             raise RuntimeError(f"{url} returned non-JSON content") from exc
-        _on_success(throttle)
+        throttle.note_success()
         return payload
 
 
@@ -270,14 +272,3 @@ class BrowserSession:
         except Exception:  # noqa: BLE001 - it is already broken; nothing to salvage
             pass
         self._client = None
-
-
-def _on_success(throttle: AdaptiveThrottle) -> None:
-    if throttle.delay > 0:
-        throttle.delay = max(0.0, throttle.delay * throttle.recover_factor - 0.01)
-
-
-def _on_throttle(throttle: AdaptiveThrottle) -> None:
-    throttle.delay = min(
-        throttle.max_delay, throttle.delay * throttle.backoff_factor + throttle.backoff_floor
-    )
