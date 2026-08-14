@@ -4,6 +4,7 @@
 #     deploy/update.sh            # deploy if origin/main moved
 #     deploy/update.sh --check    # say what a deploy would do, change nothing
 #     deploy/update.sh --force    # rebuild + restart even if already at head
+#     deploy/update.sh --poll     # unattended: skip on conditions a human would fix
 #
 # Runs *on the server box*. From a dev machine use deploy/deploy.sh, which is
 # just this script over ssh.
@@ -21,11 +22,13 @@ cd "$REPO"
 
 CHECK=0
 FORCE=0
+POLL=0
 for arg in "$@"; do
     case "$arg" in
         --check|-n) CHECK=1 ;;
         --force|-f) FORCE=1 ;;
-        *) echo "usage: $0 [--check] [--force]" >&2; exit 2 ;;
+        --poll)     POLL=1 ;;
+        *) echo "usage: $0 [--check] [--force] [--poll]" >&2; exit 2 ;;
     esac
 done
 
@@ -81,22 +84,56 @@ report_new_config_keys() {
     return 0
 }
 
+# In --poll the caller is a timer, not a person. A dirty tree or a failed fetch
+# is then a reason to come back in five minutes, not a failure: marking the unit
+# failed every tick for a condition only a human can clear turns `systemctl
+# --user status` into noise and hides the deploys that broke for real.
+skip_or_die() {
+    if [ "$POLL" -eq 1 ]; then
+        say "$1 — skipping this round"
+        exit 0
+    fi
+    die "$2"
+}
+
+# Serialise deploys. The timer and a manual `hf-deploy` can fire at the same
+# moment, and two of these interleaving over one working tree — mid-pull, mid
+# npm build, mid migration — is a bad afternoon. --check changes nothing, so it
+# does not queue behind a running deploy.
+# The lock lives in .git and not $TMPDIR, because a systemd unit and a login
+# shell do not necessarily agree on what $TMPDIR is — and two deploys each
+# holding their own private lock file is the same as no lock at all.
+if [ "$CHECK" -eq 0 ]; then
+    exec 9>"$REPO/.git/holafresca-deploy.lock"
+    flock -w 600 9 || die "another deploy has held the lock for 10 minutes; check on it."
+fi
+
 # --- refuse to deploy over local work -------------------------------------
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-    git status --short --untracked-files=no >&2
-    die "working tree has uncommitted changes — commit, stash or revert them first."
+    [ "$POLL" -eq 0 ] && git status --short --untracked-files=no >&2
+    skip_or_die "working tree has uncommitted changes" \
+                "working tree has uncommitted changes — commit, stash or revert them first."
 fi
 
 current_branch="$(git rev-parse --abbrev-ref HEAD)"
-[ "$current_branch" = "$BRANCH" ] || die "on branch '$current_branch', expected '$BRANCH'."
+[ "$current_branch" = "$BRANCH" ] || skip_or_die \
+    "on branch '$current_branch', not '$BRANCH'" \
+    "on branch '$current_branch', expected '$BRANCH'."
 
 # --- what would change? ----------------------------------------------------
 before="$(git rev-parse HEAD)"
-git fetch --quiet origin "$BRANCH"
+git fetch --quiet origin "$BRANCH" || skip_or_die \
+    "could not reach origin" "git fetch origin $BRANCH failed."
 target="$(git rev-parse FETCH_HEAD)"
 
-if [ "$before" = "$target" ] && [ "$FORCE" -eq 0 ]; then
-    say "already at $(git log --oneline -1 HEAD)"
+# "Already deployed" is not `before = target` — it is target being *contained in*
+# HEAD. Testing equality calls an unpushed local commit a deploy: nothing to
+# merge, but a pointless service restart, which is a silly way to bounce the
+# live site every five minutes.
+if [ "$FORCE" -eq 0 ] && git merge-base --is-ancestor "$target" "$before"; then
+    # Nothing to do is the timer's normal answer, ~288 times a day. Saying so
+    # every time buries the ticks that did something.
+    [ "$POLL" -eq 1 ] || say "already at $(git log --oneline -1 HEAD)"
     exit 0
 fi
 
@@ -133,7 +170,12 @@ fi
 # itself part-way through the pull. That is harmless — the explicit restart at
 # the end is what settles it on the final tree.
 say "pulling $BRANCH"
-git merge --ff-only --quiet "$target"
+# Diverged (a commit made on the box that origin does not have) is the other
+# thing only a human can untangle, so the timer leaves it alone rather than
+# failing every five minutes until someone notices.
+git merge --ff-only --quiet "$target" || skip_or_die \
+    "cannot fast-forward to origin/$BRANCH — the tree has diverged" \
+    "cannot fast-forward to origin/$BRANCH; the tree has diverged from origin."
 
 if [ "$deps" -eq 1 ]; then
     say "requirements.txt changed — installing python deps"

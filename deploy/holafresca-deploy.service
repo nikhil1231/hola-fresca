@@ -1,0 +1,20 @@
+[Unit]
+Description=HolaFresca deploy backstop (roll origin/main out to the live tree)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Documents/Programming/AI/HolaFresca
+# --poll: a dirty tree or an unreachable origin is a skip, not a failure, so a
+# `systemctl --user status` that says "failed" always means a deploy broke.
+ExecStart=%h/Documents/Programming/AI/HolaFresca/deploy/update.sh --poll
+# The frontend build is the long pole at a few seconds; ten minutes is generous
+# enough for a cold npm ci and short enough that a wedged deploy does not sit
+# holding the lock all day.
+TimeoutStartSec=10min
+# A deploy is never more urgent than whatever the box is already serving.
+Nice=10
+
+# No [Install]: this is driven by the timer, the same arrangement as
+# holafresca-testing-sync.service.

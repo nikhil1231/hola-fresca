@@ -1,0 +1,17 @@
+[Unit]
+Description=Poll origin/main for HolaFresca deploys
+
+[Timer]
+# Five minutes, not one: `hf-deploy` is the normal path and gets you there in
+# seconds, so this only has to cover the case where you cannot reach the box —
+# pushed from a phone, laptop shut, tailnet down. Nothing here is urgent enough
+# to fetch GitHub 1,440 times a day for.
+#
+# OnBootSec so a box that was off during a push catches up shortly after it
+# comes back, rather than waiting out the interval.
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=holafresca-deploy.service
+
+[Install]
+WantedBy=timers.target
