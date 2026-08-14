@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterator
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -49,6 +51,7 @@ class StandalonePrice:
     """What one recipe costs on its own, ignoring the rest of the week."""
 
     score: float
+    cost: float
     consumed_cost: float
     gap_count: int
 
@@ -71,6 +74,13 @@ class _Entry:
 def _db_path(factory: sessionmaker[Session]) -> Path | None:
     """The SQLite file a session factory is bound to, if it is one."""
     bind = getattr(factory, "kw", {}).get("bind")
+    database = getattr(getattr(bind, "url", None), "database", None)
+    return Path(database) if database else None
+
+
+def _session_db_path(session: Session) -> Path | None:
+    """The SQLite file used by ``session``, when it has one."""
+    bind = session.get_bind()
     database = getattr(getattr(bind, "url", None), "database", None)
     return Path(database) if database else None
 
@@ -183,6 +193,38 @@ def note_pack_preference(factory: sessionmaker[Session]) -> None:
             entry.fingerprint = _fingerprint(db, Path(key[3]) if key[3] else None)
 
 
+@contextmanager
+def preserve_after_personal_write(session: Session) -> Iterator[None]:
+    """Keep catalogue-derived caches across a write to user-owned tables.
+
+    SQLite exposes one modification time for the whole database, so a plan edit
+    looks exactly like a recipe, mapping, or product edit to the file watcher.
+    Plan rows cannot change the planner index or any score derived from it. This
+    context holds the cache lock across that small write and advances only cache
+    entries that were current immediately before it, preventing a concurrent
+    basket request from mistaking the plan commit for a catalogue change.
+
+    If an unobserved write had already moved the database, the entry fingerprint
+    will not match ``before`` and is deliberately left stale for the next read to
+    rebuild. CSV changes remain independently visible as well.
+    """
+    db = _session_db_path(session)
+    if db is None:
+        yield
+        return
+
+    with _LOCK:
+        before = _stat(db)
+        yield
+        after = _stat(db)
+        if after == before:
+            return
+        for key, entry in _CACHE.items():
+            if key[0] != str(db) or entry.fingerprint[0] != before:
+                continue
+            entry.fingerprint = (after, entry.fingerprint[1])
+
+
 def _preferences_key(pack_preferences: dict[str, str] | None) -> tuple[tuple[str, str], ...]:
     """A hashable, order-independent identity for one user's standing packs.
 
@@ -214,24 +256,7 @@ def get_standalone_prices(
     prefs = pack_preferences or {}
     with _LOCK:
         entry = _entry(factory, statuses, retailer, csv_path)
-        key = (servings, _preferences_key(prefs))
-        table = entry.standalone.get(key)
-        if table is None:
-            index = entry.index
-            table = {}
-            for recipe_id in index.recipes:
-                scored = score_basket(
-                    index,
-                    [Selection(recipe_id=recipe_id, servings=servings)],
-                    pack_preferences=prefs,
-                )
-                table[recipe_id] = StandalonePrice(
-                    score=scored.score,
-                    consumed_cost=scored.consumed_cost,
-                    gap_count=scored.gap_count,
-                )
-            entry.standalone[key] = table
-        return table
+        return _standalone_prices(entry, servings, prefs)
 
 
 def get_ranking(
@@ -266,8 +291,37 @@ def get_ranking(
                 candidate_ids,
                 candidate_portions=candidate_portions,
                 pack_preferences=prefs,
+                standalone_prices=_standalone_prices(
+                    entry, candidate_portions, prefs
+                ),
             )
             entry.rankings[key] = ranked
             while len(entry.rankings) > MAX_RANKINGS:
                 entry.rankings.pop(next(iter(entry.rankings)))
         return ranked
+
+
+def _standalone_prices(
+    entry: _Entry,
+    servings: int,
+    pack_preferences: dict[str, str],
+) -> dict[int, StandalonePrice]:
+    """Return the shared standalone table while the caller holds ``_LOCK``."""
+    key = (servings, _preferences_key(pack_preferences))
+    table = entry.standalone.get(key)
+    if table is None:
+        table = {}
+        for recipe_id in entry.index.recipes:
+            scored = score_basket(
+                entry.index,
+                [Selection(recipe_id=recipe_id, servings=servings)],
+                pack_preferences=pack_preferences,
+            )
+            table[recipe_id] = StandalonePrice(
+                score=scored.score,
+                cost=scored.cost,
+                consumed_cost=scored.consumed_cost,
+                gap_count=scored.gap_count,
+            )
+        entry.standalone[key] = table
+    return table
