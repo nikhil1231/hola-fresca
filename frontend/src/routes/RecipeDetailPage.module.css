@@ -583,7 +583,7 @@
 .desktopTitle {
   max-width: 680px;
   color: var(--hf-text);
-  font-size: clamp(2rem, 3vw, 3.15rem);
+  font-size: var(--hf-page-title-size);
   line-height: 1.08;
   letter-spacing: -0.045em;
   text-wrap: balance;
@@ -778,7 +778,7 @@
   }
 
   .title {
-    font-size: clamp(1.55rem, 7vw, 1.9rem);
+    font-size: var(--hf-page-title-size-mobile);
     line-height: 1.04;
     letter-spacing: -0.04em;
   }

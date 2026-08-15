@@ -116,7 +116,7 @@
 }
 
 .summaryTitle {
-  font-size: 2.05rem;
+  font-size: var(--hf-page-title-size);
   font-weight: 600;
   line-height: 1;
 }
@@ -622,7 +622,7 @@
   }
 
   .mobilePageTitle {
-    font-size: 2.25rem;
+    font-size: var(--hf-page-title-size-mobile);
   }
 
   .mobileWeekSelect {

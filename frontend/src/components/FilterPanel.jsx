@@ -46,23 +46,35 @@ function ChipFilter({ options, selected, onToggle }) {
   )
 }
 
-export default function FilterPanel({ facets, filters, setScalar, setArray, toggleArrayValue, clearAll }) {
+export default function FilterPanel({
+  facets,
+  filters,
+  setScalar,
+  setArray,
+  toggleArrayValue,
+  clearAll,
+  showHeading = true,
+}) {
   if (!facets) return null
   const ranges = facets.ranges
   const activeCount = countActiveFilters(filters)
 
   return (
     <Stack gap="sm">
-      <Group justify="space-between" wrap="nowrap">
-        <Text fw={700} size="sm">
-          Filters
-        </Text>
-        {activeCount > 0 && (
-          <Button variant="subtle" color="gray" size="xs" onClick={clearAll}>
-            Clear all ({activeCount})
-          </Button>
-        )}
-      </Group>
+      {(showHeading || activeCount > 0) && (
+        <Group justify={showHeading ? 'space-between' : 'flex-end'} wrap="nowrap">
+          {showHeading && (
+            <Text fw={700} size="sm">
+              Filters
+            </Text>
+          )}
+          {activeCount > 0 && (
+            <Button variant="subtle" color="gray" size="xs" onClick={clearAll}>
+              Clear all ({activeCount})
+            </Button>
+          )}
+        </Group>
+      )}
 
       {filters.q && (
         <div>

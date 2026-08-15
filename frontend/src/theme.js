@@ -19,13 +19,22 @@ export const theme = createTheme({
   colors: { fresh },
   primaryShade: { light: 6, dark: 5 },
   defaultRadius: 'lg',
+  spacing: {
+    xs: '0.5rem',
+    sm: '0.75rem',
+    md: '1rem',
+    lg: '1.5rem',
+    xl: '2rem',
+  },
   fontFamily:
     'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   headings: {
     fontWeight: '800',
     sizes: {
-      h1: { fontSize: 'clamp(2.35rem, 5vw, 4.1rem)', lineHeight: '0.98' },
-      h2: { fontSize: 'clamp(2rem, 3vw, 3rem)', lineHeight: '1.05' },
+      h1: { fontSize: '2rem', lineHeight: '1.15' },
+      h2: { fontSize: '1.5rem', lineHeight: '1.2' },
+      h3: { fontSize: '1.25rem', lineHeight: '1.25' },
+      h4: { fontSize: '1rem', lineHeight: '1.3' },
     },
   },
   defaultGradient: { from: 'fresh.5', to: 'fresh.6', deg: 135 },

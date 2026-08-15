@@ -20,7 +20,6 @@ import {
   Tabs,
   Text,
   TextInput,
-  Title,
 } from '@mantine/core'
 import { IconSnowflake } from '@tabler/icons-react'
 
@@ -39,6 +38,7 @@ import {
 } from '../hooks/useMappingQueries.js'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
 import RetailerChip from '../components/RetailerChip.jsx'
+import PageHeader from '../components/PageHeader.jsx'
 import {
   canonicalUnitPriceBasis,
   comparisonDescription,
@@ -209,17 +209,24 @@ export default function MappingReviewPage() {
 
   if (isLoading) {
     return (
-      <Group justify="center" py="xl">
-        <Loader />
-      </Group>
+      <Stack gap="xl">
+        <PageHeader
+          backLink={{ to: `/mapping${location.search}`, label: 'Back to mappings' }}
+          title="Ingredient mapping"
+        />
+        <Group justify="center" py="xl">
+          <Loader />
+        </Group>
+      </Stack>
     )
   }
   if (isError || !data) {
     return (
-      <Stack>
-        <Anchor component={Link} to={`/mapping${location.search}`}>
-          ← Back to mappings
-        </Anchor>
+      <Stack gap="xl">
+        <PageHeader
+          backLink={{ to: `/mapping${location.search}`, label: 'Back to mappings' }}
+          title="Ingredient mapping"
+        />
         <Alert color="red">This ingredient has no cached product candidates.</Alert>
       </Stack>
     )
@@ -414,77 +421,75 @@ export default function MappingReviewPage() {
   }
 
   return (
-    <Stack gap="lg">
-      <Group justify="space-between">
-        <Anchor component={Link} to={`/mapping${location.search}`}>
-          ← Back to mappings
-          {browseStatus ? ` (${browseStatus.replace('_', ' ')})` : ''}
-        </Anchor>
-        {/* Flick through the list being browsed without going back to it. */}
-        <Group gap="xs">
-          <ActionIcon
-            variant="default"
-            aria-label="Previous ingredient"
-            disabled={!nav.prev}
-            onClick={() => nav.prev && navigate(to(nav.prev))}
-          >
-            ←
-          </ActionIcon>
-          <Text size="sm" c="dimmed" w={90} ta="center">
-            {nav.idx >= 0 ? `${nav.idx + 1} of ${nav.total}` : `${nav.total} items`}
-          </Text>
-          <ActionIcon
-            variant="default"
-            aria-label="Next ingredient"
-            disabled={!nav.next}
-            onClick={() => nav.next && navigate(to(nav.next))}
-          >
-            →
-          </ActionIcon>
-        </Group>
-      </Group>
-
-      <Paper withBorder radius="md" p="md" className={classes.summaryPanel}>
-        <div className={classes.summaryHeader}>
-          <Group align="flex-start" gap="md" wrap="nowrap" className={classes.identityGroup}>
-            <div className={classes.ingredientIcon}>
-              {data.ingredient_icon_url ? (
-                <Image src={data.ingredient_icon_url} alt="" fit="contain" h="100%" w="100%" />
-              ) : (
-                <Text fw={800} size="xl">{data.name.slice(0, 1).toUpperCase()}</Text>
+    <Stack gap="xl">
+      <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }} className={classes.summaryPanel}>
+        <PageHeader
+          className={classes.summaryHeader}
+          backLink={{
+            to: `/mapping${location.search}`,
+            label: `Back to mappings${browseStatus ? ` (${browseStatus.replace('_', ' ')})` : ''}`,
+          }}
+          title={data.name}
+          icon={data.ingredient_icon_url ? (
+            <Image src={data.ingredient_icon_url} alt="" fit="contain" h="72%" w="72%" />
+          ) : (
+            <Text fw={800} size="lg">{data.name.slice(0, 1).toUpperCase()}</Text>
+          )}
+          badge={(
+            <Group gap="xs" wrap="wrap">
+              <RetailerChip />
+              {data.status && (
+                <Badge
+                  className={`${classes.reviewStatus} ${STATUS_BADGE_CLASSES[data.status] ?? ''}`}
+                  size="lg"
+                  variant="light"
+                  data-darkreader-ignore
+                >
+                  {data.status.replace('_', ' ')}
+                </Badge>
               )}
-            </div>
-            <div className={classes.titleBlock}>
-              <Group gap="xs" align="center">
-                <Title order={3} className={classes.ingredientTitle}>
-                  {data.name}
-                </Title>
-                <RetailerChip />
-                {data.status && (
-                  <Badge
-                    className={`${classes.reviewStatus} ${STATUS_BADGE_CLASSES[data.status] ?? ''}`}
-                    size="lg"
-                    variant="light"
-                    data-darkreader-ignore
-                  >
-                    {data.status.replace('_', ' ')}
-                  </Badge>
-                )}
-              </Group>
-              <Text c="dimmed" size="sm">
+            </Group>
+          )}
+          description={(
+            <Stack gap={2}>
+              <span>
                 Used in {data.line_count.toLocaleString('en-GB')} recipe lines
                 {u.median != null && ` - typically ${u.median}${u.metric_unit ?? 'g'}`}
                 {u.p25 != null && u.p75 != null && ` (${u.p25}-${u.p75})`}
-              </Text>
+              </span>
               {u.common_native_amounts && (
-                <Text c="dimmed" size="xs">
-                  common amounts: {u.common_native_amounts}
-                </Text>
+                <span>Common amounts: {u.common_native_amounts}</span>
               )}
-            </div>
-          </Group>
-          {!isAlias && actionButtons({ header: true })}
-        </div>
+            </Stack>
+          )}
+          actions={(
+            <Stack gap="sm" align="flex-end">
+              {/* Flick through the list being browsed without going back to it. */}
+              <Group gap="xs" wrap="nowrap">
+                <ActionIcon
+                  variant="default"
+                  aria-label="Previous ingredient"
+                  disabled={!nav.prev}
+                  onClick={() => nav.prev && navigate(to(nav.prev))}
+                >
+                  ←
+                </ActionIcon>
+                <Text size="sm" c="dimmed" w={90} ta="center">
+                  {nav.idx >= 0 ? `${nav.idx + 1} of ${nav.total}` : `${nav.total} items`}
+                </Text>
+                <ActionIcon
+                  variant="default"
+                  aria-label="Next ingredient"
+                  disabled={!nav.next}
+                  onClick={() => nav.next && navigate(to(nav.next))}
+                >
+                  →
+                </ActionIcon>
+              </Group>
+              {!isAlias && actionButtons({ header: true })}
+            </Stack>
+          )}
+        />
 
         <div className={classes.reviewGrid}>
           <div className={classes.reviewCell}>
@@ -584,7 +589,7 @@ export default function MappingReviewPage() {
         <Paper
           withBorder
           radius="md"
-          p="md"
+          p={{ base: 'md', sm: 'lg' }}
           className={`${classes.mappingSurface} ${!data.llm_notes ? classes.searchOnly : ''}`}
         >
           <Group align="flex-end" gap="sm" wrap="nowrap" className={classes.searchControls}>
@@ -673,7 +678,7 @@ export default function MappingReviewPage() {
       </Group>
 
       {sourcingManually && (
-        <Paper withBorder radius="md" p="md">
+        <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
           <Text fw={600} mb={4}>
             Buy this somewhere else
           </Text>

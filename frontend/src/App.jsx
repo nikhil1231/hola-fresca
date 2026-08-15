@@ -3,6 +3,7 @@ import { AppShell, Container, Text } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 
 import Header from './components/Header.jsx'
+import AppContainer from './components/AppContainer.jsx'
 import { useLocalPlanImport } from './hooks/useLocalPlanImport.js'
 
 const PAGE_LAST_UPDATED =
@@ -66,8 +67,6 @@ function App() {
     cooking ||
     (pathname === '/basket' && mobileBasketLayout) ||
     (recipeDetail && compactRecipeLayout)
-  const home = pathname === '/'
-
   return (
     <AppShell header={immersive ? undefined : { height: 64 }} padding={0}>
       {!immersive && (
@@ -76,15 +75,16 @@ function App() {
         </AppShell.Header>
       )}
       <AppShell.Main>
-        <Container
-          fluid={immersive || home}
-          size={immersive || home ? undefined : 'xl'}
-          px={immersive ? 0 : home ? { base: 18, sm: 32 } : { base: 24, sm: 'xl' }}
-          py={immersive ? 0 : { base: 'lg', sm: 'xl' }}
-        >
-          <Outlet />
-          {!immersive && <LastUpdatedFooter />}
-        </Container>
+        {immersive ? (
+          <Container fluid px={0} py={0}>
+            <Outlet />
+          </Container>
+        ) : (
+          <AppContainer py={{ base: 'lg', sm: 'xl' }}>
+            <Outlet />
+            <LastUpdatedFooter />
+          </AppContainer>
+        )}
       </AppShell.Main>
     </AppShell>
   )

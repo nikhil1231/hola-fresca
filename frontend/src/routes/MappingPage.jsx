@@ -17,7 +17,6 @@ import {
   Table,
   Text,
   TextInput,
-  Title,
 } from '@mantine/core'
 
 import {
@@ -29,6 +28,7 @@ import {
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
 import RetailerChip from '../components/RetailerChip.jsx'
+import PageHeader from '../components/PageHeader.jsx'
 
 const STATUS_COLORS = {
   proposed: 'blue',
@@ -180,28 +180,31 @@ export default function MappingPage() {
   )
 
   return (
-    <Stack gap="lg">
-      <div>
-        <Group gap="xs" align="center">
-          <Title order={2}>Ingredient {'\u2192'} product mapping</Title>
-          <RetailerChip />
-        </Group>
-        <Text c="dimmed">
-          Confirm which {retailerLabel ?? 'retailer'} products each ingredient maps to. Sorted by
-          spend impact - review the top rows carefully; the obvious tail can be bulk-approved.
-          Each shop has its own queue, so approving here says nothing about the other.
-        </Text>
-        <Group gap="lg">
-          <Anchor component={Link} to="/mapping/aliases" size="sm">
-            Manage aliases {'\u2192'}
-          </Anchor>
-          <Anchor component={Link} to="/mapping/manual" size="sm">
-            Manually sourced products {'\u2192'}
-          </Anchor>
-        </Group>
-      </div>
+    <Stack gap="xl">
+      <PageHeader
+        title={<>Ingredient {'\u2192'} product mapping</>}
+        badge={<RetailerChip />}
+        description={(
+          <Stack gap="xs">
+            <span>
+              Confirm which {retailerLabel ?? 'retailer'} products each ingredient maps to. Sorted
+              by spend impact - review the top rows carefully; the obvious tail can be
+              bulk-approved. Each shop has its own queue, so approving here says nothing about the
+              other.
+            </span>
+            <Group gap="lg">
+              <Anchor component={Link} to="/mapping/aliases" size="sm">
+                Manage aliases {'\u2192'}
+              </Anchor>
+              <Anchor component={Link} to="/mapping/manual" size="sm">
+                Manually sourced products {'\u2192'}
+              </Anchor>
+            </Group>
+          </Stack>
+        )}
+      />
 
-      <Paper withBorder radius="md" p="md">
+      <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
         {statsIsError && (
           <Alert color="red" variant="light" mb="sm" title="Couldn't load coverage stats">
             {statsError?.message}

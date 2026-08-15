@@ -3,7 +3,6 @@ import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-
 import {
   ActionIcon,
   Box,
-  Container,
   Drawer,
   Group,
   Stack,
@@ -14,6 +13,7 @@ import {
 import { IconMenu2, IconSearch, IconSettings, IconX } from '@tabler/icons-react'
 
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
+import AppContainer from './AppContainer.jsx'
 import classes from './Header.module.css'
 
 // Debounced search box that writes ?q= and lands on the browse page. It carries
@@ -60,7 +60,7 @@ export default function Header() {
 
   return (
     <Box className={classes.header}>
-      <Container size="xl" h="100%">
+      <AppContainer h="100%">
         <Group h="100%" justify="space-between" wrap="nowrap" visibleFrom="md">
           <Group gap="xl" wrap="nowrap">
             <Title order={3} component={Link} to="/" className={classes.logo}>
@@ -145,7 +145,7 @@ export default function Header() {
             </>
           )}
         </Group>
-      </Container>
+      </AppContainer>
 
       <Drawer
         opened={menuOpen}
@@ -164,6 +164,9 @@ export default function Header() {
           </NavLink>
           <NavLink to="/basket" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Basket
+          </NavLink>
+          <NavLink to="/mapping" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
+            Mapping
           </NavLink>
           <NavLink to="/settings" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Settings

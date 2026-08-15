@@ -11,10 +11,10 @@ import {
   Stack,
   Table,
   Text,
-  Title,
 } from '@mantine/core'
 
 import ManualProductForm from '../components/ManualProductForm.jsx'
+import PageHeader from '../components/PageHeader.jsx'
 import {
   useDeleteManualProduct,
   useManualProducts,
@@ -121,20 +121,19 @@ export default function MappingManualPage() {
   const items = data?.items ?? []
 
   return (
-    <Stack gap="lg">
-      <Anchor component={Link} to="/mapping">
-        ← Back to mappings
-      </Anchor>
-
-      <div>
-        <Title order={2}>Manually sourced products</Title>
-        <Text c="dimmed">
+    <Stack gap="xl">
+      <PageHeader
+        backLink={{ to: '/mapping', label: 'Back to mappings' }}
+        title="Manually sourced products"
+        description={(
+          <span>
           For ingredients no supermarket sells — HelloFresh's own spice blends, specialist items.
           Recording a price and pack size keeps them in the basket maths: an unmapped ingredient
           costs nothing, which would quietly make the planner favour the recipes using it. These
           are listed separately from the online order.
-        </Text>
-      </div>
+          </span>
+        )}
+      />
 
       <Group>
         <Button variant={adding ? 'default' : 'filled'} onClick={() => setAdding((v) => !v)}>

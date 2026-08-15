@@ -21,6 +21,13 @@
   --hf-radius: 28px;
   --hf-radius-sm: 14px;
   --hf-shadow: 0 20px 60px rgba(0, 0, 0, 0.38);
+  --hf-content-max: 90rem;
+  --hf-page-title-size: 2rem;
+  --hf-page-title-size-mobile: 1.75rem;
+  --hf-section-title-size: 1.5rem;
+  --hf-panel-title-size: 1.25rem;
+  --hf-supporting-text-size: 0.875rem;
+  --hf-caption-text-size: 0.75rem;
 }
 
 html {
@@ -30,6 +37,7 @@ html {
 body {
   margin: 0;
   min-width: 320px;
+  overflow-x: clip;
   background:
     radial-gradient(circle at 50% -20%, rgba(72, 101, 66, 0.14), transparent 42%),
     var(--hf-bg);

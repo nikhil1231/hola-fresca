@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { Anchor, Button, Group, Loader, Stack, Table, Text, Title } from '@mantine/core'
+import { Anchor, Button, Group, Loader, Stack, Table, Text } from '@mantine/core'
 
+import PageHeader from '../components/PageHeader.jsx'
 import { useAliases, useSetAlias } from '../hooks/useMappingQueries.js'
 
 function AliasRow({ row }) {
@@ -36,19 +37,18 @@ export default function MappingAliasesPage() {
   const items = data?.items ?? []
 
   return (
-    <Stack gap="lg">
-      <Anchor component={Link} to="/mapping">
-        ← Back to mappings
-      </Anchor>
-
-      <div>
-        <Title order={2}>Ingredient aliases</Title>
-        <Text c="dimmed">
+    <Stack gap="xl">
+      <PageHeader
+        backLink={{ to: '/mapping', label: 'Back to mappings' }}
+        title="Ingredient aliases"
+        description={(
+          <span>
           Near-duplicate ingredients linked onto one mapping. Aliases inherit the canonical
           ingredient's products, and recipe demand for both is summed onto the same pack instead of
           being bought twice.
-        </Text>
-      </div>
+          </span>
+        )}
+      />
 
       {isLoading ? (
         <Group justify="center" py="xl">

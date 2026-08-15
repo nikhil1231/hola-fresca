@@ -40,6 +40,7 @@ import {
   formatProteinModifier,
   useWeeklyPlan,
 } from '../hooks/useWeeklyPlan.js'
+import PageHeader from '../components/PageHeader.jsx'
 import classes from './HomePage.module.css'
 
 const STATUS_BADGE = {
@@ -254,30 +255,26 @@ export default function HomePage() {
   const paused = Boolean(settings?.paused)
   const recipesPerWeek = settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
 
+  const scheduleDescription = settings ? (
+    `${cadenceLabel(settings.cadence_weeks)} · recipes settled by ${
+      settings.cutoff_days_before === 0
+        ? `the start of the week, ${settings.cutoff_time}`
+        : `${settings.cutoff_days_before} ${
+            settings.cutoff_days_before === 1 ? 'day' : 'days'
+          } before, ${settings.cutoff_time}`
+    }`
+  ) : (
+    <Skeleton height={16} width={280} />
+  )
+
   return (
-    <Stack gap="lg" className={classes.pageStack}>
-      <Group justify="space-between" wrap="nowrap" className={classes.pageHeader}>
-        <Group gap="sm" wrap="nowrap" className={classes.headerIntro}>
-          <Box className={classes.headerIcon}>
-            <IconCalendarWeek size={20} />
-          </Box>
-          <div>
-            <Title order={2} className={classes.pageTitle}>Your shops</Title>
-          {settings ? (
-            <Text c="dimmed" size="sm" className={classes.scheduleSummary}>
-              {cadenceLabel(settings.cadence_weeks)} · recipes settled by{' '}
-              {settings.cutoff_days_before === 0
-                ? `the start of the week, ${settings.cutoff_time}`
-                : `${settings.cutoff_days_before} ${
-                    settings.cutoff_days_before === 1 ? 'day' : 'days'
-                  } before, ${settings.cutoff_time}`}
-            </Text>
-          ) : (
-            <Skeleton height={16} width={280} mt={4} />
-          )}
-          </div>
-        </Group>
-        <Group gap="xs" wrap="nowrap" className={classes.headerActions}>
+    <Stack gap={{ base: 'lg', sm: 'xl' }} className={classes.pageStack}>
+      <PageHeader
+        title="Your shops"
+        description={scheduleDescription}
+        icon={<IconCalendarWeek size={22} />}
+        actions={(
+          <Group gap="xs" wrap="nowrap" className={classes.headerActions}>
           <Button
             variant={paused ? 'filled' : 'default'}
             color={paused ? 'fresh' : 'gray'}
@@ -302,8 +299,9 @@ export default function HomePage() {
               <IconSettings size={18} />
             </ActionIcon>
           </Tooltip>
-        </Group>
-      </Group>
+          </Group>
+        )}
+      />
 
       {paused && (
         <Alert color="gray" variant="light" icon={<IconPlayerPause size={18} />}>

@@ -1,38 +1,6 @@
 .pageStack {
   width: 100%;
-  max-width: 1480px;
-  margin-inline: auto;
   padding-bottom: var(--mantine-spacing-xl);
-}
-
-.pageHeader {
-  align-items: center;
-  row-gap: var(--mantine-spacing-sm);
-}
-
-.headerIntro {
-  min-width: 0;
-}
-
-.headerIcon {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  flex: none;
-  place-items: center;
-  border-radius: 11px;
-  color: var(--hf-accent);
-  background: color-mix(in srgb, var(--hf-accent) 12%, var(--hf-surface));
-}
-
-.pageTitle {
-  font-size: 1.35rem;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-}
-
-.scheduleSummary {
-  margin-top: 1px;
 }
 
 .weekRow {
@@ -250,30 +218,6 @@
 }
 
 @media (max-width: 48em) {
-  .pageStack {
-    gap: var(--mantine-spacing-md);
-  }
-
-  .pageHeader {
-    align-items: flex-start;
-  }
-
-  .headerIcon {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-  }
-
-  .pageTitle {
-    font-size: 1.05rem;
-  }
-
-  .scheduleSummary {
-    max-width: 230px;
-    font-size: 0.72rem;
-    line-height: 1.25;
-  }
-
   .headerActions > button {
     height: 34px;
     padding-inline: 12px;
@@ -346,14 +290,6 @@
 }
 
 @media (max-width: 25em) {
-  .scheduleSummary {
-    display: none;
-  }
-
-  .headerIcon {
-    display: none;
-  }
-
   .weekRowWithMeals {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:

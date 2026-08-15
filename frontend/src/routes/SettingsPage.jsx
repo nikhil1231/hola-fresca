@@ -19,6 +19,7 @@ import {
 } from '@mantine/core'
 import { IconAlertCircle, IconDeviceFloppy, IconSettings } from '@tabler/icons-react'
 
+import PageHeader from '../components/PageHeader.jsx'
 import {
   formatWeekRange,
   useSchedule,
@@ -87,7 +88,7 @@ function WhereYouShop() {
 
   if (isPending) {
     return (
-      <Paper withBorder radius="md" p="lg">
+      <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
         <Group gap="sm">
           <Loader size="sm" color="fresh" />
           <Text size="sm" c="dimmed">
@@ -110,7 +111,7 @@ function WhereYouShop() {
   const active = items.find((item) => item.id === data?.active)
 
   return (
-    <Paper withBorder radius="md" p="lg">
+    <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
       <Stack gap="md">
         <div>
           <Title order={4}>Where you shop</Title>
@@ -183,33 +184,39 @@ export default function SettingsPage() {
     setDraft((current) => ({ ...current, [key]: value }))
   }
 
+  const pageHeader = (
+    <PageHeader
+      title="Settings"
+      description="Where you shop, how often, and when each week's recipes have to be settled."
+      icon={<IconSettings size={22} />}
+    />
+  )
+
   if (isError) {
     return (
-      <Alert color="red" title="Couldn't load settings" icon={<IconAlertCircle size={18} />}>
-        {error?.message ?? 'Please check the backend is running and try again.'}
-      </Alert>
+      <Stack gap="xl" maw={720}>
+        {pageHeader}
+        <Alert color="red" title="Couldn't load settings" icon={<IconAlertCircle size={18} />}>
+          {error?.message ?? 'Please check the backend is running and try again.'}
+        </Alert>
+      </Stack>
     )
   }
 
   if (isLoading || !draft) {
     return (
-      <Group justify="center" py="xl">
-        <Loader color="fresh" />
-      </Group>
+      <Stack gap="xl" maw={720}>
+        {pageHeader}
+        <Group justify="center" py="xl">
+          <Loader color="fresh" />
+        </Group>
+      </Stack>
     )
   }
 
   return (
-    <Stack gap="lg" maw={720}>
-      <div>
-        <Group gap="xs">
-          <IconSettings size={28} color="var(--mantine-color-fresh-7)" />
-          <Title order={2}>Settings</Title>
-        </Group>
-        <Text c="dimmed" size="sm">
-          Where you shop, how often, and when each week's recipes have to be settled.
-        </Text>
-      </div>
+    <Stack gap="xl" maw={720}>
+      {pageHeader}
 
       {updateSettings.error && (
         <Alert color="red" icon={<IconAlertCircle size={18} />}>
@@ -219,7 +226,7 @@ export default function SettingsPage() {
 
       <WhereYouShop />
 
-      <Paper withBorder radius="md" p="lg">
+      <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
         <Stack gap="md">
           <Title order={4}>Shopping rhythm</Title>
 
@@ -311,7 +318,7 @@ export default function SettingsPage() {
         </Stack>
       </Paper>
 
-      <Paper withBorder radius="md" p="lg">
+      <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
         <Stack gap="md">
           <Title order={4}>Basket choices</Title>
           <NumberInput
@@ -355,7 +362,7 @@ export default function SettingsPage() {
         </Button>
       </Group>
 
-      <Paper withBorder radius="md" p="lg">
+      <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
         <Title order={4} mb="xs">
           Next shops
         </Title>
