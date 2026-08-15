@@ -45,6 +45,8 @@ def configured(monkeypatch, signing_key, factory):
     monkeypatch.setattr("app.config.ACCESS_AUD", AUD)
     monkeypatch.setattr("app.config.ACCESS_HOSTNAME", HOSTNAME)
     monkeypatch.setattr("app.config.ACCESS_OWNER_EMAIL", OWNER)
+    monkeypatch.setattr("app.config.LOCAL_USER_NAME", "Local Nikhil")
+    monkeypatch.setattr("app.config.LOCAL_USER_EMAIL", "local@example.test")
 
     class _Key:
         key = signing_key.public_key()
@@ -68,20 +70,24 @@ def make_token(
     signing_key,
     *,
     email: str = OWNER,
+    name: str | None = None,
     aud: str = AUD,
     issuer: str = f"https://{TEAM}",
     expires_in: timedelta = timedelta(hours=1),
 ) -> str:
     now = datetime.now(timezone.utc)
+    payload = {
+        "email": email,
+        "aud": aud,
+        "iss": issuer,
+        "iat": now,
+        "exp": now + expires_in,
+        "sub": "some-access-user-id",
+    }
+    if name is not None:
+        payload["name"] = name
     return jwt.encode(
-        {
-            "email": email,
-            "aud": aud,
-            "iss": issuer,
-            "iat": now,
-            "exp": now + expires_in,
-            "sub": "some-access-user-id",
-        },
+        payload,
         signing_key,
         algorithm="RS256",
     )
@@ -100,6 +106,23 @@ def test_lan_request_without_an_assertion_is_the_bootstrap_user(configured):
     """The laptop still answers on its own address, as it did before Access."""
     client = TestClient(main.app)
     assert get(client, host="192.168.1.50:8100").status_code == 200
+
+
+def test_lan_account_uses_mock_identity_without_persisting_it(configured):
+    response = TestClient(main.app).get(
+        "/api/account", headers={"Host": "192.168.1.50:8100"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "email": "local@example.test",
+        "name": "Local Nikhil",
+        "access_authenticated": False,
+        "logout_url": None,
+    }
+    with configured() as session:
+        user = session.scalar(select(User).order_by(User.id).limit(1))
+        assert (user.email, user.name) == (None, None)
 
 
 def test_tunnel_request_without_an_assertion_is_refused(configured):
@@ -129,6 +152,58 @@ def test_valid_assertion_is_accepted(configured, signing_key):
     response = get(client, host=HOSTNAME, token=make_token(signing_key))
 
     assert response.status_code == 200
+
+
+def test_account_returns_and_stores_name_from_access_claim(configured, signing_key):
+    client = TestClient(main.app)
+    response = client.get(
+        "/api/account",
+        headers={"Host": HOSTNAME, "Cf-Access-Jwt-Assertion": make_token(
+            signing_key, name="Nikhil Kunde"
+        )},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "email": OWNER,
+        "name": "Nikhil Kunde",
+        "access_authenticated": True,
+        "logout_url": "/cdn-cgi/access/logout",
+    }
+    with configured() as session:
+        assert session.scalar(select(User).where(User.email == OWNER)).name == "Nikhil Kunde"
+
+
+def test_account_gets_name_from_full_cloudflare_identity(
+    configured, signing_key, monkeypatch
+):
+    seen = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"email": OWNER, "name": "Nikhil Kunde"}
+
+    def get_identity(url, *, cookies, timeout):
+        seen.update(url=url, cookies=cookies, timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr(access.httpx, "get", get_identity)
+    token = make_token(signing_key)
+    response = TestClient(main.app).get(
+        "/api/account",
+        headers={"Host": HOSTNAME, "Cf-Access-Jwt-Assertion": token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Nikhil Kunde"
+    assert seen == {
+        "url": f"https://{TEAM}/cdn-cgi/access/get-identity",
+        "cookies": {"CF_Authorization": token},
+        "timeout": 5.0,
+    }
 
 
 def test_assertion_may_arrive_as_a_cookie(configured, signing_key):
@@ -217,6 +292,8 @@ def test_access_unconfigured_changes_nothing(monkeypatch, factory):
     """Local dev and the test suite: no team domain, no enforcement anywhere."""
     monkeypatch.setattr("app.config.ACCESS_TEAM_DOMAIN", None)
     monkeypatch.setattr("app.config.ACCESS_AUD", None)
+    monkeypatch.setattr("app.config.LOCAL_USER_NAME", "Local Nikhil")
+    monkeypatch.setattr("app.config.LOCAL_USER_EMAIL", "local@example.test")
 
     def override():
         with factory() as session:
@@ -229,5 +306,11 @@ def test_access_unconfigured_changes_nothing(monkeypatch, factory):
         # attached, because nothing is being checked.
         assert get(client, host=HOSTNAME).status_code == 200
         assert get(client, host=HOSTNAME, token="not-a-jwt").status_code == 200
+        assert client.get("/api/account").json() == {
+            "email": "local@example.test",
+            "name": "Local Nikhil",
+            "access_authenticated": False,
+            "logout_url": None,
+        }
     finally:
         main.app.dependency_overrides.clear()

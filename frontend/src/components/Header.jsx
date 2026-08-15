@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
+  Avatar,
   Box,
   Drawer,
   Group,
@@ -10,9 +11,11 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core'
-import { IconMenu2, IconSearch, IconSettings, IconX } from '@tabler/icons-react'
+import { IconMenu2, IconSearch, IconX } from '@tabler/icons-react'
 
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
+import { useAccount } from '../hooks/useAccount.js'
+import { accountInitials } from '../utils/account.js'
 import AppContainer from './AppContainer.jsx'
 import classes from './Header.module.css'
 
@@ -50,6 +53,7 @@ function SearchBox({ autoFocus = false, fluid = false, onEscape }) {
 
 export default function Header() {
   const { pathname } = useLocation()
+  const { data: account } = useAccount()
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
 
@@ -83,17 +87,18 @@ export default function Header() {
           </Group>
           <Group gap="sm" wrap="nowrap">
             {pathname === '/browse' && <SearchBox />}
-            <Tooltip label="Settings" withArrow>
-              <ActionIcon
-                component={NavLink}
+            <Tooltip label={accountLabel(account)} withArrow>
+              <Avatar
+                component={Link}
                 to="/settings"
-                variant="subtle"
-                color="gray"
-                size="lg"
-                aria-label="Settings"
+                color="fresh"
+                variant={pathname === '/settings' ? 'filled' : 'light'}
+                size={38}
+                className={classes.accountAvatar}
+                aria-label={accountLabel(account)}
               >
-                <IconSettings size={20} />
-              </ActionIcon>
+                {accountInitials(account)}
+              </Avatar>
             </Tooltip>
           </Group>
         </Group>
@@ -131,6 +136,17 @@ export default function Header() {
                     <IconSearch size={22} />
                   </ActionIcon>
                 )}
+                <Avatar
+                  component={Link}
+                  to="/settings"
+                  color="fresh"
+                  variant={pathname === '/settings' ? 'filled' : 'light'}
+                  size={36}
+                  className={classes.accountAvatar}
+                  aria-label={accountLabel(account)}
+                >
+                  {accountInitials(account)}
+                </Avatar>
                 <ActionIcon
                   variant="subtle"
                   color="gray"
@@ -175,6 +191,12 @@ export default function Header() {
       </Drawer>
     </Box>
   )
+}
+
+function accountLabel(account) {
+  if (account?.name) return `Account settings for ${account.name}`
+  if (account?.email) return `Account settings for ${account.email}`
+  return 'Account settings'
 }
 
 function navClass({ isActive }) {

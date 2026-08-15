@@ -195,6 +195,15 @@ policy, not a database chore. New accounts are never admin. The one exception is
 `HOLAFRESCA_ACCESS_OWNER_EMAIL`, whose first sign-in *claims* the bootstrap row
 rather than starting a second account beside years of plan history.
 
+The account UI uses two identity providers with one response shape. Requests
+through the public hostname verify Access's signed application JWT, use its
+email to select the user, and fetch the Google-backed display name from
+Cloudflare's `get-identity` endpoint. Localhost/LAN requests never pass through
+Access, so they show the presentation-only `HOLAFRESCA_LOCAL_USER_NAME` and
+`HOLAFRESCA_LOCAL_USER_EMAIL` values instead. Those local values do not select a
+database row, are not persisted, and grant no permissions; the request remains
+the bootstrap user selected by `get_current_user`.
+
 ```sh
 systemctl --user status cloudflared.service
 journalctl --user -u cloudflared.service -f      # connections, reconnects

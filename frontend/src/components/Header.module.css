@@ -33,6 +33,19 @@
   border-bottom-color: var(--hf-accent);
 }
 
+.accountAvatar {
+  text-decoration: none;
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.accountAvatar:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--hf-accent) 24%, transparent);
+}
+
 .mobileNavLink {
   display: flex;
   min-height: 44px;

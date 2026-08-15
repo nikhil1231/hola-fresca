@@ -48,6 +48,18 @@ ACCESS_HOSTNAME = os.environ.get("HOLAFRESCA_ACCESS_HOSTNAME")
 # a second account and leaving the plan, hides and preferences behind.
 ACCESS_OWNER_EMAIL = os.environ.get("HOLAFRESCA_ACCESS_OWNER_EMAIL")
 
+# Browser requests to localhost/LAN do not pass through Access, so there is no
+# Google identity for the account chrome to display. Give that path a plainly
+# local presentation identity with the same name/email shape as production.
+# It is never used to select or create a User row and is never trusted for
+# authorization; get_current_user keeps resolving the bootstrap account.
+LOCAL_USER_NAME = os.environ.get("HOLAFRESCA_LOCAL_USER_NAME", "Local User").strip() or "Local User"
+LOCAL_USER_EMAIL = (
+    os.environ.get("HOLAFRESCA_LOCAL_USER_EMAIL")
+    or ACCESS_OWNER_EMAIL
+    or "local@holafresca.test"
+).strip()
+
 # OpenAI settings for the ingredient→product mapping proposal pass. The key is
 # never committed — it lives in the gitignored .env. The model is overridable so
 # a different id can be used without a code change.

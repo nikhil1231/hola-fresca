@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
+  Avatar,
   Badge,
   Button,
   Divider,
@@ -17,15 +18,17 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
-import { IconAlertCircle, IconDeviceFloppy, IconSettings } from '@tabler/icons-react'
+import { IconAlertCircle, IconDeviceFloppy, IconLogout, IconSettings } from '@tabler/icons-react'
 
 import PageHeader from '../components/PageHeader.jsx'
+import { useAccount } from '../hooks/useAccount.js'
 import {
   formatWeekRange,
   useSchedule,
   useUpdateScheduleSettings,
 } from '../hooks/useSchedule.js'
 import { useRetailers, useSetRetailer } from '../hooks/useRetailer.js'
+import { accountInitials } from '../utils/account.js'
 
 const CADENCE_OPTIONS = [
   { value: '1', label: 'Every week' },
@@ -151,6 +154,57 @@ function WhereYouShop() {
   )
 }
 
+function AccountCard() {
+  const { data: account, isPending, isError, error } = useAccount()
+
+  return (
+    <Paper withBorder radius="md" p={{ base: 'md', sm: 'lg' }}>
+      <Stack gap="md">
+        <Title order={4}>Account</Title>
+
+        {isPending ? (
+          <Group gap="sm">
+            <Loader size="sm" color="fresh" />
+            <Text size="sm" c="dimmed">Loading account…</Text>
+          </Group>
+        ) : isError ? (
+          <Alert color="red" icon={<IconAlertCircle size={18} />}>
+            Couldn't load your account: {error?.message}
+          </Alert>
+        ) : (
+          <Group justify="space-between" align="center" wrap="wrap" gap="lg">
+            <Group gap="md" wrap="nowrap">
+              <Avatar color="fresh" variant="light" size={48}>
+                {accountInitials(account)}
+              </Avatar>
+              <Stack gap={2}>
+                <Text fw={700}>{account?.name || 'Name unavailable'}</Text>
+                <Text size="sm" c="dimmed">{account?.email || 'Email unavailable'}</Text>
+              </Stack>
+            </Group>
+            <Button
+              component="a"
+              href={account?.logout_url ?? undefined}
+              variant="default"
+              leftSection={<IconLogout size={16} />}
+              disabled={!account?.logout_url}
+            >
+              Log out
+            </Button>
+          </Group>
+        )}
+
+        {account && !account.access_authenticated && (
+          <Text size="xs" c="dimmed">
+            Local mock identity. Production uses your Google profile through Cloudflare Access,
+            where sign-out is also available.
+          </Text>
+        )}
+      </Stack>
+    </Paper>
+  )
+}
+
 export default function SettingsPage() {
   const { data: schedule, isLoading, isError, error } = useSchedule()
   const updateSettings = useUpdateScheduleSettings()
@@ -194,8 +248,9 @@ export default function SettingsPage() {
 
   if (isError) {
     return (
-      <Stack gap="xl" maw={720}>
+      <Stack gap="xl" maw={720} w="100%" mx="auto">
         {pageHeader}
+        <AccountCard />
         <Alert color="red" title="Couldn't load settings" icon={<IconAlertCircle size={18} />}>
           {error?.message ?? 'Please check the backend is running and try again.'}
         </Alert>
@@ -205,8 +260,9 @@ export default function SettingsPage() {
 
   if (isLoading || !draft) {
     return (
-      <Stack gap="xl" maw={720}>
+      <Stack gap="xl" maw={720} w="100%" mx="auto">
         {pageHeader}
+        <AccountCard />
         <Group justify="center" py="xl">
           <Loader color="fresh" />
         </Group>
@@ -215,8 +271,10 @@ export default function SettingsPage() {
   }
 
   return (
-    <Stack gap="xl" maw={720}>
+    <Stack gap="xl" maw={720} w="100%" mx="auto">
       {pageHeader}
+
+      <AccountCard />
 
       {updateSettings.error && (
         <Alert color="red" icon={<IconAlertCircle size={18} />}>

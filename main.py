@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.account import router as account_router
 from app.api.mapping import router as mapping_router
 from app.api.ocado import router as ocado_router
 from app.api.plan import router as plan_router
@@ -56,6 +57,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="HolaFresca", lifespan=lifespan)
 
+app.include_router(account_router)
 app.include_router(recipes_router)
 app.include_router(mapping_router)
 app.include_router(planner_router)

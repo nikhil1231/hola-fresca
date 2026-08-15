@@ -15,6 +15,13 @@ from app import protein as protein_mod
 from app import schedule as schedule_mod
 
 
+class AccountOut(BaseModel):
+    email: str | None = None
+    name: str | None = None
+    access_authenticated: bool = False
+    logout_url: str | None = None
+
+
 class PersonalRatingIn(BaseModel):
     rating: int | None = Field(default=None, ge=1, le=5)
 
