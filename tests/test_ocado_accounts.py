@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import pytest
+from sqlalchemy import select
+
 from app import config
+from app.db.models import RetailerAccount
+from app.db.session import init_db, make_engine, make_session_factory
 from app.ocado import session as ocado_session
 from app.ocado.auth import AuthState
 from app.ocado.ledger import read_ledger, write_ledger
@@ -36,7 +41,9 @@ def test_legacy_account_config_falls_back_to_default(monkeypatch):
     assert account.password == "legacy-secret"
 
 
-def test_account_runtime_uses_separate_session_paths(tmp_path, monkeypatch):
+def test_account_runtime_uses_database_registry_and_separate_session_paths(
+    tmp_path, monkeypatch
+):
     accounts = (
         config.OcadoAccountConfig(id="main", label="Main", email="a", password="b"),
         config.OcadoAccountConfig(id="backup", label="Backup", email="c", password="d"),
@@ -45,9 +52,12 @@ def test_account_runtime_uses_separate_session_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "OCADO_ACCOUNTS", accounts)
     monkeypatch.setattr(config, "DEFAULT_OCADO_ACCOUNT_ID", "main")
     ocado_session._RUNTIMES.clear()
+    engine = make_engine(tmp_path / "accounts.db")
+    init_db(engine)
+    factory = make_session_factory(engine)
 
-    main = ocado_session.get_account_runtime("main")
-    backup = ocado_session.get_account_runtime("backup")
+    main = ocado_session.get_account_runtime("main", factory=factory)
+    backup = ocado_session.get_account_runtime("backup", factory=factory)
 
     assert main.session.jar_path == tmp_path / "ocado" / "accounts" / "main" / "session.json"
     assert backup.session.jar_path == tmp_path / "ocado" / "accounts" / "backup" / "session.json"
@@ -57,6 +67,31 @@ def test_account_runtime_uses_separate_session_paths(tmp_path, monkeypatch):
 
     main.auth.state = AuthState.READY
     assert backup.auth.state == AuthState.LOGGED_OUT
+
+
+def test_database_not_environment_decides_which_accounts_exist(tmp_path, monkeypatch):
+    configured = config.OcadoAccountConfig(
+        id="configured", label="Configured", email="configured@example.com"
+    )
+    monkeypatch.setattr(config, "OCADO_ACCOUNTS", (configured,))
+    engine = make_engine(tmp_path / "accounts.db")
+    init_db(engine)
+    factory = make_session_factory(engine)
+
+    with factory() as session:
+        row = session.scalar(
+            select(RetailerAccount).where(RetailerAccount.key == "configured")
+        )
+        assert row is not None
+        row.key = "database-only"
+        session.commit()
+
+    ocado_session._RUNTIMES.clear()
+    assert ocado_session.get_account_runtime(
+        "database-only", factory=factory
+    ).account.email == "configured@example.com"
+    with pytest.raises(KeyError):
+        ocado_session.get_account_runtime("configured", factory=factory)
 
 
 def test_ledger_is_isolated_by_account(factory):

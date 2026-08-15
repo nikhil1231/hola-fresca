@@ -68,6 +68,46 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class RetailerAccount(Base):
+    """One person's persisted connection to one retailer.
+
+    ``key`` is the stable, opaque account id used by cookie/profile directories
+    and the existing cart/auth history.  It deliberately survives email changes.
+    There is no password column: credentials are only an input to an interactive
+    login, while the resulting retailer session is persisted outside the
+    database.
+
+    One user may connect several retailers, but only one account at each shop.
+    Switching the active retailer therefore leaves every other connection (and
+    the user's retailer-independent plan) untouched.
+    """
+
+    __tablename__ = "retailer_accounts"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_retailer_account_key"),
+        UniqueConstraint(
+            "user_id", "retailer", name="uq_retailer_account_user_retailer"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    key: Mapped[str] = mapped_column(String(64))
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # JSON list of strings.  Nullable means manual OTP entry rather than an
+    # empty rule accidentally matching mail intended for another account.
+    otp_markers: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # never | connected | needs_password.  This is last-known state, not proof
+    # that an upstream cookie has remained valid since it was recorded.
+    status: Mapped[str] = mapped_column(String(32), default="never", index=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class PlannerCacheState(Base):
     """Singleton generations for the two halves of the planner snapshot."""
 
@@ -661,9 +701,9 @@ class OcadoAuthEvent(Base):
     between them is what decides whether an interactively-logged-in account is a
     quarterly chore or a weekly interruption.
 
-    Keyed by ``account_id`` (the config slug) to match :class:`OcadoCartSync` and
-    :class:`OcadoCartLedger`. When accounts become per-user rows this moves with
-    them, which is why nothing here reaches for a ``users`` foreign key yet.
+    Keyed by ``account_id`` (the stable :class:`RetailerAccount` key) to match
+    :class:`OcadoCartSync` and :class:`OcadoCartLedger`. Ownership is resolved
+    through that account row rather than copied onto every historical event.
     """
 
     __tablename__ = "ocado_auth_events"

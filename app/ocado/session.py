@@ -4,13 +4,17 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from http.cookiejar import Cookie
 from pathlib import Path
 from typing import Any
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 from app import config
+from app.db.models import RetailerAccount
 from app.ocado.auth import AuthLadder, AuthState
 
 BASE_URL = "https://www.ocado.com"
@@ -225,16 +229,69 @@ def account_dir(account_id: str) -> Path:
     return config.DATA_DIR / "ocado" / "accounts" / account_id
 
 
-def _account_config(account_id: str | None = None) -> config.OcadoAccountConfig:
-    resolved = account_id or config.DEFAULT_OCADO_ACCOUNT_ID
-    for account in config.OCADO_ACCOUNTS:
-        if account.id == resolved:
-            return account
-    raise KeyError(resolved)
+@lru_cache(maxsize=4)
+def _default_account_factory(db_path: Path) -> sessionmaker[Session]:
+    """A registry factory for non-API callers such as catalogue refresh jobs."""
+    from app.db.session import init_db, make_engine, make_session_factory
+
+    engine = make_engine(db_path)
+    init_db(engine)
+    return make_session_factory(engine)
 
 
-def get_account_runtime(account_id: str | None = None) -> OcadoAccountRuntime:
-    account = _account_config(account_id)
+def _legacy_config(account_key: str) -> config.OcadoAccountConfig | None:
+    # Step-one compatibility only: the row decides whether an account exists,
+    # while its legacy env entry still supplies the password until step two.
+    return next(
+        (account for account in config.OCADO_ACCOUNTS if account.id == account_key),
+        None,
+    )
+
+
+def _markers(raw: str | None) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(payload, list):
+        return ()
+    return tuple(item for item in payload if isinstance(item, str) and item)
+
+
+def _account_config(
+    account_id: str | None = None,
+    *,
+    factory: sessionmaker[Session] | None = None,
+) -> config.OcadoAccountConfig:
+    factory = factory or _default_account_factory(config.DB_PATH)
+    with factory() as db:
+        query = select(RetailerAccount).where(RetailerAccount.retailer == "ocado")
+        if account_id is not None:
+            query = query.where(RetailerAccount.key == account_id)
+        else:
+            query = query.order_by(RetailerAccount.id).limit(1)
+        row = db.scalar(query)
+    if row is None:
+        raise KeyError(account_id or "ocado")
+
+    legacy = _legacy_config(row.key)
+    return config.OcadoAccountConfig(
+        id=row.key,
+        label=(legacy.label if legacy is not None else None) or row.email or "Ocado",
+        email=row.email,
+        password=legacy.password if legacy is not None else None,
+        otp_markers=_markers(row.otp_markers),
+    )
+
+
+def get_account_runtime(
+    account_id: str | None = None,
+    *,
+    factory: sessionmaker[Session] | None = None,
+) -> OcadoAccountRuntime:
+    account = _account_config(account_id, factory=factory)
     runtime = _RUNTIMES.get(account.id)
     if runtime is not None:
         return runtime
@@ -255,8 +312,19 @@ def get_account_runtime(account_id: str | None = None) -> OcadoAccountRuntime:
     return runtime
 
 
-def list_account_runtimes() -> list[OcadoAccountRuntime]:
-    return [get_account_runtime(account.id) for account in config.OCADO_ACCOUNTS]
+def list_account_runtimes(
+    *, factory: sessionmaker[Session] | None = None
+) -> list[OcadoAccountRuntime]:
+    factory = factory or _default_account_factory(config.DB_PATH)
+    with factory() as db:
+        account_ids = list(
+            db.scalars(
+                select(RetailerAccount.key)
+                .where(RetailerAccount.retailer == "ocado")
+                .order_by(RetailerAccount.id)
+            )
+        )
+    return [get_account_runtime(account_id, factory=factory) for account_id in account_ids]
 
 
 def get_shared_session(account_id: str | None = None) -> OcadoSession:

@@ -14,6 +14,7 @@ import threading
 
 from sqlalchemy import text
 
+from app import config
 from app.db.session import ALEMBIC_DIR, init_db, make_engine
 
 
@@ -267,6 +268,48 @@ def test_a_fresh_database_is_stamped_at_head(tmp_path):
         assert conn.execute(
             text("SELECT COUNT(*) FROM recipe_cook_maps")
         ).scalar() == 0
+
+
+def test_legacy_retailer_accounts_keep_their_keys_and_gain_distinct_owners(
+    tmp_path, monkeypatch
+):
+    accounts = (
+        config.OcadoAccountConfig(
+            id="main",
+            label="Main",
+            email="main@example.com",
+            password="not-persisted",
+            otp_markers=("main@example.com", "otp+main@example.com"),
+        ),
+        config.OcadoAccountConfig(
+            id="backup",
+            label="Backup",
+            email="backup@example.com",
+            password="also-not-persisted",
+        ),
+    )
+    monkeypatch.setattr(config, "OCADO_ACCOUNTS", accounts)
+    engine = _old_database(tmp_path / "old.db")
+
+    init_db(engine)
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT user_id, retailer, key, email, otp_markers, status "
+                "FROM retailer_accounts ORDER BY id"
+            )
+        ).all()
+        columns = {
+            column[1] for column in conn.execute(text("PRAGMA table_info(retailer_accounts)"))
+        }
+
+    assert [row.key for row in rows] == ["main", "backup"]
+    assert len({row.user_id for row in rows}) == 2
+    assert [row.retailer for row in rows] == ["ocado", "ocado"]
+    assert rows[0].otp_markers == '["main@example.com", "otp+main@example.com"]'
+    assert [row.status for row in rows] == ["never", "never"]
+    assert "password" not in columns
 
 
 def test_frozen_products_backfill_existing_exact_mappings_as_form_differences(tmp_path):

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app import config
 from app.db.base import Base
 from app.db import models  # noqa: F401  (register models on Base.metadata)
+from app.db.retailer_accounts import seed_legacy_ocado_accounts
 from app.db.models import User
 
 log = logging.getLogger(__name__)
@@ -187,6 +188,10 @@ def _init_db(engine: Engine) -> None:
     ensure_bootstrap_user(engine)
 
     with engine.begin() as conn:
+        # Fresh databases are stamped at head, so migration 0012 does not run on
+        # them.  Seed here too; the helper is idempotent for existing databases
+        # where the migration already inserted the rows.
+        seed_legacy_ocado_accounts(conn, config.OCADO_ACCOUNTS)
         for table, columns in _RUNTIME_COLUMNS.items():
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
             for name, decl in columns.items():
