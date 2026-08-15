@@ -15,7 +15,9 @@ from fastapi.testclient import TestClient
 import main
 from app.api import cart as cart_api
 from app.api.cart import get_cart_adapter
+from app.api.deps import get_current_user, get_session_factory
 from app.cart.adapters import AccountInfo, AuthStatus, CartAdapter, CartItem, CartSnapshot
+from app.db.models import RetailerAccount, User
 from app.cart.merge import CartLedger, PushPlan
 from app.planner.basket import Basket
 
@@ -29,6 +31,7 @@ class FakeAdapter(CartAdapter):
         self.retailer = retailer
         self._accounts = accounts
         self.pushed: list[str] = []
+        self.logged_out: list[str] = []
 
     def accounts(self):
         return [AccountInfo(id=account, label=account.title()) for account in self._accounts]
@@ -36,14 +39,19 @@ class FakeAdapter(CartAdapter):
     def status(self, account_id=None):
         return AuthStatus(account_id=account_id or "default", status="logged_out", stage="idle")
 
-    def ensure_authenticated(self, account_id=None, *, allow_login=True):
+    def ensure_authenticated(self, account_id=None, *, email=None, password=None):
         return AuthStatus(
             account_id=account_id or "default",
-            status="ready" if allow_login else "logged_out",
+            status="ready" if email and password else "needs_password",
         )
 
     def submit_otp(self, code, account_id=None):
         return AuthStatus(account_id=account_id or "default", status="ready")
+
+    def logout(self, account_id=None):
+        account_id = account_id or "default"
+        self.logged_out.append(account_id)
+        return AuthStatus(account_id=account_id, status="logged_out", stage="idle")
 
     def cart(self, account_id=None):
         return CartSnapshot(
@@ -83,7 +91,9 @@ def test_status_reports_the_ladder_state(client, retailer):
     response = client.get(f"/api/cart/{retailer}/status")
 
     assert response.status_code == 200
-    assert response.json()["status"] in {"logged_out", "awaiting_otp", "ready"}
+    assert response.json()["status"] in {
+        "logged_out", "needs_password", "awaiting_otp", "ready"
+    }
 
 
 @pytest.mark.parametrize("retailer", SHOPS)
@@ -118,8 +128,56 @@ def test_a_quiet_refresh_never_climbs_to_the_password(client, retailer):
     """The rung that would email somebody a code, for opening a page."""
     body = client.post(f"/api/cart/{retailer}/session/refresh", json={}).json()
 
-    assert body["status"] == "logged_out"
-    assert client.post(f"/api/cart/{retailer}/login", json={}).json()["status"] == "ready"
+    assert body["status"] == "needs_password"
+    login = client.post(
+        f"/api/cart/{retailer}/login",
+        json={"email": "a@example.com", "password": "secret"},
+    )
+    assert login.json()["status"] == "ready"
+
+
+@pytest.mark.parametrize("retailer", SHOPS)
+def test_logout_forgets_the_selected_retailers_session(client, retailer):
+    response = client.post(f"/api/cart/{retailer}/logout")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "logged_out"
+    assert client.adapters[retailer].logged_out == ["default"]
+
+
+def test_logout_resolves_the_retailer_account_owned_by_the_current_user(client):
+    with get_session_factory()() as session:
+        user = User(email="second@example.com")
+        session.add(user)
+        session.flush()
+        session.add(
+            RetailerAccount(
+                user_id=user.id,
+                retailer="ocado",
+                key="second",
+                email="shopper@example.com",
+            )
+        )
+        session.commit()
+        user_id = user.id
+
+    main.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=user_id)
+    client.adapters["ocado"] = FakeAdapter("ocado", accounts=("default", "second"))
+
+    response = client.post("/api/cart/ocado/logout")
+
+    assert response.status_code == 200
+    assert client.adapters["ocado"].logged_out == ["second"]
+
+
+def test_login_requires_credentials_without_echoing_the_password(client):
+    response = client.post(
+        "/api/cart/ocado/login",
+        json={"email": "", "password": "do-not-echo"},
+    )
+
+    assert response.status_code == 400
+    assert "do-not-echo" not in response.text
 
 
 def test_a_shop_with_no_cart_integration_is_a_404(client):

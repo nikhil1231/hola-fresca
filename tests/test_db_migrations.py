@@ -296,18 +296,16 @@ def test_legacy_retailer_accounts_keep_their_keys_and_gain_distinct_owners(
 ):
     accounts = (
         config.OcadoAccountConfig(
-            id="main",
-            label="Main",
-            email="main@example.com",
-            password="not-persisted",
-            otp_markers=("main@example.com", "otp+main@example.com"),
+                id="main",
+                label="Main",
+                email="main@example.com",
+                otp_markers=("main@example.com", "otp+main@example.com"),
         ),
         config.OcadoAccountConfig(
-            id="backup",
-            label="Backup",
-            email="backup@example.com",
-            password="also-not-persisted",
-        ),
+                id="backup",
+                label="Backup",
+                email="backup@example.com",
+            ),
     )
     monkeypatch.setattr(config, "OCADO_ACCOUNTS", accounts)
     engine = _old_database(tmp_path / "old.db")

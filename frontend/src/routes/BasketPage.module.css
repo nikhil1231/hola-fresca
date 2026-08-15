@@ -56,19 +56,25 @@
 }
 
 .viewToggle {
-  width: 260px;
-  padding: 5px;
-  border-radius: 18px;
+  width: 216px;
+  padding: 3px;
+  border-radius: 14px;
   background: var(--hf-surface-strong);
 }
 
 .viewToggle :global(.mantine-SegmentedControl-indicator) {
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--hf-text);
 }
 
 .viewToggle :global(.mantine-SegmentedControl-label) {
-  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  line-height: 1;
   color: var(--hf-text-muted);
   font-weight: 600;
 }
@@ -83,12 +89,21 @@
 
 .weekSelect :global(.mantine-Input-input),
 .mobileWeekSelect :global(.mantine-Input-input) {
-  min-height: 46px;
   border: 1px solid var(--hf-border);
-  border-radius: 16px;
   background: transparent;
   color: var(--hf-text);
   font-weight: 600;
+}
+
+.weekSelect :global(.mantine-Input-input) {
+  height: 38px;
+  min-height: 38px;
+  border-radius: 14px;
+}
+
+.mobileWeekSelect :global(.mantine-Input-input) {
+  min-height: 46px;
+  border-radius: 16px;
 }
 
 .summaryCard,

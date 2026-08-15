@@ -72,8 +72,6 @@ def session(tmp_path, monkeypatch):
     monkeypatch.setattr(session_module, "submit_credentials", lambda *a, **k: None)
     return SainsburysSession(
         jar_path=tmp_path / "session.json",
-        email="a@b.com",
-        password="pw",
         http=FakeHttp(),
     )
 
@@ -90,7 +88,12 @@ def test_an_interactive_login_never_waits_on_the_mailbox(session, monkeypatch):
         session_module, "read_emailed_code", lambda **kwargs: called.append(kwargs) or None
     )
 
-    state = session.ensure_authenticated(trust_existing=False, allow_mailbox=False)
+    state = session.ensure_authenticated(
+        trust_existing=False,
+        email="a@b.com",
+        password="pw",
+        allow_mailbox=False,
+    )
 
     assert state == AuthState.AWAITING_OTP
     assert called == [], "an interactive login must not poll the mailbox"
@@ -103,7 +106,9 @@ def test_an_unattended_login_still_reads_the_mailbox(session, monkeypatch):
         session_module, "read_emailed_code", lambda **kwargs: called.append(kwargs) or None
     )
 
-    session.ensure_authenticated(trust_existing=False)
+    session.ensure_authenticated(
+        trust_existing=False, email="a@b.com", password="pw"
+    )
 
     assert len(called) == 1
 
@@ -111,7 +116,12 @@ def test_an_unattended_login_still_reads_the_mailbox(session, monkeypatch):
 def test_a_parked_login_keeps_what_the_code_will_need(session, monkeypatch):
     monkeypatch.setattr(session_module, "read_emailed_code", lambda **kwargs: None)
 
-    session.ensure_authenticated(trust_existing=False, allow_mailbox=False)
+    session.ensure_authenticated(
+        trust_existing=False,
+        email="a@b.com",
+        password="pw",
+        allow_mailbox=False,
+    )
 
     # The PKCE verifier has to survive to the OTP submit, which is a separate
     # request minutes later; losing it means another emailed code.
@@ -128,7 +138,7 @@ def test_a_quiet_refresh_never_reaches_the_password(session, monkeypatch):
         lambda *a, **k: attempted.append(True),
     )
 
-    assert session.refresh_quietly() == AuthState.LOGGED_OUT
+    assert session.refresh_quietly() == AuthState.NEEDS_PASSWORD
     assert attempted == []
 
 
@@ -196,7 +206,7 @@ def test_a_rotated_refresh_token_is_persisted_before_anything_else_can_fail(
         lambda http, tokens: (_ for _ in ()).throw(AuthError("nope")),
     )
 
-    assert session.refresh_quietly() == AuthState.LOGGED_OUT
+    assert session.refresh_quietly() == AuthState.NEEDS_PASSWORD
 
     reloaded = SainsburysSession(jar_path=session.jar_path, http=FakeHttp())
     assert reloaded.tokens.refresh_token == "rotated"
@@ -222,15 +232,12 @@ def test_a_dead_refresh_token_does_not_take_the_access_token_with_it(session, mo
     assert session.tokens.refresh_token is None
 
 
-def test_credentials_that_are_not_configured_do_not_pretend_to_log_in(tmp_path, monkeypatch):
-    # Blanked at the config, not passed as None: ``email=None`` means "take it
-    # from the environment", so a None here would quietly pick up the real
-    # credentials and try to sign in for real.
-    monkeypatch.setattr(session_module.config, "SAINSBURYS_EMAIL", None)
-    monkeypatch.setattr(session_module.config, "SAINSBURYS_PASSWORD", None)
+def test_credentials_are_not_retained_on_the_session(tmp_path):
     bare = SainsburysSession(jar_path=tmp_path / "session.json", http=FakeHttp())
 
-    assert bare.ensure_authenticated(trust_existing=False) == AuthState.LOGGED_OUT
+    assert bare.ensure_authenticated(trust_existing=False) == AuthState.NEEDS_PASSWORD
+    assert not hasattr(bare, "email")
+    assert not hasattr(bare, "password")
 
 
 def test_the_login_asks_for_the_code_to_be_sent(session, monkeypatch):
@@ -239,7 +246,12 @@ def test_the_login_asks_for_the_code_to_be_sent(session, monkeypatch):
     monkeypatch.setattr(session_module, "request_code", lambda http: asked.append(True))
     monkeypatch.setattr(session_module, "read_emailed_code", lambda **kwargs: None)
 
-    state = session.ensure_authenticated(trust_existing=False, allow_mailbox=False)
+    state = session.ensure_authenticated(
+        trust_existing=False,
+        email="a@b.com",
+        password="pw",
+        allow_mailbox=False,
+    )
 
     assert asked == [True]
     assert state == AuthState.AWAITING_OTP
@@ -269,6 +281,28 @@ def test_every_request_carries_the_commerce_token_and_a_bearer(session, monkeypa
 
     assert sent["WCAuthToken"] == "wc-value"
     assert sent["Authorization"] == "Bearer at"
+
+
+def test_a_401_never_escalates_to_the_password_step(session, monkeypatch):
+    calls = []
+
+    class Rejecting(FakeHttp):
+        def request(self, *args, **kwargs):
+            calls.append(1)
+            return _Response(401)
+
+    session._http = Rejecting()
+    monkeypatch.setattr(
+        session_module,
+        "submit_credentials",
+        lambda *args, **kwargs: pytest.fail("a 401 retry must not submit a password"),
+    )
+
+    response = session.request("GET", "/groceries-api/gol-services/basket/v2/basket")
+
+    assert response.status_code == 401
+    assert calls == [1]
+    assert session.state == AuthState.NEEDS_PASSWORD
 
 
 def test_a_tombstoned_commerce_cookie_is_not_a_session(session):

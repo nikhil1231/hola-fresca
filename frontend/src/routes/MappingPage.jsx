@@ -27,7 +27,6 @@ import {
 } from '../hooks/useMappingQueries.js'
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
-import RetailerChip from '../components/RetailerChip.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 
 const STATUS_COLORS = {
@@ -183,7 +182,6 @@ export default function MappingPage() {
     <Stack gap="xl">
       <PageHeader
         title={<>Ingredient {'\u2192'} product mapping</>}
-        badge={<RetailerChip />}
         description={(
           <Stack gap="xs">
             <span>

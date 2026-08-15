@@ -89,13 +89,9 @@ class SainsburysSession:
         self,
         *,
         jar_path: Path | None = None,
-        email: str | None = None,
-        password: str | None = None,
         http: Any | None = None,
     ):
         self.jar_path = jar_path or (config.DATA_DIR / "sainsburys" / "session.json")
-        self.email = email if email is not None else config.SAINSBURYS_EMAIL
-        self.password = password if password is not None else config.SAINSBURYS_PASSWORD
         self.tokens: Tokens | None = None
         self.state: AuthState = AuthState.LOGGED_OUT
         #: A login parked between the password and the code. Held in memory only:
@@ -220,7 +216,12 @@ class SainsburysSession:
         return self.tokens is not None and not self.tokens.expired
 
     def ensure_authenticated(
-        self, *, trust_existing: bool = True, allow_mailbox: bool = True
+        self,
+        *,
+        trust_existing: bool = True,
+        email: str | None = None,
+        password: str | None = None,
+        allow_mailbox: bool = True,
     ) -> AuthState:
         """Climb until the session shops, and report where it stopped.
 
@@ -243,7 +244,11 @@ class SainsburysSession:
             if self._refresh():
                 return self.state
 
-            return self._login(allow_mailbox=allow_mailbox)
+            if not email or not password:
+                self.state = AuthState.NEEDS_PASSWORD
+                return self.state
+
+            return self._login(email=email, password=password, allow_mailbox=allow_mailbox)
 
     def refresh_quietly(self) -> AuthState:
         """Climb the first two rungs only, and never the third.
@@ -258,7 +263,7 @@ class SainsburysSession:
             if self.looks_authenticated() or self._reestablish() or self._refresh():
                 self.state = AuthState.READY
             else:
-                self.state = AuthState.LOGGED_OUT
+                self.state = AuthState.NEEDS_PASSWORD
             return self.state
 
     def _reestablish(self) -> bool:
@@ -320,18 +325,15 @@ class SainsburysSession:
         self.save()
         return True
 
-    def _login(self, *, allow_mailbox: bool = True) -> AuthState:
-        """Rung three: the full ladder, which may need an emailed code."""
-        if not (self.email and self.password):
-            log.warning("No Sainsbury's credentials configured; staying logged out")
-            self.state = AuthState.LOGGED_OUT
-            return self.state
-
+    def _login(
+        self, *, email: str, password: str, allow_mailbox: bool = True
+    ) -> AuthState:
+        """Full login with request-local credentials, which may need an OTP."""
         started = time.time()
         log.info("Signing in to Sainsbury's")
         pending = begin_login(self._http)
         try:
-            code = submit_credentials(self._http, pending, self.email, self.password)
+            code = submit_credentials(self._http, pending, email, password)
         except AuthError:
             self.state = AuthState.LOGGED_OUT
             raise

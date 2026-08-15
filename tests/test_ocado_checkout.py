@@ -113,13 +113,26 @@ def test_unsynced_product_uses_the_planned_line_total(factory):
     assert (row.cost, row.cost_source) == (2.5, "planned")
 
 
-def test_pending_removal_stays_visible_and_an_already_deleted_one_costs_zero(factory):
-    (row,) = _checkout_items(
+def test_an_already_removed_historical_line_is_not_rendered(factory):
+    rows = _checkout_items(
         factory,
         "ocado",
         Basket(),
         _ledger(2),
         _cart({"personal-only": 4}),
+        owned_item_keys=set(),
+    )
+
+    assert rows == []
+
+
+def test_pending_removal_stays_visible_without_inventing_a_zero_price(factory):
+    (row,) = _checkout_items(
+        factory,
+        "ocado",
+        Basket(),
+        _ledger(2),
+        _cart({"sku-a": 2}),
         owned_item_keys=set(),
     )
 
@@ -129,7 +142,7 @@ def test_pending_removal_stays_visible_and_an_already_deleted_one_costs_zero(fac
         0,
         "changed",
     )
-    assert (row.cost, row.cost_source) == (0, "live")
+    assert (row.cost, row.cost_source) == (None, "planned")
 
 
 def test_personal_external_and_owned_products_are_excluded(factory):

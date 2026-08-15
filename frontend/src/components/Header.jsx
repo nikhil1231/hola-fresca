@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   ActionIcon,
   Avatar,
@@ -7,59 +7,24 @@ import {
   Drawer,
   Group,
   Stack,
-  TextInput,
   Title,
   Tooltip,
 } from '@mantine/core'
-import { IconMenu2, IconSearch, IconX } from '@tabler/icons-react'
+import { IconMenu2 } from '@tabler/icons-react'
 
-import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 import { useAccount } from '../hooks/useAccount.js'
 import { accountInitials } from '../utils/account.js'
 import AppContainer from './AppContainer.jsx'
+import RetailerChip from './RetailerChip.jsx'
 import classes from './Header.module.css'
-
-// Debounced search box that writes ?q= and lands on the browse page. It carries
-// the current query string along, so searching from a week you are editing keeps
-// editing that week.
-function SearchBox({ autoFocus = false, fluid = false, onEscape }) {
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const q = searchParams.get('q') ?? ''
-  const [value, setValue] = useDebouncedSearch(q, (nextValue) => {
-    const next = new URLSearchParams(searchParams)
-    if (nextValue) next.set('q', nextValue)
-    else next.delete('q')
-    next.delete('page')
-    navigate({ pathname: '/browse', search: next.toString() })
-  })
-
-  return (
-    <TextInput
-      value={value}
-      onChange={(e) => setValue(e.currentTarget.value)}
-      placeholder="Search recipes"
-      leftSection={<IconSearch size={16} />}
-      radius="xl"
-      w={fluid ? '100%' : 280}
-      autoFocus={autoFocus}
-      aria-label="Search recipes"
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') onEscape?.()
-      }}
-    />
-  )
-}
 
 export default function Header() {
   const { pathname } = useLocation()
   const { data: account } = useAccount()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
 
   useEffect(() => {
     setMenuOpen(false)
-    setSearchOpen(false)
   }, [pathname])
 
   return (
@@ -86,7 +51,7 @@ export default function Header() {
             </Group>
           </Group>
           <Group gap="sm" wrap="nowrap">
-            {pathname === '/browse' && <SearchBox />}
+            <RetailerChip />
             <Tooltip label={accountLabel(account)} withArrow>
               <Avatar
                 component={Link}
@@ -104,62 +69,33 @@ export default function Header() {
         </Group>
 
         <Group h="100%" justify="space-between" wrap="nowrap" hiddenFrom="md">
-          {searchOpen && pathname === '/browse' ? (
-            <Group gap="xs" wrap="nowrap" w="100%">
-              <Box style={{ flex: 1, minWidth: 0 }}>
-                <SearchBox autoFocus fluid onEscape={() => setSearchOpen(false)} />
-              </Box>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size={44}
-                aria-label="Close recipe search"
-                onClick={() => setSearchOpen(false)}
-              >
-                <IconX size={22} />
-              </ActionIcon>
-            </Group>
-          ) : (
-            <>
-              <Title order={3} component={Link} to="/" className={classes.logo}>
-                Hola<span className={classes.logoAccent}>Fresca</span>
-              </Title>
-              <Group gap={4} wrap="nowrap">
-                {pathname === '/browse' && (
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size={44}
-                    aria-label="Search recipes"
-                    onClick={() => setSearchOpen(true)}
-                  >
-                    <IconSearch size={22} />
-                  </ActionIcon>
-                )}
-                <Avatar
-                  component={Link}
-                  to="/settings"
-                  color="fresh"
-                  variant={pathname === '/settings' ? 'filled' : 'light'}
-                  size={36}
-                  className={classes.accountAvatar}
-                  aria-label={accountLabel(account)}
-                >
-                  {accountInitials(account)}
-                </Avatar>
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  size={44}
-                  aria-label="Open navigation menu"
-                  aria-expanded={menuOpen}
-                  onClick={() => setMenuOpen(true)}
-                >
-                  <IconMenu2 size={24} />
-                </ActionIcon>
-              </Group>
-            </>
-          )}
+          <Title order={3} component={Link} to="/" className={classes.logo}>
+            Hola<span className={classes.logoAccent}>Fresca</span>
+          </Title>
+          <Group gap={4} wrap="nowrap">
+            <RetailerChip size="sm" />
+            <Avatar
+              component={Link}
+              to="/settings"
+              color="fresh"
+              variant={pathname === '/settings' ? 'filled' : 'light'}
+              size={36}
+              className={classes.accountAvatar}
+              aria-label={accountLabel(account)}
+            >
+              {accountInitials(account)}
+            </Avatar>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size={44}
+              aria-label="Open navigation menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(true)}
+            >
+              <IconMenu2 size={24} />
+            </ActionIcon>
+          </Group>
         </Group>
       </AppContainer>
 

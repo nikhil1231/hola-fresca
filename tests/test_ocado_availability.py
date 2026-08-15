@@ -34,11 +34,13 @@ class FakeSession:
     def __init__(self, products, *, poison=()):
         self.products = products
         self.batches: list[list[str]] = []
+        self.request_options: list[dict] = []
         self.poison = set(poison)
 
     def request(self, method, path, *, json=None, **kwargs):
         assert method == "PUT" and path == A.PRODUCTS_PATH
         self.batches.append(list(json))
+        self.request_options.append(kwargs)
         if self.poison & set(json):
             return FakeResponse(None, status=500)
         return FakeResponse(
@@ -50,6 +52,7 @@ class FakeResponse:
     def __init__(self, payload, *, status=200):
         self.payload = payload
         self.status = status
+        self.status_code = status
         self.content = b"{}"
 
     def raise_for_status(self):
@@ -95,6 +98,24 @@ def test_statuses_come_back_keyed_by_sku():
     assert statuses[MITAKE].available is True
     assert statuses[MITAKE].price == 1.30
     assert statuses[SAITAKU].available is False
+    assert session.request_options == [{"reauthenticate": False}]
+
+
+def test_authentication_failure_is_not_bisected_into_repeated_requests():
+    session = FakeSession([], poison={MITAKE})
+
+    original_request = session.request
+
+    def unauthorised(*args, **kwargs):
+        original_request(*args, **kwargs)
+        return FakeResponse(None, status=401)
+
+    session.request = unauthorised
+
+    with pytest.raises(RuntimeError, match="HTTP 401"):
+        A.fetch_statuses([MITAKE, SAITAKU], session=session)
+
+    assert session.batches == [[MITAKE, SAITAKU]]
 
 
 def test_an_id_ocado_will_not_talk_about_counts_as_unavailable():

@@ -37,7 +37,6 @@ import {
   useSetAlias,
 } from '../hooks/useMappingQueries.js'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
-import RetailerChip from '../components/RetailerChip.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import {
   canonicalUnitPriceBasis,
@@ -437,7 +436,6 @@ export default function MappingReviewPage() {
           )}
           badge={(
             <Group gap="xs" wrap="wrap">
-              <RetailerChip />
               {data.status && (
                 <Badge
                   className={`${classes.reviewStatus} ${STATUS_BADGE_CLASSES[data.status] ?? ''}`}

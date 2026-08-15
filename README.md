@@ -172,7 +172,7 @@ something that rots.
 
 `app.ocado.heartbeat` re-checks each Ocado session roughly daily — jittered,
 staggered across accounts, and confined to waking hours. It stops at the silent
-refresh (`allow_login=False`), so it can never send anyone a one-time code.
+refresh without credentials, so it can never send anyone a one-time code.
 
 It runs in the server process rather than as a systemd timer beside the backup
 job, and that is not incidental: the cookie jar and the browser profile are owned

@@ -79,6 +79,43 @@ def test_401_reauths_once_and_retries(tmp_path):
     assert auth.calls == [False]
 
 
+def test_401_stops_without_retry_when_quiet_recovery_needs_a_password(tmp_path):
+    auth = FakeAuth(AuthState.NEEDS_PASSWORD)
+    seen = 0
+
+    def handler(request):
+        nonlocal seen
+        seen += 1
+        return httpx.Response(401)
+
+    session = make_session(handler, tmp_path, auth)
+    response = session.request("GET", "/api/cart/v2/carts/active/cart-view")
+
+    assert response.status_code == 401
+    assert seen == 1
+    assert auth.calls == [False]
+
+
+def test_an_anonymous_request_does_not_enter_the_auth_ladder_on_401(tmp_path):
+    auth = FakeAuth()
+
+    def handler(request):
+        if request.url.path == "/basket":
+            return httpx.Response(200, text=basket_html("anonymous"))
+        return httpx.Response(401)
+
+    session = make_session(handler, tmp_path, auth)
+    response = session.request(
+        "PUT",
+        "/api/webproductpagews/v6/products",
+        json=[],
+        reauthenticate=False,
+    )
+
+    assert response.status_code == 401
+    assert auth.calls == []
+
+
 def test_csrf_is_refetched_after_a_reauth(tmp_path):
     """A new login means a new session, and the CSRF token dies with the old one."""
     auth = FakeAuth()

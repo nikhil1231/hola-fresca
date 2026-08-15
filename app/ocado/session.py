@@ -99,6 +99,12 @@ class OcadoSession:
         }
         self.jar_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    def forget(self) -> None:
+        """Drop the HTTP session persisted for this account."""
+        self.client.cookies.clear()
+        self._csrf_token = None
+        self.save()
+
     def import_playwright_cookies(self, cookies: list[dict[str, Any]]) -> None:
         for cookie in cookies:
             self.client.cookies.set(
@@ -121,7 +127,20 @@ class OcadoSession:
         self.save()
         return self._csrf_token
 
-    def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        reauthenticate: bool = True,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Send one request, optionally repairing a rejected cart session.
+
+        ``reauthenticate=False`` is for Ocado endpoints documented to work
+        anonymously, such as the bulk product-price read. A rejection there is
+        an endpoint failure, not evidence that a shopper should be signed in.
+        """
         method = method.upper()
         writes = method not in {"GET", "HEAD", "OPTIONS"}
         if writes:
@@ -133,7 +152,7 @@ class OcadoSession:
             kwargs = self._with_csrf(kwargs, self.csrf(force=True))
             response = self.client.request(method, url, **kwargs)
 
-        if response.status_code == 401:
+        if response.status_code == 401 and reauthenticate:
             # The jar is provably dead, so tell the ladder not to re-check it.
             state = self.auth.ensure_authenticated(self, trust_existing=False)
             if state == AuthState.READY:
@@ -241,7 +260,7 @@ def _default_account_factory(db_path: Path) -> sessionmaker[Session]:
 
 def _legacy_config(account_key: str) -> config.OcadoAccountConfig | None:
     # Step-one compatibility only: the row decides whether an account exists,
-    # while its legacy env entry still supplies the password until step two.
+    # while its legacy env entry may still supply a display label.
     return next(
         (account for account in config.OCADO_ACCOUNTS if account.id == account_key),
         None,
@@ -281,7 +300,6 @@ def _account_config(
         id=row.key,
         label=(legacy.label if legacy is not None else None) or row.email or "Ocado",
         email=row.email,
-        password=legacy.password if legacy is not None else None,
         otp_markers=_markers(row.otp_markers),
     )
 
@@ -298,8 +316,6 @@ def get_account_runtime(
     root = account_dir(account.id)
     auth = AuthLadder(
         profile_dir=root / "browser-profile",
-        email=account.email,
-        password=account.password,
         otp_markers=account.otp_markers,
         account_id=account.id,
         # Imported here rather than at module scope: app.ocado.events imports the

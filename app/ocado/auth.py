@@ -54,8 +54,23 @@ SESSION_SETTLE_TIMEOUT_S = 30.0
 SESSION_SETTLE_POLL_S = 2.0
 NETWORK_IDLE_TIMEOUT_MS = 10_000
 
-EMAIL_SELECTORS = ("input[type=email]", "input[name=usernamelogin]", "input[name*=email i]")
-PASSWORD_SELECTORS = ("input[type=password]", "input[name=passwordlogin]")
+EMAIL_SELECTORS = (
+    "input[data-id=login-input]",
+    "input[data-synthetics=username-input]",
+    "input[type=email]",
+    "input[name=usernamelogin]",
+    "input[name*=email i]",
+)
+PASSWORD_SELECTORS = (
+    "input[data-id=login-password-input]",
+    "input[data-synthetics=password-input]",
+    "input[type=password]",
+    "input[name=passwordlogin]",
+)
+# A fresh profile has to load the Salesforce shell, reCAPTCHA and the login web
+# component before the fields exist. Three seconds is routinely too short on a
+# cold start, so field discovery gets one bounded wait of its own.
+LOGIN_FIELD_TIMEOUT_S = 30.0
 # Ocado's SSO is a Salesforce LWR app: the form lives in shadow DOM (Playwright
 # locators pierce it, plain querySelectorAll does not) and the submit control is a
 # styled <div>, not a <button> - so `button[type=submit]` matches nothing here.
@@ -107,6 +122,7 @@ OTP_SUBMIT_SELECTORS = (
 
 class AuthState(StrEnum):
     LOGGED_OUT = "logged_out"
+    NEEDS_PASSWORD = "needs_password"
     AWAITING_OTP = "awaiting_otp"
     READY = "ready"
 
@@ -125,26 +141,6 @@ class AuthStage(StrEnum):
     SIGNING_IN = "signing_in"
     WAITING_FOR_CODE = "waiting_for_code"
     ENTERING_CODE = "entering_code"
-
-
-class _FromConfig:
-    """Sentinel for "no credential was supplied", distinct from "there is none".
-
-    ``AuthLadder(email=None)`` used to mean *fall back to the configured account*,
-    which made two very different things unsayable apart. A test building a
-    credential-less ladder got the real account and drove a real browser at the
-    real Ocado login; and an account configured without a password inherited the
-    first account's, so ``anuja`` would have logged in as ``nikhil``.
-
-    With the sentinel, omitting the argument still reads config — every existing
-    caller is unaffected — while passing ``None`` explicitly means what it says.
-    """
-
-    def __repr__(self) -> str:  # pragma: no cover - only ever seen in a repr
-        return "<from config>"
-
-
-FROM_CONFIG: Any = _FromConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,12 +267,6 @@ class AuthLadder:
     """Refresh the Ocado cookie jar, escalating from free checks to full login."""
 
     profile_dir: Path | None = None
-    #: Defaults to :data:`FROM_CONFIG`, not ``None`` — see that sentinel. Passing
-    #: ``None`` explicitly means this ladder has no email and cannot log in.
-    email: str | None = FROM_CONFIG
-    #: ``repr=False`` because a dataclass repr lands in tracebacks and log
-    #: records. A ladder formatted into a stack trace must not print a password.
-    password: str | None = field(default=FROM_CONFIG, repr=False)
     headless: bool | None = None
     #: Where to read the emailed code from. ``None`` means ask a human for it.
     otp_mailbox: otp_mail.MailboxConfig | None = None
@@ -298,10 +288,6 @@ class AuthLadder:
 
     def __post_init__(self) -> None:
         self.profile_dir = self.profile_dir or (config.DATA_DIR / "ocado" / "browser-profile")
-        if self.email is FROM_CONFIG:
-            self.email = config.OCADO_EMAIL
-        if self.password is FROM_CONFIG:
-            self.password = config.OCADO_PASSWORD
         if self.headless is None:
             self.headless = config.OCADO_LOGIN_HEADLESS
         if self.otp_mailbox is None:
@@ -351,7 +337,8 @@ class AuthLadder:
         session: "OcadoSession",
         *,
         trust_existing: bool = True,
-        allow_login: bool = True,
+        email: str | None = None,
+        password: str | None = None,
         trigger: str = "request",
     ) -> AuthState:
         """Try the cheapest thing that could work, then escalate.
@@ -360,9 +347,9 @@ class AuthLadder:
         already has proof the jar is dead, so re-checking it would only burn a
         request confirming that and then wrongly report READY.
 
-        ``allow_login=False`` stops before the password step. The first two rungs
-        need nothing from the user, but the third emails an OTP - so anything
-        automatic (a page load, say) must not be able to reach it.
+        The first two rungs need nothing from the user. Full login is reachable
+        only when this call carries both credentials, so automatic callers cannot
+        accidentally send an OTP merely by checking or retrying a session.
 
         ``trigger`` is recorded against every rung this call reaches. It is what
         separates the heartbeat's steady drum from somebody actually shopping,
@@ -382,12 +369,14 @@ class AuthLadder:
                 log.info("ocado auth: silent refresh succeeded")
                 self.state = AuthState.READY
                 return self.state
-            if not allow_login:
-                log.info("ocado auth: quiet refresh exhausted, a full login is needed")
-                self.state = AuthState.LOGGED_OUT
+            if not email or not password:
+                log.info("ocado auth: quiet refresh exhausted, a password is needed")
+                self.state = AuthState.NEEDS_PASSWORD
                 return self.state
             log.info("ocado auth: silent refresh failed, falling back to full login")
-            return self.start_login(session, trigger=trigger)
+            return self.start_login(
+                session, email=email, password=password, trigger=trigger
+            )
         finally:
             self.stage = AuthStage.IDLE
 
@@ -438,14 +427,25 @@ class AuthLadder:
         )
         return ok
 
-    def start_login(self, session: "OcadoSession", *, trigger: str = "request") -> AuthState:
-        email = self.email
-        password = self.password
+    def start_login(
+        self,
+        session: "OcadoSession",
+        *,
+        email: str,
+        password: str,
+        trigger: str = "request",
+    ) -> AuthState:
+        """Run the credential rung without retaining credentials on the ladder.
+
+        Python cannot promise in-place secret zeroing, but these values are only
+        request-local arguments captured for the browser job; they are never
+        copied into the process-wide account runtime or persisted configuration.
+        """
         if not email or not password:
             self._record(
-                "login", "skipped", trigger=trigger, detail="no stored credentials"
+                "login", "skipped", trigger=trigger, detail="credentials not supplied"
             )
-            self.state = AuthState.LOGGED_OUT
+            self.state = AuthState.NEEDS_PASSWORD
             return self.state
         self.stage = AuthStage.SIGNING_IN
 
@@ -456,6 +456,7 @@ class AuthLadder:
             _dismiss_cookie_banner(page)
             _fill_first(page, EMAIL_SELECTORS, email)
             _fill_first(page, PASSWORD_SELECTORS, password)
+            _dismiss_cookie_banner(page)
             _click_first(page, SUBMIT_SELECTORS)
             return _await_login_outcome(page)
 
@@ -489,12 +490,20 @@ class AuthLadder:
             # submit_otp resets the state, and that is what the caller needs.
             return self.state
 
-        if outcome == "error":
+        if outcome in {"error", "timeout"}:
             self._safe_stop()
             self._record(
-                "login", "failed", trigger=trigger, detail=detail, started_at=started
+                "login",
+                "failed",
+                trigger=trigger,
+                detail=detail or "timed out waiting for Ocado",
+                started_at=started,
             )
             self.state = AuthState.LOGGED_OUT
+            if outcome == "timeout":
+                raise RuntimeError(
+                    "Ocado did not finish signing in within 90 seconds; please try again"
+                )
             raise RuntimeError(f"Ocado rejected the login: {detail}")
 
         self._finish(session)
@@ -617,6 +626,28 @@ class AuthLadder:
             # ensure_authenticated to clear the stage behind it.
             self.stage = AuthStage.IDLE
 
+    def forget(self, session: "OcadoSession") -> None:
+        """Forget both halves of the persisted Ocado login.
+
+        The httpx cookie jar is only half the session. The dedicated Chromium
+        profile holds the upstream SSO cookies used by silent refresh, so logout
+        must remove its cookie database too or the next quiet check signs
+        straight back in. The rest of the profile is deliberately preserved:
+        replacing Ocado's known browser with a brand-new identity makes its
+        invisible reCAPTCHA much more likely to stall the next login.
+        """
+        self._safe_stop()
+        self._pending_session = None
+        self._last_silent_at = None
+        self.state = AuthState.LOGGED_OUT
+        self.stage = AuthStage.IDLE
+        session.forget()
+        if self.profile_dir is not None and self.profile_dir.exists():
+            for name in ("Cookies", "Cookies-journal"):
+                for path in self.profile_dir.rglob(name):
+                    if path.is_file():
+                        path.unlink()
+
     def _finish(self, session: "OcadoSession") -> None:
         """Harvest cookies until the jar works, close the browser, record it."""
         authenticated = self._harvest_until_authenticated(session)
@@ -662,8 +693,10 @@ class AuthLadder:
             time.sleep(SESSION_SETTLE_POLL_S)
 
     def _safe_stop(self) -> None:
+        if self._worker is None:
+            return
         try:
-            self.worker.submit(lambda worker: worker.stop_browser())
+            self._worker.submit(lambda worker: worker.stop_browser())
         except Exception:  # noqa: BLE001 - shutdown must not mask the real error
             pass
 
@@ -754,8 +787,26 @@ def _visible(page: Any, selectors: tuple[str, ...]) -> Any:
     return None
 
 
+def _wait_visible(
+    page: Any,
+    selectors: tuple[str, ...],
+    *,
+    timeout: float = LOGIN_FIELD_TIMEOUT_S,
+) -> Any:
+    """Wait for a late-mounted shadow-DOM control within one shared deadline."""
+    deadline = time.monotonic() + timeout
+    while True:
+        locator = _visible(page, selectors)
+        if locator is not None:
+            return locator
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        page.wait_for_timeout(min(500, max(1, int(remaining * 1000))))
+
+
 def _fill_first(page: Any, selectors: tuple[str, ...], value: str) -> None:
-    locator = _visible(page, selectors)
+    locator = _wait_visible(page, selectors)
     if locator is None:
         raise RuntimeError(f"could not find an Ocado login field matching {selectors[0]}")
     locator.fill(value)

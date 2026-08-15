@@ -191,17 +191,14 @@ class Heartbeat:
     def check_account(self, account_id: str) -> None:
         """One quiet check. Never escalates past the silent refresh.
 
-        ``allow_login=False`` is the whole safety story: rung 3 emails a one-time
-        code, and a background timer must never be able to send somebody a code
-        they did not ask for.
+        No credentials are supplied here, which is the whole safety story: rung
+        3 emails a one-time code, and a background timer must never reach it.
         """
         from app.ocado.session import get_account_runtime
 
         runtime = get_account_runtime(account_id)
         try:
-            state = runtime.auth.ensure_authenticated(
-                runtime.session, allow_login=False, trigger="heartbeat"
-            )
+            state = runtime.auth.ensure_authenticated(runtime.session, trigger="heartbeat")
         except Exception:  # noqa: BLE001 - a failed check is data, not an outage
             log.warning(
                 "ocado heartbeat: check failed for %s", account_id, exc_info=True

@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from app import protein as protein_mod
 from app import schedule as schedule_mod
@@ -870,6 +870,11 @@ class CartAccountIn(BaseModel):
     account_id: str | None = None
 
 
+class CartLoginIn(CartAccountIn):
+    email: str
+    password: SecretStr
+
+
 class CartLoginOut(BaseModel):
     account_id: str
     status: str
@@ -967,7 +972,7 @@ class CheckoutItemOut(BaseModel):
     desired_quantity: int = 0
     synced_quantity: int = 0
     cart_quantity: int = 0
-    cost: float = 0.0
+    cost: float | None = None
     cost_source: Literal["live", "planned"] = "planned"
     status: Literal["not_synced", "changed", "deleted", "extra", "synced"]
 

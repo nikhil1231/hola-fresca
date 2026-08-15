@@ -77,10 +77,10 @@ class CartSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class AuthStatus:
-    """Where the ladder stopped, in the three states every shop shares."""
+    """Where the ladder stopped, in the states every shop shares."""
 
     account_id: str
-    #: ``logged_out`` | ``awaiting_otp`` | ``ready``
+    #: ``logged_out`` | ``needs_password`` | ``awaiting_otp`` | ``ready``
     status: str
     #: Free-text progress for a UI that shows what the ladder is doing. Ocado
     #: reports a rung; Sainsbury's climbs too fast for it to be worth watching.
@@ -120,17 +120,25 @@ class CartAdapter(ABC):
 
     @abstractmethod
     def ensure_authenticated(
-        self, account_id: str | None = None, *, allow_login: bool = True
+        self,
+        account_id: str | None = None,
+        *,
+        email: str | None = None,
+        password: str | None = None,
     ) -> AuthStatus:
         """Climb as far as possible.
 
-        ``allow_login=False`` stops before anything that would email somebody a
-        code, which is what makes this safe to call on page load.
+        Full login is reachable only when both credentials are supplied. Calls
+        without them are quiet and safe to make on page load or after a 401.
         """
 
     @abstractmethod
     def submit_otp(self, code: str, account_id: str | None = None) -> AuthStatus:
         ...
+
+    @abstractmethod
+    def logout(self, account_id: str | None = None) -> AuthStatus:
+        """Forget the persisted session for one retailer account."""
 
     # --- the cart ---
 
@@ -223,10 +231,16 @@ class OcadoAdapter(CartAdapter):
         )
 
     def ensure_authenticated(
-        self, account_id: str | None = None, *, allow_login: bool = True
+        self,
+        account_id: str | None = None,
+        *,
+        email: str | None = None,
+        password: str | None = None,
     ) -> AuthStatus:
         runtime = self._runtime(account_id)
-        state = runtime.auth.ensure_authenticated(runtime.session, allow_login=allow_login)
+        state = runtime.auth.ensure_authenticated(
+            runtime.session, email=email, password=password
+        )
         return AuthStatus(
             account_id=runtime.account.id, status=str(state), stage=str(runtime.auth.stage)
         )
@@ -236,6 +250,15 @@ class OcadoAdapter(CartAdapter):
         state = runtime.auth.submit_otp(code)
         return AuthStatus(
             account_id=runtime.account.id, status=str(state), stage=str(runtime.auth.stage)
+        )
+
+    def logout(self, account_id: str | None = None) -> AuthStatus:
+        runtime = self._runtime(account_id)
+        runtime.auth.forget(runtime.session)
+        return AuthStatus(
+            account_id=runtime.account.id,
+            status=str(runtime.auth.state),
+            stage=str(runtime.auth.stage),
         )
 
     def cart(self, account_id: str | None = None) -> CartSnapshot:
@@ -332,21 +355,26 @@ class SainsburysAdapter(CartAdapter):
         return AuthStatus(account_id=self.ACCOUNT_ID, status=str(self._session().state))
 
     def ensure_authenticated(
-        self, account_id: str | None = None, *, allow_login: bool = True
+        self,
+        account_id: str | None = None,
+        *,
+        email: str | None = None,
+        password: str | None = None,
     ) -> AuthStatus:
         session = self._session()
-        if not allow_login:
-            return AuthStatus(
-                account_id=self.ACCOUNT_ID, status=str(session.refresh_quietly())
-            )
         return AuthStatus(
-            account_id=self.ACCOUNT_ID, status=str(session.ensure_authenticated())
+            account_id=self.ACCOUNT_ID,
+            status=str(session.ensure_authenticated(email=email, password=password)),
         )
 
     def submit_otp(self, code: str, account_id: str | None = None) -> AuthStatus:
         return AuthStatus(
             account_id=self.ACCOUNT_ID, status=str(self._session().submit_otp(code))
         )
+
+    def logout(self, account_id: str | None = None) -> AuthStatus:
+        self._session().forget()
+        return AuthStatus(account_id=self.ACCOUNT_ID, status="logged_out")
 
     def cart(self, account_id: str | None = None) -> CartSnapshot:
         client = self._client()

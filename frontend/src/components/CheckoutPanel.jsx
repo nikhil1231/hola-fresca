@@ -1,13 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
   Alert,
-  Badge,
   Box,
   Button,
   Group,
   Loader,
-  PasswordInput,
-  Select,
   Stack,
   Table,
   Text,
@@ -19,7 +16,6 @@ import {
   IconCircleCheck,
   IconCircleDashed,
   IconCloudUpload,
-  IconLogin,
   IconPlugOff,
   IconPlus,
   IconRefresh,
@@ -27,21 +23,14 @@ import {
 } from '@tabler/icons-react'
 
 import {
-  useCartAccounts,
-  useCartLogin,
-  useCartOtp,
   useCartPush,
   useCartPushPlan,
-  useCartSessionRefresh,
-  useCartStatus,
 } from '../hooks/useCartQueries.js'
+import { useCartConnection } from '../hooks/useCartConnection.js'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
+import RetailerLoginPanel, { RetailerAccountStatus } from './RetailerLoginPanel.jsx'
 import classes from './CheckoutPanel.module.css'
 
-// Remembered per shop. One key for both would offer Sainsbury's an Ocado
-// account id on the first render after a switch, and the panel would flicker
-// through a connection it cannot have.
-const accountStorageKey = (retailer) => `holafresca:cart-account-id:${retailer}`
 const money = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' })
 const ACTIONABLE_STATUSES = new Set(['not_synced', 'changed', 'deleted'])
 
@@ -95,23 +84,6 @@ function formatMoney(value) {
   return money.format(value ?? 0)
 }
 
-function statusLabel(status) {
-  if (status === 'ready') return 'connected'
-  if (status === 'awaiting_otp') return 'awaiting OTP'
-  return 'logged out'
-}
-
-const STAGE_LABELS = {
-  checking_session: 'Checking your saved session…',
-  signing_in: 'Signing in…',
-  waiting_for_code: 'Waiting for the emailed code…',
-  entering_code: 'Entering the code…',
-}
-
-function stageLabel(stage, fallback) {
-  return STAGE_LABELS[stage] ?? fallback
-}
-
 function plannedCheckoutItems(lines, ownedItemKeySet) {
   const items = new Map()
   for (const line of lines ?? []) {
@@ -120,7 +92,7 @@ function plannedCheckoutItems(lines, ownedItemKeySet) {
       const current = items.get(choice.sku)
       if (current) {
         current.desired_quantity += choice.count ?? 0
-        current.cost += choice.cost ?? 0
+        if (choice.cost != null) current.cost = (current.cost ?? 0) + choice.cost
         continue
       }
       items.set(choice.sku, {
@@ -131,7 +103,7 @@ function plannedCheckoutItems(lines, ownedItemKeySet) {
         desired_quantity: choice.count ?? 0,
         synced_quantity: 0,
         cart_quantity: 0,
-        cost: choice.cost ?? 0,
+        cost: choice.cost ?? null,
         cost_source: 'planned',
         status: 'unverified',
       })
@@ -188,78 +160,6 @@ function StatusLegend({ shop = DEFAULT_SHOP }) {
   )
 }
 
-function ConnectionPanel({
-  accountId,
-  awaitingOtp,
-  handlingCode,
-  login,
-  otp,
-  otpCode,
-  reconnecting,
-  setOtpCode,
-  shop = DEFAULT_SHOP,
-  stage,
-  status,
-}) {
-  const signingIn = login.isPending || reconnecting
-  return (
-    <Box className={classes.connectionPanel}>
-      <Stack gap="sm">
-        <Group justify="space-between">
-          <Title order={4}>{awaitingOtp ? 'Check your email' : `Connect to ${shop}`}</Title>
-          {(status.isLoading || reconnecting || handlingCode) && <Loader size="sm" />}
-        </Group>
-        {awaitingOtp ? (
-          <>
-            <Text size="sm" c="dimmed">
-              {shop} sent a verification code. Enter it to finish signing in.
-            </Text>
-            <Group align="flex-end">
-              <PasswordInput
-                label="Verification code"
-                value={otpCode}
-                onChange={(event) => setOtpCode(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && otpCode.trim()) otp.mutate(otpCode)
-                }}
-                flex={1}
-              />
-              <Button
-                disabled={!otpCode.trim() || otp.isPending}
-                loading={otp.isPending}
-                onClick={() => otp.mutate(otpCode)}
-              >
-                Submit
-              </Button>
-            </Group>
-          </>
-        ) : (
-          <>
-            <Text size="sm" c="dimmed">
-              {reconnecting
-                ? 'Reusing your saved session…'
-                : `Connect to compare this plan with the live ${shop} basket.`}
-            </Text>
-            <Button
-              leftSection={signingIn ? null : <IconLogin size={16} />}
-              disabled={!accountId || signingIn}
-              loading={signingIn}
-              onClick={() => login.mutate()}
-            >
-              {signingIn ? stageLabel(stage, 'Signing in…') : `Sign in to ${shop}`}
-            </Button>
-          </>
-        )}
-        {(login.error || otp.error || status.error) && (
-          <Alert color="red" icon={<IconAlertCircle size={18} />}>
-            {login.error?.message ?? otp.error?.message ?? status.error?.message}
-          </Alert>
-        )}
-      </Stack>
-    </Box>
-  )
-}
-
 export default function CheckoutPanel({
   lines,
   ownedItemKeys,
@@ -272,71 +172,16 @@ export default function CheckoutPanel({
   weekStart,
 }) {
   const { id: retailer, label: retailerLabel } = useActiveRetailer()
-  const accounts = useCartAccounts(retailer)
-  const [accountId, setAccountId] = useState(null)
-  const selectedAccount = useMemo(
-    () => (accounts.data?.items ?? []).find((account) => account.id === accountId) ?? null,
-    [accounts.data?.items, accountId],
-  )
-  const login = useCartLogin(retailer, accountId)
-  const sessionRefresh = useCartSessionRefresh(retailer, accountId)
-  const status = useCartStatus(retailer, accountId, {
-    enabled: Boolean(selectedAccount),
-    active: login.isPending || sessionRefresh.isPending,
-  })
-  const otp = useCartOtp(retailer, accountId)
+  const connection = useCartConnection(retailer)
+  const { accountId, connected } = connection
   const push = useCartPush(retailer, accountId)
-  const connected = status.data?.status === 'ready'
   const plan = useCartPushPlan(
     { retailer, accountId, selections, ownedItemKeys, packOverrides, snapOverrides },
     { enabled: connected },
   )
-  const reconnectAttempted = useRef(new Set())
-  const mutationActions = useRef(null)
-  mutationActions.current = {
-    resetLogin: login.reset,
-    resetOtp: otp.reset,
-    resetPush: push.reset,
-    refreshSession: sessionRefresh.mutate,
-  }
-  const [otpCode, setOtpCode] = useState('')
-
   useEffect(() => {
-    const items = accounts.data?.items ?? []
-    if (!items.length) return
-    if (accountId && items.some((account) => account.id === accountId)) return
-    const remembered = window.localStorage.getItem(accountStorageKey(retailer))
-    const next = items.some((account) => account.id === remembered)
-      ? remembered
-      : accounts.data?.default_account_id ?? items[0].id
-    setAccountId(next)
-    window.localStorage.setItem(accountStorageKey(retailer), next)
-  }, [accountId, accounts.data, retailer])
-
-  // Switching shops means the selected account belongs to the other one.
-  useEffect(() => {
-    setAccountId(null)
-  }, [retailer])
-
-  useEffect(() => {
-    if (!accountId || !retailer) return
-    window.localStorage.setItem(accountStorageKey(retailer), accountId)
-    setOtpCode('')
-    mutationActions.current.resetLogin()
-    mutationActions.current.resetOtp()
-    mutationActions.current.resetPush()
-  }, [accountId])
-
-  useEffect(() => {
-    if (!accountId || status.data?.status !== 'logged_out') return
-    if (reconnectAttempted.current.has(accountId)) return
-    reconnectAttempted.current.add(accountId)
-    mutationActions.current.refreshSession()
-  }, [accountId, status.data?.status])
-
-  useEffect(() => {
-    mutationActions.current.resetPush()
-  }, [weekStart])
+    push.reset()
+  }, [accountId, weekStart])
 
   const fallbackItems = useMemo(
     () => plannedCheckoutItems(lines, ownedItemKeySet),
@@ -345,9 +190,7 @@ export default function CheckoutPanel({
   const items = connected && plan.data ? plan.data.checkout_items : fallbackItems
   const actionable = items.some((item) => ACTIONABLE_STATUSES.has(item.status))
   const total = items.reduce((sum, item) => sum + (item.cost ?? 0), 0)
-  const stage = status.data?.stage ?? 'idle'
-  const awaitingOtp = status.data?.status === 'awaiting_otp'
-  const handlingCode = stage === 'waiting_for_code' || stage === 'entering_code'
+  const hasUnknownCosts = items.some((item) => item.cost == null)
   const shop = retailerLabel ?? DEFAULT_SHOP
 
   return (
@@ -355,22 +198,7 @@ export default function CheckoutPanel({
       <Group justify="space-between" align="center" wrap="wrap">
         <Group gap="sm">
           <Title order={3} className={classes.title}>Checkout</Title>
-          <Select
-            aria-label={`${shop} account`}
-            value={accountId}
-            onChange={(value) => value && setAccountId(value)}
-            data={(accounts.data?.items ?? []).map((account) => ({
-              value: account.id,
-              label: account.label,
-            }))}
-            disabled={accounts.isLoading || (accounts.data?.items ?? []).length <= 1}
-            allowDeselect={false}
-            size="xs"
-            w={180}
-          />
-          <Badge color={connected ? 'green' : 'gray'} variant="light">
-            {statusLabel(status.data?.status)}
-          </Badge>
+          <RetailerAccountStatus connection={connection} shop={shop} />
         </Group>
         <Button
           color="green"
@@ -393,19 +221,7 @@ export default function CheckoutPanel({
       </Group>
 
       {!connected && (
-        <ConnectionPanel
-          accountId={accountId}
-          awaitingOtp={awaitingOtp}
-          handlingCode={handlingCode}
-          login={login}
-          otp={otp}
-          otpCode={otpCode}
-          reconnecting={sessionRefresh.isPending}
-          setOtpCode={setOtpCode}
-          shop={shop}
-          stage={stage}
-          status={status}
-        />
+        <RetailerLoginPanel connection={connection} shop={shop} />
       )}
 
       {plan.error && (
@@ -476,10 +292,16 @@ export default function CheckoutPanel({
                   </Table.Td>
                   <Table.Td ta="right">
                     <Tooltip
-                      label={item.cost_source === 'live' ? `Live ${shop} basket total` : 'Planned price until synced'}
+                      label={item.cost == null
+                        ? 'Price unavailable'
+                        : item.cost_source === 'live'
+                          ? `Live ${shop} basket total`
+                          : 'Planned price until synced'}
                       withArrow
                     >
-                      <Text fw={700} size="sm" className={classes.cost}>{formatMoney(item.cost)}</Text>
+                      <Text fw={700} size="sm" className={classes.cost}>
+                        {item.cost == null ? '—' : formatMoney(item.cost)}
+                      </Text>
                     </Tooltip>
                   </Table.Td>
                 </Table.Tr>
@@ -488,7 +310,7 @@ export default function CheckoutPanel({
             <Table.Tfoot>
               <Table.Tr>
                 <Table.Th />
-                <Table.Th>Total</Table.Th>
+                <Table.Th>{hasUnknownCosts ? 'Known total' : 'Total'}</Table.Th>
                 <Table.Th ta="right">{formatMoney(total)}</Table.Th>
               </Table.Tr>
             </Table.Tfoot>

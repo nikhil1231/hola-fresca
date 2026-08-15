@@ -97,6 +97,7 @@ REQUEST_TIMEOUT_S = 30.0
 
 class AuthState(StrEnum):
     LOGGED_OUT = "logged_out"
+    NEEDS_PASSWORD = "needs_password"
     AWAITING_OTP = "awaiting_otp"
     READY = "ready"
 

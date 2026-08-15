@@ -18,10 +18,20 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
-import { IconAlertCircle, IconDeviceFloppy, IconLogout, IconSettings } from '@tabler/icons-react'
+import {
+  IconAlertCircle,
+  IconCircleCheck,
+  IconDeviceFloppy,
+  IconLogout,
+  IconSettings,
+} from '@tabler/icons-react'
 
 import PageHeader from '../components/PageHeader.jsx'
+import RetailerLoginPanel, {
+  RetailerAccountStatus,
+} from '../components/RetailerLoginPanel.jsx'
 import { useAccount } from '../hooks/useAccount.js'
+import { useCartConnection } from '../hooks/useCartConnection.js'
 import {
   formatWeekRange,
   useSchedule,
@@ -88,6 +98,7 @@ function toDraft(settings) {
 function WhereYouShop() {
   const { data, isPending, isError, error } = useRetailers()
   const setRetailer = useSetRetailer()
+  const connection = useCartConnection(data?.active ?? null)
 
   if (isPending) {
     return (
@@ -138,6 +149,24 @@ function WhereYouShop() {
           </Alert>
         )}
 
+        {active?.shoppable && (
+          <Stack gap="sm">
+            <Group gap="sm">
+              <RetailerAccountStatus connection={connection} shop={active.label} />
+            </Group>
+            {connection.connected ? (
+              <Alert color="green" variant="light" icon={<IconCircleCheck size={18} />}>
+                Connected to {active.label}.
+              </Alert>
+            ) : (
+              <RetailerLoginPanel connection={connection} shop={active.label} />
+            )}
+            {(connection.connected || connection.logout.isPending) && (
+              <RetailerLogout key={active.id} retailer={active} connection={connection} />
+            )}
+          </Stack>
+        )}
+
         <Text size="xs" c="dimmed">
           {active?.shoppable
             ? 'Baskets can be sent straight to this shop\u2019s trolley.'
@@ -151,6 +180,34 @@ function WhereYouShop() {
         </Text>
       </Stack>
     </Paper>
+  )
+}
+
+function RetailerLogout({ retailer, connection }) {
+  const { disconnect, logout } = connection
+
+  return (
+    <Stack gap="xs" align="flex-start">
+      <Button
+        variant="default"
+        leftSection={<IconLogout size={16} />}
+        loading={logout.isPending}
+        onClick={disconnect}
+      >
+        Log out of {retailer.label}
+      </Button>
+
+      {logout.isSuccess && (
+        <Text size="xs" c="dimmed">
+          Logged out of {retailer.label}.
+        </Text>
+      )}
+      {logout.isError && (
+        <Alert color="red" icon={<IconAlertCircle size={18} />}>
+          {logout.error?.message}
+        </Alert>
+      )}
+    </Stack>
   )
 }
 

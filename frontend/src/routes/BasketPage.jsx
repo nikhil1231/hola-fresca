@@ -41,7 +41,6 @@ import {
 import CheckoutPanel from '../components/CheckoutPanel.jsx'
 import RecipeCard from '../components/RecipeCard.jsx'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
-import RetailerChip from '../components/RetailerChip.jsx'
 import { useOwnedBasketItems } from '../hooks/useOwnedBasketItems.js'
 import { useWeekPackChoices } from '../hooks/useWeekPackChoices.js'
 import { usePackPreference, usePlannerBasket, useStockRefresh } from '../hooks/useRecipeQueries.js'
@@ -827,7 +826,6 @@ function BasketSummary({
         <div>
           <Group gap="xs" align="center">
             <Title order={1} className={classes.summaryTitle}>Basket</Title>
-            <RetailerChip />
           </Group>
           <Text className={classes.summarySubtitle}>
             {entries.length} {recipeWord} · {totalPortions} {portionWord} · {formatWeekLabel(weekStart)}
@@ -883,7 +881,7 @@ function BasketControls({
           retailer has. Hiding the tab beats showing one that leads nowhere. */}
       {canCheckout && (
         <SegmentedControl
-          size="md"
+          size="sm"
           value={pageView}
           onChange={setPageView}
           data={[
@@ -1406,7 +1404,6 @@ export default function BasketPage() {
           <div className={classes.mobileTopRow}>
             <Group gap="xs" align="center">
               <Title order={1} className={classes.mobilePageTitle}>Basket</Title>
-              <RetailerChip size="xs" />
               {readOnly && (
                 <Badge color="gray" variant="light" radius="sm" leftSection={<IconLock size={12} />}>
                   Past

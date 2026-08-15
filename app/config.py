@@ -96,7 +96,6 @@ OCADO_OTP_POLL_S = float(os.environ.get("OCADO_OTP_POLL_S", "4"))
 # What that costs instead is a one-time emailed code, and what it buys is a
 # refresh token — so the code is asked for once, not once a week.
 SAINSBURYS_EMAIL = os.environ.get("SAINSBURYS_EMAIL")
-SAINSBURYS_PASSWORD = os.environ.get("SAINSBURYS_PASSWORD")
 # The mailbox Sainsbury's login codes are read from, for an unattended login.
 #
 # Deliberately NOT defaulted to the Ocado OTP mailbox, even though the two could
@@ -119,7 +118,6 @@ class OcadoAccountConfig:
     id: str
     label: str
     email: str | None = None
-    password: str | None = None
     #: Strings that identify this account's mail in the shared OTP mailbox.
     otp_markers: tuple[str, ...] = ()
 
@@ -163,7 +161,6 @@ def _configured_ocado_accounts() -> tuple[OcadoAccountConfig, ...]:
                 id="default",
                 label=os.environ.get("OCADO_LABEL") or email or "Ocado",
                 email=email,
-                password=os.environ.get("OCADO_PASSWORD"),
                 otp_markers=_otp_markers("default", email),
             ),
         )
@@ -185,7 +182,6 @@ def _configured_ocado_accounts() -> tuple[OcadoAccountConfig, ...]:
                 id=account_id,
                 label=os.environ.get(f"{prefix}_LABEL") or account_id,
                 email=email,
-                password=os.environ.get(f"{prefix}_PASSWORD"),
                 otp_markers=_otp_markers(account_id, email),
             )
         )
@@ -196,9 +192,6 @@ OCADO_ACCOUNTS = _configured_ocado_accounts()
 OCADO_ACCOUNT_IDS = tuple(account.id for account in OCADO_ACCOUNTS)
 DEFAULT_OCADO_ACCOUNT_ID = OCADO_ACCOUNTS[0].id
 
-# Legacy names are kept for code/tests that construct the default ladder by hand.
-OCADO_EMAIL = OCADO_ACCOUNTS[0].email
-OCADO_PASSWORD = OCADO_ACCOUNTS[0].password
 # Login drives a real browser (Ocado's SSO runs reCAPTCHA, which no HTTP client
 # can clear). Headless by default so it works on a box with no display; if
 # reCAPTCHA starts challenging, run the server under `xvfb-run` and set this to 0

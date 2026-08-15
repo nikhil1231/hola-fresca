@@ -6,7 +6,13 @@ import pytest
 from types import SimpleNamespace
 
 from app.ocado import auth as auth_module
-from app.ocado.auth import AuthLadder, AuthStage, AuthState, _await_login_outcome
+from app.ocado.auth import (
+    AuthLadder,
+    AuthStage,
+    AuthState,
+    _await_login_outcome,
+    _fill_first,
+)
 from app.ocado.otp_mail import MailboxConfig
 
 
@@ -51,6 +57,85 @@ class FakeWorker:
 
     page = None
     context = None
+
+
+def test_a_late_mounted_login_field_is_waited_for():
+    class Locator:
+        def __init__(self, page):
+            self.page = page
+            self.first = self
+
+        def count(self):
+            return int(self.page.polls >= 2)
+
+        def is_visible(self):
+            return self.page.polls >= 2
+
+        def fill(self, value):
+            self.page.filled = value
+
+    class Page:
+        polls = 0
+        filled = None
+
+        def locator(self, _selector):
+            return Locator(self)
+
+        def wait_for_timeout(self, _milliseconds):
+            self.polls += 1
+
+    page = Page()
+
+    _fill_first(page, ("input[type=email]",), "shopper@example.com")
+
+    assert page.polls == 2
+    assert page.filled == "shopper@example.com"
+
+
+def test_forget_clears_browser_cookies_without_replacing_the_profile(tmp_path):
+    profile = tmp_path / "browser-profile"
+    default = profile / "Default"
+    default.mkdir(parents=True)
+    (default / "Cookies").write_text("session", encoding="utf-8")
+    (default / "Cookies-journal").write_text("session", encoding="utf-8")
+    (default / "Preferences").write_text("known browser", encoding="utf-8")
+    auth = AuthLadder(profile_dir=profile, headless=True)
+    auth.state = AuthState.READY
+    session = SimpleNamespace(forget_calls=0)
+
+    def forget():
+        session.forget_calls += 1
+
+    session.forget = forget
+
+    auth.forget(session)
+
+    assert session.forget_calls == 1
+    assert auth.state == AuthState.LOGGED_OUT
+    assert profile.exists()
+    assert not (default / "Cookies").exists()
+    assert not (default / "Cookies-journal").exists()
+    assert (default / "Preferences").read_text(encoding="utf-8") == "known browser"
+
+
+def test_a_password_step_timeout_fails_without_trying_to_harvest(monkeypatch):
+    auth = AuthLadder(profile_dir=None, headless=True)
+
+    class TimedOutWorker:
+        def submit(self, _job):
+            return "timeout", None
+
+    auth._worker = TimedOutWorker()
+    monkeypatch.setattr(
+        auth,
+        "_finish",
+        lambda _session: pytest.fail("a timed-out login was not accepted"),
+    )
+
+    with pytest.raises(RuntimeError, match="within 90 seconds"):
+        auth.start_login(FakeSession(), email="a@example.com", password="secret")
+
+    assert auth.state == AuthState.LOGGED_OUT
 
 
 def ladder(*, silent_works=False, login_outcome=None, session_after=None):
@@ -99,7 +184,9 @@ def test_a_failed_silent_refresh_escalates_to_full_login():
     auth = ladder(silent_works=False, login_outcome=AuthState.AWAITING_OTP)
     session = FakeSession(authenticated=False)
 
-    assert auth.ensure_authenticated(session) == AuthState.AWAITING_OTP
+    assert auth.ensure_authenticated(
+        session, email="a@example.com", password="secret"
+    ) == AuthState.AWAITING_OTP
     assert auth.calls == ["silent", "login"]
 
 
@@ -113,9 +200,9 @@ def test_a_quiet_refresh_never_reaches_the_password_step():
     auth = ladder(silent_works=False, login_outcome=AuthState.AWAITING_OTP)
     session = FakeSession(authenticated=False)
 
-    state = auth.ensure_authenticated(session, allow_login=False)
+    state = auth.ensure_authenticated(session)
 
-    assert state == AuthState.LOGGED_OUT
+    assert state == AuthState.NEEDS_PASSWORD
     assert auth.calls == ["silent"], "must not start a login that emails a code"
 
 
@@ -123,7 +210,7 @@ def test_a_quiet_refresh_still_reports_a_working_session():
     auth = ladder(silent_works=True)
     session = FakeSession(authenticated=False)
 
-    assert auth.ensure_authenticated(session, allow_login=False) == AuthState.READY
+    assert auth.ensure_authenticated(session) == AuthState.READY
 
 
 def test_a_401_caller_is_not_allowed_to_short_circuit():
@@ -341,7 +428,9 @@ def test_a_failed_login_does_not_leave_a_stage_stuck_on_screen():
     auth.start_login = explode
 
     with pytest.raises(RuntimeError):
-        auth.ensure_authenticated(FakeSession())
+        auth.ensure_authenticated(
+            FakeSession(), email="a@example.com", password="secret"
+        )
     assert auth.stage == AuthStage.IDLE
 
 

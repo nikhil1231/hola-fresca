@@ -13,6 +13,7 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  TextInput,
   Tooltip,
 } from '@mantine/core'
 import { useDisclosure, useIntersection, useMediaQuery } from '@mantine/hooks'
@@ -21,6 +22,7 @@ import {
   IconCalendarWeek,
   IconCheck,
   IconMoodEmpty,
+  IconSearch,
   IconSparkles,
 } from '@tabler/icons-react'
 
@@ -29,6 +31,7 @@ import { DEFAULT_FACETS } from '../data/defaultFacets.js'
 import RecipeCard, { RecipeCardSkeleton } from '../components/RecipeCard.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import { useFilters, countActiveFilters } from '../hooks/useFilters.js'
+import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 import { useActiveRetailer } from '../hooks/useRetailer.js'
 import {
   useFacets,
@@ -109,6 +112,25 @@ function BasketBadge({ loading, error, cost }) {
     >
       {badge}
     </Tooltip>
+  )
+}
+
+function BrowseSearch({ query, onSearch, fluid = false }) {
+  const [value, setValue] = useDebouncedSearch(query ?? '', (next) => {
+    onSearch(next.trim() || null)
+  })
+
+  return (
+    <TextInput
+      value={value}
+      onChange={(event) => setValue(event.currentTarget.value)}
+      placeholder="Search recipes"
+      leftSection={<IconSearch size={16} />}
+      radius="md"
+      size="sm"
+      w={fluid ? '100%' : 240}
+      aria-label="Search recipes"
+    />
   )
 }
 
@@ -393,7 +415,7 @@ export default function BrowsePage() {
           }
         />
 
-        <Group justify="space-between" wrap="nowrap" visibleFrom="sm">
+        <Group justify="space-between" wrap="wrap" visibleFrom="sm">
           <Group gap="sm">
             <Button
               hiddenFrom="md"
@@ -407,8 +429,6 @@ export default function BrowsePage() {
             <Text c="dimmed" size="sm">
               {isLoading ? 'Loading…' : `${total.toLocaleString()} recipes`}
             </Text>
-          </Group>
-          <Group gap="xs" wrap="nowrap">
             <BasketBadge loading={basketLoading} error={basketError} cost={basket?.cost} />
             <Button
               variant={bestFitActive ? 'filled' : 'default'}
@@ -420,6 +440,9 @@ export default function BrowsePage() {
             >
               Best fit
             </Button>
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            <BrowseSearch query={filters.q} onSearch={(value) => setScalar('q', value)} />
             <Select
               value={sortValue}
               onChange={(v) => setScalar('sort', v)}
@@ -460,16 +483,25 @@ export default function BrowsePage() {
               Best fit
             </Button>
           </Group>
-          <Select
-            value={sortValue}
-            onChange={(v) => setScalar('sort', v)}
-            data={sortOptions}
-            allowDeselect={false}
-            radius="md"
-            size="sm"
-            w="100%"
-            aria-label="Sort recipes"
-          />
+          <Group gap="xs" wrap="nowrap">
+            <Box style={{ flex: 1, minWidth: 0 }}>
+              <BrowseSearch
+                query={filters.q}
+                onSearch={(value) => setScalar('q', value)}
+                fluid
+              />
+            </Box>
+            <Select
+              value={sortValue}
+              onChange={(v) => setScalar('sort', v)}
+              data={sortOptions}
+              allowDeselect={false}
+              radius="md"
+              size="sm"
+              w={150}
+              aria-label="Sort recipes"
+            />
+          </Group>
         </Stack>
 
         {isError ? (

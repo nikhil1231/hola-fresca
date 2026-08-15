@@ -1,9 +1,8 @@
 """Backfill the database account registry from the legacy environment config.
 
-This is intentionally transitional.  Step one moves account *discovery* into
-the database without changing how a login obtains its password.  Step two will
-remove the environment credential registry; until then this seed keeps existing
-cookie/profile keys and their owners stable across the deployment.
+This is intentionally transitional. It imports the old account metadata once
+so existing cookie/profile keys and their owners stay stable across deployment.
+Passwords are deliberately absent from both this protocol and the registry.
 """
 from __future__ import annotations
 

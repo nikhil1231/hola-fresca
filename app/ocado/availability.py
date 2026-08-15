@@ -107,10 +107,20 @@ def _fetch_batch(
     if not batch or state.budget <= 0:
         return
     state.budget -= 1
+    response = None
     try:
-        response = session.request("PUT", PRODUCTS_PATH, json=batch)
+        response = session.request(
+            "PUT", PRODUCTS_PATH, json=batch, reauthenticate=False
+        )
         response.raise_for_status()
     except Exception:  # noqa: BLE001 - the id that caused it is what matters
+        # Only Ocado's known "one retired id poisoned this batch" 500 is safe to
+        # bisect. Authentication failures and network outages affect every id;
+        # splitting those would turn one failed price check into minutes of
+        # identical retries while the UI remains stuck on "Checking Ocado".
+        status = getattr(response, "status_code", getattr(response, "status", None))
+        if status != 500:
+            raise
         if len(batch) == 1:
             log.info("ocado stock: %s could not be decorated, treating as unlisted", batch[0])
             return

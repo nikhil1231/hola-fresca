@@ -54,8 +54,12 @@ export function fetchCartStatus(retailer, accountId) {
   return getJSON(`${base(retailer)}/status${accountQuery(accountId)}`)
 }
 
-export function startCartLogin(retailer, accountId) {
-  return postJSON(`${base(retailer)}/login`, { account_id: accountId })
+export function startCartLogin({ retailer, accountId, email, password }) {
+  return postJSON(`${base(retailer)}/login`, {
+    account_id: accountId,
+    email,
+    password,
+  })
 }
 
 export function refreshCartSession(retailer, accountId) {
@@ -64,6 +68,10 @@ export function refreshCartSession(retailer, accountId) {
 
 export function submitCartOtp({ retailer, accountId, code }) {
   return postJSON(`${base(retailer)}/otp`, { account_id: accountId, code })
+}
+
+export function logoutCart(retailer) {
+  return postJSON(`${base(retailer)}/logout`)
 }
 
 export function pushCartBasket({

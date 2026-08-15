@@ -27,20 +27,12 @@ class _FakeSession:
         return self.authenticated
 
 
-#: An explicit ``None`` now means "this ladder has no credentials" rather than
-#: "read them from config" — see :data:`app.ocado.auth.FROM_CONFIG`. Before that
-#: sentinel existed, this dict was the difference between a unit test and a real
-#: browser pointed at the real Ocado login.
-NO_CREDENTIALS = {"email": None, "password": None}
-
-
 def _ladder(**kwargs) -> tuple[AuthLadder, list[LadderEvent]]:
     events: list[LadderEvent] = []
     ladder = AuthLadder(
         account_id="test",
         on_event=events.append,
         otp_mailbox=None,
-        **NO_CREDENTIALS,
         **kwargs,
     )
     return ladder, events
@@ -66,10 +58,10 @@ def test_dead_jar_records_the_probe_failure_then_the_silent_attempt(monkeypatch)
     session = _FakeSession(authenticated=False)
     monkeypatch.setattr(AuthLadder, "try_silent", lambda self, session, **kw: False)
 
-    # allow_login=False is what the heartbeat passes: it must stop here.
-    state = ladder.ensure_authenticated(session, allow_login=False, trigger="heartbeat")
+    # No credentials is what makes the heartbeat stop here.
+    state = ladder.ensure_authenticated(session, trigger="heartbeat")
 
-    assert state == AuthState.LOGGED_OUT
+    assert state == AuthState.NEEDS_PASSWORD
     assert [(e.rung, e.outcome) for e in events] == [("probe", "failed")]
 
 
@@ -77,11 +69,13 @@ def test_a_login_without_credentials_is_recorded_as_skipped():
     ladder, events = _ladder()
     session = _FakeSession(authenticated=False)
 
-    state = ladder.start_login(session, trigger="heartbeat")
+    state = ladder.start_login(
+        session, email="", password="", trigger="heartbeat"
+    )
 
-    assert state == AuthState.LOGGED_OUT
+    assert state == AuthState.NEEDS_PASSWORD
     assert [(e.rung, e.outcome, e.detail) for e in events] == [
-        ("login", "skipped", "no stored credentials")
+        ("login", "skipped", "credentials not supplied")
     ]
 
 
@@ -96,50 +90,11 @@ def test_a_broken_sink_cannot_fail_a_login():
     assert ladder.ensure_authenticated(session) == AuthState.READY
 
 
-def test_the_password_is_not_in_the_repr():
-    """A ladder formatted into a traceback must not print a credential."""
-    ladder = AuthLadder(
-        account_id="test", otp_mailbox=None, email="a@b.c", password="hunter2"
-    )
-    assert "hunter2" not in repr(ladder)
-
-
-# -- the credential sentinel -----------------------------------------------
-
-
-def test_an_explicit_none_means_no_credentials_not_the_configured_ones(monkeypatch):
-    """The difference between a unit test and a real login against a real account."""
-    monkeypatch.setattr("app.config.OCADO_EMAIL", "real@example.com")
-    monkeypatch.setattr("app.config.OCADO_PASSWORD", "real-password")
-
-    ladder = AuthLadder(account_id="test", otp_mailbox=None, email=None, password=None)
-
-    assert ladder.email is None
-    assert ladder.password is None
-
-
-def test_an_account_without_a_password_does_not_borrow_the_default_accounts(monkeypatch):
-    """Otherwise a second account silently logs in as the first one."""
-    monkeypatch.setattr("app.config.OCADO_EMAIL", "nikhil@example.com")
-    monkeypatch.setattr("app.config.OCADO_PASSWORD", "nikhils-password")
-
-    # What get_account_runtime passes for an account configured without one.
-    ladder = AuthLadder(
-        account_id="anuja", otp_mailbox=None, email="anuja@example.com", password=None
-    )
-
-    assert ladder.password is None
-
-
-def test_omitting_the_credentials_still_reads_config(monkeypatch):
-    """The existing callers must keep working — that is what the sentinel is for."""
-    monkeypatch.setattr("app.config.OCADO_EMAIL", "real@example.com")
-    monkeypatch.setattr("app.config.OCADO_PASSWORD", "real-password")
-
+def test_the_ladder_has_no_long_lived_credential_fields():
     ladder = AuthLadder(account_id="test", otp_mailbox=None)
 
-    assert ladder.email == "real@example.com"
-    assert ladder.password == "real-password"
+    assert not hasattr(ladder, "email")
+    assert not hasattr(ladder, "password")
 
 
 # -- the rung-2 cap --------------------------------------------------------
@@ -290,7 +245,8 @@ def test_the_heartbeat_never_escalates_to_a_full_login(monkeypatch):
 
     Heartbeat(interval_hours=24).check_account("test")
 
-    assert calls["allow_login"] is False
+    assert "email" not in calls
+    assert "password" not in calls
     assert calls["trigger"] == "heartbeat"
 
 

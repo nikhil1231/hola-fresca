@@ -1,4 +1,5 @@
 import { Badge, Tooltip } from '@mantine/core'
+import { Link } from 'react-router-dom'
 
 import { useActiveRetailer } from '../hooks/useRetailer.js'
 
@@ -17,12 +18,20 @@ const RETAILER_COLORS = {
  *
  *  Renders nothing until the retailer is known, rather than defaulting: naming
  *  the wrong shop, even for a moment, is worse than naming none. */
-export default function RetailerChip({ size = 'sm' }) {
+export default function RetailerChip({ size = 'md' }) {
   const { id, label, shoppable } = useActiveRetailer()
   if (!label) return null
 
   const chip = (
-    <Badge size={size} variant="light" color={RETAILER_COLORS[id] ?? 'gray'}>
+    <Badge
+      component={Link}
+      to="/settings"
+      size={size}
+      variant="light"
+      color={RETAILER_COLORS[id] ?? 'gray'}
+      aria-label={`${label} selected; change retailer in Settings`}
+      style={{ cursor: 'pointer', textDecoration: 'none' }}
+    >
       {label}
     </Badge>
   )
@@ -30,10 +39,13 @@ export default function RetailerChip({ size = 'sm' }) {
   // A shop with no cart integration can be planned and priced but not pushed to,
   // and that is worth saying where the difference shows up rather than leaving
   // someone to hunt for a missing button.
-  return shoppable ? (
-    chip
-  ) : (
-    <Tooltip label="Priced here, but the shop itself is done by hand — no cart to push to" withArrow>
+  return (
+    <Tooltip
+      label={shoppable
+        ? 'Change retailer in Settings'
+        : 'Priced here, but the shop itself is done by hand — no cart to push to'}
+      withArrow
+    >
       {chip}
     </Tooltip>
   )

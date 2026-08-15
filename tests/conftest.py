@@ -37,8 +37,6 @@ def isolated_legacy_retailer_config(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "OCADO_ACCOUNTS", (account,))
     monkeypatch.setattr(config, "OCADO_ACCOUNT_IDS", (account.id,))
     monkeypatch.setattr(config, "DEFAULT_OCADO_ACCOUNT_ID", account.id)
-    monkeypatch.setattr(config, "OCADO_EMAIL", None)
-    monkeypatch.setattr(config, "OCADO_PASSWORD", None)
     deps._session_factory.cache_clear()
     ocado_session._default_account_factory.cache_clear()
     ocado_session._RUNTIMES.clear()

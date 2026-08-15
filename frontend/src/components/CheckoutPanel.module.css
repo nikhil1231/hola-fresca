@@ -16,6 +16,10 @@
   background: var(--hf-surface);
 }
 
+.connectionPanel :global(.mantine-InputWrapper-label) {
+  margin-bottom: 6px;
+}
+
 .tableScroll {
   min-height: 0;
   overflow-y: auto;

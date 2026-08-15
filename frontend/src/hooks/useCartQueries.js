@@ -4,6 +4,7 @@ import {
   fetchCartAccounts,
   fetchCartBasket,
   fetchCartStatus,
+  logoutCart,
   planCartBasket,
   pushCartBasket,
   refreshCartSession,
@@ -48,13 +49,14 @@ function useStatusWriteback(retailer) {
 export function useCartLogin(retailer, accountId) {
   const onDone = useStatusWriteback(retailer)
   return useMutation({
-    mutationFn: () => startCartLogin(retailer, accountId),
+    mutationFn: ({ email, password }) =>
+      startCartLogin({ retailer, accountId, email, password }),
     onSuccess: onDone,
   })
 }
 
-// Reconnects without any user input where it can. Distinct from useCartLogin,
-// which may escalate to a password login and email a one-time code.
+// Reconnects without any user input where it can. Only useCartLogin receives
+// credentials and may therefore escalate to a full login and emailed code.
 export function useCartSessionRefresh(retailer, accountId) {
   const onDone = useStatusWriteback(retailer)
   return useMutation({
@@ -68,6 +70,17 @@ export function useCartOtp(retailer, accountId) {
   return useMutation({
     mutationFn: (code) => submitCartOtp({ retailer, accountId, code }),
     onSuccess: onDone,
+  })
+}
+
+export function useCartLogout(retailer) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => logoutCart(retailer),
+    onSuccess: (data) => {
+      qc.setQueryData(key('status', retailer, data.account_id), data)
+      qc.invalidateQueries({ queryKey: ['cart', retailer] })
+    },
   })
 }
 

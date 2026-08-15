@@ -14,9 +14,11 @@ is built from, so this should not need running again unless the token is revoked
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import sys
 
+from app import config
 from app.sainsburys.auth import AuthError, AuthState
 from app.sainsburys.session import SainsburysSession
 
@@ -52,7 +54,19 @@ def _login(session: SainsburysSession) -> int:
     # Never waits on the OTP mailbox: whoever ran this can read their own email
     # faster than a forwarding rule can, and the wait is invisible while it
     # happens. Unattended callers (the API) still use the mailbox.
-    state = session.ensure_authenticated(allow_mailbox=False)
+    default_email = config.SAINSBURYS_EMAIL or ""
+    prompt = f"Email [{default_email}]: " if default_email else "Email: "
+    email = input(prompt).strip() or default_email
+    password = getpass.getpass("Password: ")
+    if not email or not password:
+        print("Email and password are required.", file=sys.stderr)
+        return 1
+    try:
+        state = session.ensure_authenticated(
+            email=email, password=password, allow_mailbox=False
+        )
+    finally:
+        del password
 
     if state == AuthState.AWAITING_OTP:
         say("Sainsbury's has emailed a six-digit code to the account address.")

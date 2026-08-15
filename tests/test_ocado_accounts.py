@@ -16,37 +16,36 @@ def test_named_account_config_parses_env(monkeypatch):
     monkeypatch.setenv("OCADO_ACCOUNTS", "main,backup")
     monkeypatch.setenv("OCADO_MAIN_LABEL", "Main shop")
     monkeypatch.setenv("OCADO_MAIN_EMAIL", "main@example.com")
-    monkeypatch.setenv("OCADO_MAIN_PASSWORD", "main-secret")
+    monkeypatch.setenv("OCADO_MAIN_PASSWORD", "ignored-secret")
     monkeypatch.setenv("OCADO_BACKUP_LABEL", "Backup shop")
     monkeypatch.setenv("OCADO_BACKUP_EMAIL", "backup@example.com")
-    monkeypatch.setenv("OCADO_BACKUP_PASSWORD", "backup-secret")
+    monkeypatch.setenv("OCADO_BACKUP_PASSWORD", "also-ignored")
 
     accounts = config._configured_ocado_accounts()
 
     assert [account.id for account in accounts] == ["main", "backup"]
     assert accounts[0].label == "Main shop"
     assert accounts[0].email == "main@example.com"
-    assert accounts[1].password == "backup-secret"
+    assert not hasattr(accounts[1], "password")
 
 
 def test_legacy_account_config_falls_back_to_default(monkeypatch):
     monkeypatch.delenv("OCADO_ACCOUNTS", raising=False)
     monkeypatch.setenv("OCADO_EMAIL", "legacy@example.com")
-    monkeypatch.setenv("OCADO_PASSWORD", "legacy-secret")
 
     (account,) = config._configured_ocado_accounts()
 
     assert account.id == "default"
     assert account.email == "legacy@example.com"
-    assert account.password == "legacy-secret"
+    assert not hasattr(account, "password")
 
 
 def test_account_runtime_uses_database_registry_and_separate_session_paths(
     tmp_path, monkeypatch
 ):
     accounts = (
-        config.OcadoAccountConfig(id="main", label="Main", email="a", password="b"),
-        config.OcadoAccountConfig(id="backup", label="Backup", email="c", password="d"),
+        config.OcadoAccountConfig(id="main", label="Main", email="a"),
+        config.OcadoAccountConfig(id="backup", label="Backup", email="c"),
     )
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "OCADO_ACCOUNTS", accounts)
@@ -62,8 +61,8 @@ def test_account_runtime_uses_database_registry_and_separate_session_paths(
     assert main.session.jar_path == tmp_path / "ocado" / "accounts" / "main" / "session.json"
     assert backup.session.jar_path == tmp_path / "ocado" / "accounts" / "backup" / "session.json"
     assert main.auth.profile_dir != backup.auth.profile_dir
-    assert main.auth.email == "a"
-    assert backup.auth.password == "d"
+    assert not hasattr(main.auth, "email")
+    assert not hasattr(backup.auth, "password")
 
     main.auth.state = AuthState.READY
     assert backup.auth.state == AuthState.LOGGED_OUT

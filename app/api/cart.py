@@ -44,6 +44,7 @@ from app.api.schemas import (
     CartAccountOut,
     CartAccountsOut,
     CartBasketOut,
+    CartLoginIn,
     CartLoginOut,
     CartOtpIn,
     CheckoutItemOut,
@@ -55,7 +56,7 @@ from app.api.schemas import (
 from app.cart.adapters import CartAdapter, CartSnapshot, get_adapter
 from app.cart.ledger import read_ledger, write_ledger
 from app.cart.merge import CartLedger, PushLine, basket_targets
-from app.db.models import Product, User
+from app.db.models import Product, RetailerAccount, User
 from app.planner.basket import Basket, Selection, build_basket
 from app.planner.index import PlanIndex
 
@@ -113,6 +114,36 @@ def _login_out(status) -> CartLoginOut:
     )
 
 
+def _owned_account(session: Session, user: User, adapter: CartAdapter) -> str:
+    """Resolve the caller's account without accepting an account id from them.
+
+    Ocado's migrated registry already has one row per user and retailer. During
+    the transition Sainsbury's still has its single legacy runtime and no row;
+    only a retailer with no registry rows at all may use that sole account.
+    """
+    account_id = session.scalar(
+        select(RetailerAccount.key).where(
+            RetailerAccount.user_id == user.id,
+            RetailerAccount.retailer == adapter.retailer,
+        )
+    )
+    if account_id is not None:
+        return _account(adapter, account_id)
+
+    any_registered = session.scalar(
+        select(RetailerAccount.id)
+        .where(RetailerAccount.retailer == adapter.retailer)
+        .limit(1)
+    )
+    if any_registered is None and len(adapter.accounts()) == 1:
+        return adapter.default_account_id
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"No {adapter.retailer} account is connected for this user",
+    )
+
+
 # --- accounts and sessions ---------------------------------------------------
 
 
@@ -137,15 +168,23 @@ def status(
 
 @router.post("/login", response_model=CartLoginOut)
 def login(
-    body: CartAccountIn, adapter: CartAdapter = Depends(get_cart_adapter)
+    body: CartLoginIn, adapter: CartAdapter = Depends(get_cart_adapter)
 ) -> CartLoginOut:
     account_id = _account(adapter, body.account_id)
+    email = body.email.strip()
+    password = body.password.get_secret_value()
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
     try:
-        return _login_out(adapter.ensure_authenticated(account_id))
+        return _login_out(
+            adapter.ensure_authenticated(account_id, email=email, password=password)
+        )
     except Exception as exc:  # noqa: BLE001 - login failures surface as bad gateway
         raise HTTPException(
             status_code=502, detail=f"{adapter.retailer} login failed: {exc}"
         ) from exc
+    finally:
+        del password
 
 
 @router.post("/session/refresh", response_model=CartLoginOut)
@@ -159,7 +198,7 @@ def refresh_session(
     """
     account_id = _account(adapter, body.account_id)
     try:
-        return _login_out(adapter.ensure_authenticated(account_id, allow_login=False))
+        return _login_out(adapter.ensure_authenticated(account_id))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502, detail=f"{adapter.retailer} session refresh failed: {exc}"
@@ -176,6 +215,22 @@ def otp(body: CartOtpIn, adapter: CartAdapter = Depends(get_cart_adapter)) -> Ca
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502, detail=f"{adapter.retailer} OTP failed: {exc}"
+        ) from exc
+
+
+@router.post("/logout", response_model=CartLoginOut)
+def logout(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+    adapter: CartAdapter = Depends(get_cart_adapter),
+) -> CartLoginOut:
+    """Disconnect the current user's account at the retailer in the path."""
+    account_id = _owned_account(session, user, adapter)
+    try:
+        return _login_out(adapter.logout(account_id))
+    except Exception as exc:  # noqa: BLE001 - filesystem/session failures surface cleanly
+        raise HTTPException(
+            status_code=502, detail=f"{adapter.retailer} logout failed: {exc}"
         ) from exc
 
 
@@ -286,7 +341,14 @@ def _checkout_items(
     """Normalize the target, ledger and live cart into display-ready rows."""
     targets, target_names, _, _ = basket_targets(basket, owned_item_keys=owned_item_keys)
     ledger_quantities = ledger.quantities
-    skus = set(targets) | set(ledger_quantities)
+    cart = snapshot.quantities
+    live_costs = snapshot.costs
+    # A historical claim that is wanted by neither this week nor the live cart
+    # has no action left to take. Keeping it produces an ever-growing checkout
+    # table of already-completed removals, each misleadingly priced at £0.
+    skus = set(targets) | {
+        sku for sku in ledger_quantities if cart.get(sku, 0) > 0
+    }
     if not skus:
         return []
 
@@ -315,8 +377,6 @@ def _checkout_items(
             ).scalars()
         }
 
-    cart = snapshot.quantities
-    live_costs = snapshot.costs
     ledger_lines = {line.sku: line for line in ledger.lines}
     rows: list[CheckoutItemOut] = []
     for sku in skus:
@@ -348,14 +408,12 @@ def _checkout_items(
         if live_cost is not None:
             cost = live_cost
             cost_source = "live"
-        elif current == 0 and desired == 0:
-            cost = 0.0
-            cost_source = "live"
         else:
             price = plan.get("price")
             if price is None and product is not None:
                 price = product.price
-            cost = (price or 0.0) * desired
+            quantity = desired if desired > 0 else current
+            cost = price * quantity if price is not None else None
             cost_source = "planned"
 
         rows.append(
@@ -368,7 +426,7 @@ def _checkout_items(
                 desired_quantity=desired,
                 synced_quantity=synced,
                 cart_quantity=current,
-                cost=_round_money(cost),
+                cost=_round_money(cost) if cost is not None else None,
                 cost_source=cost_source,
                 status=row_status,
             )
