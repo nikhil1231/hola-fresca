@@ -207,6 +207,9 @@ def _apply_prices(row: Product, status: ProductStatus) -> None:
     if status.price is not None:
         row.price = status.price
         row.base_price = status.base_price
+        # A stated live price is also an authoritative end to an old Nectar
+        # offer when the retailer no longer marks it as one.
+        row.is_nectar_price = status.is_nectar_price
     if status.unit_price is not None:
         row.unit_price = status.unit_price
         row.base_unit_price = status.base_unit_price

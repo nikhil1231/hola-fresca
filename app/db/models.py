@@ -557,6 +557,12 @@ class Product(Base):
     unit_price_basis: Mapped[str | None] = mapped_column(String(32), nullable=True)
     base_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     base_unit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # True only when today's price specifically requires a Nectar card. Generic
+    # promotions keep using the same price/base-price pair without borrowing
+    # Nectar's presentation in the basket.
+    is_nectar_price: Mapped[bool] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
 
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Explicit retailer storage form. This is separate from category because
@@ -988,6 +994,29 @@ class UserPackPreference(Base):
     sku: Mapped[str] = mapped_column(String(128))
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class UserRetailerPriceRefresh(Base):
+    """The five-minute live-price cadence for one person at one shop.
+
+    The catalogue being refreshed is shared, but the requested debounce is a
+    user-facing interaction limit. Keeping the timestamp here also makes it
+    authoritative across devices and browser tabs.
+    """
+
+    __tablename__ = "user_retailer_price_refreshes"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "retailer", name="uq_user_retailer_price_refresh"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    last_refreshed_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 class IngredientMappingProduct(Base):

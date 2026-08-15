@@ -7,16 +7,18 @@ fakes the planner - only the shop.
 """
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.api.cart import get_cart_adapter
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
-from app.api.planner import _stock_checked_at
-from app.db.models import Recipe, RecipeIngredient
+from app.api.planner import _reserve_price_refresh, _stock_checked_at
+from app.db.models import Product, Recipe, RecipeIngredient, User
 from app.db.session import init_db, make_engine, make_session_factory
 from app.mapping import service
 from app import config
@@ -206,6 +208,92 @@ def test_a_basket_starts_on_the_cheapest_pack(stock_client):
     assert data["lines"][0]["choices"][0]["sku"] == CHEAP
     assert data["lines"][0]["substitution"] is None
     assert data["stock_checked_at"] is None, "nothing has been checked live yet"
+
+
+def test_nectar_identity_reaches_the_chosen_pack_and_line(stock_client):
+    client, recipe_id, _ = stock_client
+    factory = app.dependency_overrides[get_session_factory]()
+    with factory() as session:
+        product = session.scalar(select(Product).where(Product.sku == CHEAP))
+        product.is_nectar_price = True
+        session.commit()
+
+    line = client.post("/api/planner/basket", json=_selections(recipe_id)).json()["lines"][0]
+
+    assert line["cost"] == 1.0
+    assert line["is_nectar_price"] is True
+    assert line["choices"][0]["is_nectar_price"] is True
+
+
+def test_price_refresh_is_debounced_before_a_second_retailer_call(stock_client, monkeypatch):
+    client, recipe_id, _ = stock_client
+    calls = []
+
+    def shelves(skus, session=None):
+        calls.append(list(skus))
+        return {sku: ProductStatus(sku=sku, available=True) for sku in skus}
+
+    monkeypatch.setattr(availability, "fetch_statuses", shelves)
+    first = client.post("/api/planner/stock/refresh", json=_selections(recipe_id)).json()
+    second = client.post("/api/planner/stock/refresh", json=_selections(recipe_id)).json()
+
+    assert first["performed"] is True
+    assert second["performed"] is False
+    assert second["next_refresh_at"] > second["checked_at"]
+    assert len(calls) == 1
+
+
+def test_a_failed_price_refresh_releases_its_cooldown(stock_client, monkeypatch):
+    client, recipe_id, _ = stock_client
+
+    def unavailable(skus, session=None):
+        raise RuntimeError("shop is down")
+
+    monkeypatch.setattr(availability, "fetch_statuses", unavailable)
+    assert client.post(
+        "/api/planner/stock/refresh", json=_selections(recipe_id)
+    ).status_code == 502
+
+    _shelves(monkeypatch)
+    retry = client.post("/api/planner/stock/refresh", json=_selections(recipe_id)).json()
+    assert retry["performed"] is True
+
+
+def test_refresh_cooldowns_are_atomic_and_scoped_by_user_and_retailer(stock_client):
+    _, _, _ = stock_client
+    factory = app.dependency_overrides[get_session_factory]()
+    now = datetime(2026, 8, 15, 12, tzinfo=timezone.utc)
+    with factory() as session:
+        mine = session.scalar(select(User.id).order_by(User.id).limit(1))
+        other = User(name="Someone Else")
+        session.add(other)
+        session.commit()
+        other_id = other.id
+
+    outcomes = []
+    failures = []
+    start = threading.Barrier(2)
+
+    def reserve() -> None:
+        try:
+            with factory() as session:
+                start.wait()
+                outcomes.append(_reserve_price_refresh(session, mine, "ocado", now)[0])
+        except BaseException as exc:  # noqa: BLE001 - asserted below
+            failures.append(exc)
+
+    threads = [threading.Thread(target=reserve) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not failures
+    assert sorted(outcomes) == [False, True]
+    with factory() as session:
+        assert _reserve_price_refresh(session, mine, "sainsburys", now)[0] is True
+    with factory() as session:
+        assert _reserve_price_refresh(session, other_id, "ocado", now)[0] is True
 
 
 def test_refreshing_stock_moves_the_basket_onto_what_is_in_stock(stock_client, monkeypatch):

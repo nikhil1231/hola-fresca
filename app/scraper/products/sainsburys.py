@@ -173,6 +173,7 @@ def normalize_product(payload: dict[str, Any]) -> NormalizedProduct:
         unit_price_basis=unit_basis,
         base_price=_base_price(payload),
         base_unit_price=base_unit,
+        is_nectar_price=_is_nectar_price(payload),
         category=category,
         is_frozen=category_is_frozen(category),
         in_stock=_in_stock(payload),
@@ -202,6 +203,7 @@ def product_status(node: dict[str, Any]) -> ProductStatus | None:
         unit_price=unit_price,
         unit_price_basis=unit_basis,
         base_unit_price=_base_unit_price(node, unit_price, unit_basis),
+        is_nectar_price=_is_nectar_price(node),
         name=name if isinstance(name, str) else None,
     )
 
@@ -369,6 +371,17 @@ def _base_price(node: dict[str, Any]) -> float | None:
         and not isinstance(promotion.get("original_price"), bool)
     ]
     return base_price(price, max(originals)) if originals else None
+
+
+def _is_nectar_price(node: dict[str, Any]) -> bool:
+    """Whether today's stated price is tied to a confirmed Nectar offer."""
+    promotions = node.get("promotions")
+    if _base_price(node) is None or not isinstance(promotions, list):
+        return False
+    return any(
+        isinstance(promotion, dict) and promotion.get("is_nectar") is True
+        for promotion in promotions
+    )
 
 
 def _base_unit_price(

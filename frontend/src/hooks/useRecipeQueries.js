@@ -93,7 +93,9 @@ export function useStockRefresh() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: refreshPlannerStock,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-basket'] }),
+    onSuccess: (result) => {
+      if (result.performed) qc.invalidateQueries({ queryKey: ['planner-basket'] })
+    },
   })
 }
 

@@ -57,12 +57,14 @@ def test_a_promotion_writes_both_what_you_pay_and_the_shelf_price(factory):
             unit_price=7.0,
             unit_price_basis="l",
             base_unit_price=14.0,
+            is_nectar_price=True,
         ),
     )
 
     row = _row(factory)
     assert (row.price, row.base_price) == (3.5, 7.0)
     assert (row.unit_price, row.base_unit_price) == (7.0, 14.0)
+    assert bool(row.is_nectar_price) is True
     assert result.repriced == ["8190444"]
     assert row.stock_checked_at is not None
 
@@ -72,7 +74,7 @@ def test_a_promotion_that_has_ended_clears_the_shelf_price_it_left_behind(factor
     # behind would keep advertising a discount off a price nobody is charging —
     # and the review page would keep colouring its pills from it.
     _seed(factory, price=3.5, base_price=7.0, unit_price=7.0, base_unit_price=14.0,
-          unit_price_basis="l", in_stock=1)
+          unit_price_basis="l", is_nectar_price=True, in_stock=1)
 
     _refresh(
         factory,
@@ -90,6 +92,7 @@ def test_a_promotion_that_has_ended_clears_the_shelf_price_it_left_behind(factor
     row = _row(factory)
     assert (row.price, row.base_price) == (7.0, None)
     assert (row.unit_price, row.base_unit_price) == (14.0, None)
+    assert bool(row.is_nectar_price) is False
 
 
 def test_a_shop_that_states_no_price_leaves_the_cached_one_alone(factory):

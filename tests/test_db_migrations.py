@@ -210,6 +210,27 @@ def test_standing_pack_choices_move_off_the_shared_mapping(tmp_path):
         assert "preferred_sku" not in columns, "the column must not come back"
 
 
+def test_nectar_and_refresh_tracking_are_added_to_an_existing_database(tmp_path):
+    engine = _old_database(tmp_path / "old.db")
+
+    init_db(engine)
+
+    with engine.connect() as conn:
+        product_columns = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(products)"))
+        }
+        refresh_columns = {
+            row[1]
+            for row in conn.execute(
+                text("PRAGMA table_info(user_retailer_price_refreshes)")
+            )
+        }
+        assert "is_nectar_price" in product_columns
+        assert refresh_columns == {
+            "id", "user_id", "retailer", "last_refreshed_at"
+        }
+
+
 def test_migrating_twice_changes_nothing(tmp_path):
     """Every start-up runs this; it has to be safe to run on an up-to-date file."""
     engine = _old_database(tmp_path / "old.db")

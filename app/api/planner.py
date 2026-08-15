@@ -1,11 +1,12 @@
 """Stateless planner API: basket pricing and best-fit recipe ranking."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api.deps import (
@@ -41,7 +42,12 @@ from app.api.schemas import (
 )
 from app.api.schedule import pack_shortfall_tolerance_pct
 from app import catalogue
-from app.db.models import IngredientMapping, Recipe, User
+from app.db.models import (
+    IngredientMapping,
+    Recipe,
+    User,
+    UserRetailerPriceRefresh,
+)
 from app.planner.basket import (
     Basket,
     BasketLine,
@@ -54,6 +60,7 @@ from app.planner.preferences import pack_preferences, set_pack_preference as wri
 
 router = APIRouter(prefix="/api/planner", tags=["planner"])
 assert SuggestionsIn.model_fields["candidate_portions"].default == 4
+PRICE_REFRESH_COOLDOWN = timedelta(minutes=5)
 
 
 def _planner_selection(body_selection) -> Selection:
@@ -189,6 +196,7 @@ def _line_out(line: BasketLine) -> BasketLineOut:
                 cost=_round_money(choice.cost),
                 retailer=choice.pack.retailer,
                 external=choice.pack.external,
+                is_nectar_price=choice.pack.is_nectar_price,
             )
             for choice in cover.choices
         ]
@@ -208,6 +216,7 @@ def _line_out(line: BasketLine) -> BasketLineOut:
         packs=cover.packs if cover else 0,
         trace=line.trace,
         external=line.external,
+        is_nectar_price=any(choice.is_nectar_price for choice in choices),
         note=line.note,
         substitution=_substitution_out(line),
         options=[_option_out(option) for option in line.options],
@@ -324,16 +333,33 @@ def stock_refresh(
         pack_preferences=pack_preferences(session, user.id, retailer=retailer),
         pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session, user.id),
     )
+    reserved_at = datetime.now(timezone.utc)
+    performed, previous_refresh = _reserve_price_refresh(
+        session, user.id, retailer, reserved_at
+    )
+    if not performed:
+        checked_at = _utc(previous_refresh)
+        assert checked_at is not None
+        return StockRefreshOut(
+            checked_at=checked_at,
+            performed=False,
+            next_refresh_at=checked_at + PRICE_REFRESH_COOLDOWN,
+        )
     try:
         result = catalogue.refresh_stock(
             factory, candidate_skus(index, basket), retailer=retailer
         )
     except Exception as exc:  # noqa: BLE001 - the shop's failure, not the app's
+        _restore_price_refresh(
+            session, user.id, retailer, reserved_at, previous_refresh
+        )
         raise HTTPException(
             status_code=502, detail=f"{retailer} stock check failed: {exc}"
         ) from exc
     return StockRefreshOut(
         checked_at=result.checked_at,
+        performed=True,
+        next_refresh_at=reserved_at + PRICE_REFRESH_COOLDOWN,
         checked=result.checked,
         available=result.available,
         sold_out=result.sold_out,
@@ -341,6 +367,83 @@ def stock_refresh(
         repriced=result.repriced,
         changed=result.changed,
     )
+
+
+def _reserve_price_refresh(
+    session: Session, user_id: int, retailer: str, now: datetime
+) -> tuple[bool, datetime | None]:
+    """Atomically claim this user's retailer refresh window.
+
+    SQLite is the application's database, so its conflict-aware insert gives a
+    new user/retailer pair the same one-winner guarantee as the conditional
+    update used for an existing pair.
+    """
+    inserted = session.execute(
+        sqlite_insert(UserRetailerPriceRefresh)
+        .values(user_id=user_id, retailer=retailer, last_refreshed_at=now)
+        .on_conflict_do_nothing(index_elements=["user_id", "retailer"])
+    )
+    if inserted.rowcount:
+        session.commit()
+        return True, None
+
+    row = session.scalar(
+        select(UserRetailerPriceRefresh).where(
+            UserRetailerPriceRefresh.user_id == user_id,
+            UserRetailerPriceRefresh.retailer == retailer,
+        )
+    )
+    if row is None:  # Defensive: another transaction removed it between reads.
+        session.rollback()
+        return _reserve_price_refresh(session, user_id, retailer, now)
+    previous = row.last_refreshed_at
+    claimed = session.execute(
+        update(UserRetailerPriceRefresh)
+        .where(
+            UserRetailerPriceRefresh.id == row.id,
+            UserRetailerPriceRefresh.last_refreshed_at <= now - PRICE_REFRESH_COOLDOWN,
+        )
+        .values(last_refreshed_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    session.commit()
+    if claimed.rowcount:
+        return True, previous
+    current = session.scalar(
+        select(UserRetailerPriceRefresh.last_refreshed_at).where(
+            UserRetailerPriceRefresh.id == row.id
+        )
+    )
+    return False, current
+
+
+def _restore_price_refresh(
+    session: Session,
+    user_id: int,
+    retailer: str,
+    reserved_at: datetime,
+    previous: datetime | None,
+) -> None:
+    """Release a failed reservation without undoing a newer successful claim."""
+    filters = (
+        UserRetailerPriceRefresh.user_id == user_id,
+        UserRetailerPriceRefresh.retailer == retailer,
+        UserRetailerPriceRefresh.last_refreshed_at == reserved_at,
+    )
+    if previous is None:
+        session.execute(
+            delete(UserRetailerPriceRefresh)
+            .where(*filters)
+            .execution_options(synchronize_session=False)
+        )
+    else:
+        session.execute(
+            update(UserRetailerPriceRefresh)
+            .where(*filters)
+            .values(last_refreshed_at=previous)
+            .execution_options(synchronize_session=False)
+        )
+    session.commit()
 
 
 def candidate_skus(index: PlanIndex, basket: Basket) -> list[str]:

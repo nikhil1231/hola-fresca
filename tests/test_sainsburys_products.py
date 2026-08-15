@@ -110,6 +110,12 @@ def test_a_was_price_on_another_basis_is_not_a_discount():
     product = sainsburys.normalize_product(payload)
     assert product.base_price == 7.0
     assert product.base_unit_price is None
+    assert product.is_nectar_price is True
+
+
+def test_an_ordinary_promotion_is_not_called_a_nectar_price(by_sku):
+    assert by_sku["7317686"].base_price == 2.6
+    assert by_sku["7317686"].is_nectar_price is False
 
 
 def test_the_dearest_original_wins_when_promotions_stack(by_sku):
@@ -138,6 +144,20 @@ def test_product_status_reads_stock_and_both_prices(by_sku):
     assert (status.price, status.base_price) == (2.25, 2.6)
     assert (status.unit_price, status.unit_price_basis) == (10.0, "kg")
     assert status.base_unit_price == 11.56
+
+
+def test_live_status_preserves_confirmed_nectar_identity():
+    status = sainsburys.product_status(
+        {
+            "product_uid": "nectar-1",
+            "name": "Coffee 200g",
+            "is_available": True,
+            "retail_price": {"price": 3.0},
+            "promotions": [{"original_price": 6.0, "is_nectar": True}],
+        }
+    )
+    assert status is not None
+    assert status.is_nectar_price is True
 
 
 def test_unavailable_products_are_marked_not_dropped(by_sku):

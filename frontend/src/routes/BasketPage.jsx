@@ -34,7 +34,6 @@ import {
   IconInfoCircle,
   IconLock,
   IconPackages,
-  IconRefresh,
   IconStarFilled,
   IconToolsKitchen2,
 } from '@tabler/icons-react'
@@ -66,6 +65,15 @@ const money = new Intl.NumberFormat('en-GB', {
 
 function formatMoney(value) {
   return money.format(value ?? 0)
+}
+
+function BasketPrice({ value, isNectar = false, className = '' }) {
+  if (!isNectar) return <span className={className}>{formatMoney(value)}</span>
+  return (
+    <span className={`${classes.nectarPrice} ${className}`.trim()}>
+      {formatMoney(value)}
+    </span>
+  )
 }
 
 function formatGrams(value) {
@@ -618,7 +626,9 @@ function LineTable({
                     <Table.Td>{formatQuantity(line.need_qty ?? line.need_g, line.quantity_unit)}</Table.Td>
                     <Table.Td>{packsText(line)}</Table.Td>
                     <Table.Td>{formatQuantity(line.leftover_qty ?? line.leftover_g, line.quantity_unit)}</Table.Td>
-                    <Table.Td>{formatMoney(line.cost)}</Table.Td>
+                    <Table.Td>
+                      <BasketPrice value={line.cost} isNectar={line.is_nectar_price} />
+                    </Table.Td>
                     <Table.Td>{formatMoney(line.waste_gbp)}</Table.Td>
                     <Table.Td className={classes.packSwapCell}>
                       {/* Read-only keeps the snap mark and drops the buttons:
@@ -726,7 +736,12 @@ function LineTable({
                                   {choice.pack_size_raw || formatGrams(choice.capacity_g)}
                                 </div>
                                 <div />
-                                <div>{formatMoney(choice.cost)}</div>
+                                <div>
+                                  <BasketPrice
+                                    value={choice.cost}
+                                    isNectar={choice.is_nectar_price}
+                                  />
+                                </div>
                                 <div />
                                 <div />
                               </div>
@@ -772,8 +787,23 @@ function shortWeekLabel(value) {
   }).format(date)
 }
 
-function stockStatusText(stockRefresh, stockAge, retailerLabel) {
+function cooldownText(nextRefreshAt, now) {
+  const then = new Date(nextRefreshAt).getTime()
+  if (Number.isNaN(then)) return null
+  const minutes = Math.max(0, Math.ceil((then - now) / 60000))
+  if (minutes <= 0) return null
+  return `${minutes} min`
+}
+
+function stockStatusText(stockRefresh, stockAge, retailerLabel, cooldownRemaining) {
   if (stockRefresh.isPending) return `Checking ${retailerLabel ?? 'the shop'}...`
+  if (stockRefresh.isError) return "Couldn’t refresh · showing cached prices"
+  if (stockRefresh.data?.performed === false && cooldownRemaining) {
+    return `Prices checked recently · again in ${cooldownRemaining}`
+  }
+  if (stockRefresh.data?.performed) {
+    return `Prices refreshed ${formatAge(stockRefresh.data.checked_at) ?? 'just now'}`
+  }
   if (stockAge) return `Prices checked ${stockAge}`
   return 'Prices not checked'
 }
@@ -1014,7 +1044,11 @@ function MobileLineCard({
           <Text className={classes.mobileOwnedText}>Owned</Text>
         ) : (
           <>
-            <Text className={classes.mobileCost}>{formatMoney(line.cost)}</Text>
+            <BasketPrice
+              value={line.cost}
+              isNectar={line.is_nectar_price}
+              className={classes.mobileCost}
+            />
             <Text className={line.waste_gbp > 1 ? classes.mobileWasteHot : classes.mobileWaste}>
               {formatMoney(line.waste_gbp)} waste
             </Text>
@@ -1067,6 +1101,7 @@ function OrderPanelHeader({
   itemCount,
   stockText,
   stockRefresh,
+  refreshDisabled,
   selections,
   packOverrides,
   snapOverrides,
@@ -1088,7 +1123,7 @@ function OrderPanelHeader({
           radius="lg"
           className={classes.refreshButton}
           loading={stockRefresh.isPending}
-          disabled={!selections.length}
+          disabled={!selections.length || refreshDisabled}
           onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
         >
           Refresh prices
@@ -1166,7 +1201,12 @@ export default function BasketPage() {
     setWeekPackAndSnap,
   } = useWeekPackChoices(weekStart)
   const stockRefresh = useStockRefresh()
-  const { label: retailerLabel, shoppable: retailerShoppable } = useActiveRetailer()
+  const refreshStock = stockRefresh.mutate
+  const {
+    id: retailerId,
+    label: retailerLabel,
+    shoppable: retailerShoppable,
+  } = useActiveRetailer()
   // A ?view=checkout link survives a switch to a shop with no trolley, so the
   // view falls back rather than leaving an empty panel with no way out of it.
   const pageView = retailerShoppable ? requestedView : 'basket'
@@ -1175,6 +1215,8 @@ export default function BasketPage() {
   const [packScope, setPackScope] = useState('week')
   const recipesScrollRef = useRef(null)
   const recipeRefs = useRef(new Map())
+  const autoRefreshedRetailer = useRef(null)
+  const [refreshClock, setRefreshClock] = useState(() => Date.now())
 
   const entries = getWeekRecipes(weekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
@@ -1205,6 +1247,9 @@ export default function BasketPage() {
   )
   const recipePrices = useMemo(() => recipePortionPrices(buyLines, entries), [buyLines, entries])
   const stockAge = formatAge(data?.stock_checked_at)
+  const nextRefreshAt = stockRefresh.data?.next_refresh_at ?? null
+  const cooldownRemaining = cooldownText(nextRefreshAt, refreshClock)
+  const refreshDisabled = cooldownRemaining != null
   const packLine = useMemo(
     () => (data?.lines ?? []).find((line) => line.key === packLineKey) ?? null,
     [data?.lines, packLineKey],
@@ -1258,6 +1303,32 @@ export default function BasketPage() {
     setHoverRecipeId(null)
   }, [weekStart, selections])
 
+  // Mounts can happen twice under StrictMode and the same account can open the
+  // page in several tabs. The ref avoids noise in one mount; the backend's
+  // user/retailer reservation is the authority across all of them.
+  useEffect(() => {
+    if (!retailerId || !selections.length) return
+    if (autoRefreshedRetailer.current === retailerId) return
+    autoRefreshedRetailer.current = retailerId
+    refreshStock({ selections, packOverrides, snapOverrides })
+  }, [retailerId, selections, packOverrides, snapOverrides, refreshStock])
+
+  useEffect(() => {
+    if (!nextRefreshAt) return undefined
+    const expiresAt = new Date(nextRefreshAt).getTime()
+    if (Number.isNaN(expiresAt)) return undefined
+    setRefreshClock(Date.now())
+    const interval = window.setInterval(() => setRefreshClock(Date.now()), 30000)
+    const timeout = window.setTimeout(
+      () => setRefreshClock(Date.now()),
+      Math.max(0, expiresAt - Date.now()) + 25,
+    )
+    return () => {
+      window.clearInterval(interval)
+      window.clearTimeout(timeout)
+    }
+  }, [nextRefreshAt])
+
   useEffect(() => {
     if (!hoverLineKey) {
       setGlowLineKey(activeLineKey)
@@ -1297,7 +1368,12 @@ export default function BasketPage() {
     return () => window.clearTimeout(handle)
   }, [hoverLineKey, glowRecipeIds])
 
-  const orderStockText = stockStatusText(stockRefresh, stockAge, retailerLabel)
+  const orderStockText = stockStatusText(
+    stockRefresh,
+    stockAge,
+    retailerLabel,
+    cooldownRemaining,
+  )
   const busyPackKey = packPreference.isPending ? packPreference.variables?.ingredientKey : null
 
   return (
@@ -1370,26 +1446,6 @@ export default function BasketPage() {
             buyLines={buyLines}
           />
 
-          {stockRefresh.error && (
-            <Alert color="red" icon={<IconAlertCircle size={18} />} className={classes.alertCard}>
-              {stockRefresh.error.message}
-            </Alert>
-          )}
-
-          {stockRefresh.isSuccess && !stockRefresh.isPending && (
-            <Alert
-              color={stockRefresh.data.sold_out.length ? 'yellow' : 'teal'}
-              variant="light"
-              icon={<IconRefresh size={18} />}
-              className={classes.alertCard}
-            >
-              Checked {stockRefresh.data.checked} products: {stockRefresh.data.available}{' '}
-              available, {stockRefresh.data.sold_out.length} sold out,{' '}
-              {stockRefresh.data.restocked.length} back in stock,{' '}
-              {stockRefresh.data.repriced.length} repriced.
-            </Alert>
-          )}
-
           <Box className={classes.basketPanel}>
             {pageView === 'checkout' ? (
               <CheckoutPanel
@@ -1424,6 +1480,7 @@ export default function BasketPage() {
                   itemCount={onlineLines.length}
                   stockText={orderStockText}
                   stockRefresh={stockRefresh}
+                  refreshDisabled={refreshDisabled}
                   selections={selections}
                   packOverrides={packOverrides}
                   snapOverrides={snapOverrides}

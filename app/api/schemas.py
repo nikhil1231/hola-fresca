@@ -498,6 +498,7 @@ class BasketPackChoiceOut(BaseModel):
     cost: float
     retailer: str
     external: bool = False
+    is_nectar_price: bool = False
 
 
 class BasketPackOptionOut(BaseModel):
@@ -588,6 +589,7 @@ class BasketLineOut(BaseModel):
     packs: int
     trace: bool = False
     external: bool = False
+    is_nectar_price: bool = False
     note: str | None = None
     substitution: BasketSubstitutionOut | None = None
     options: list[BasketPackOptionOut] = Field(default_factory=list)
@@ -993,6 +995,8 @@ class StockRefreshOut(BaseModel):
     """The result of a live stock and price check, at whichever shop."""
 
     checked_at: datetime
+    performed: bool = True
+    next_refresh_at: datetime
     checked: int = 0
     available: int = 0
     sold_out: list[str] = Field(default_factory=list)

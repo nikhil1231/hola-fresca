@@ -295,6 +295,25 @@
   font-weight: 600;
 }
 
+.nectarPrice {
+  position: relative;
+  z-index: 0;
+  display: inline-block;
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.nectarPrice::before {
+  position: absolute;
+  z-index: -1;
+  inset: -3px -8px;
+  border: 1px solid color-mix(in srgb, var(--mantine-color-grape-4) 42%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hf-purple) 78%, #2b163e);
+  content: '';
+}
+
 .unmappedAlert {
   margin: 20px 24px 0;
   border-color: color-mix(in srgb, var(--hf-warning) 55%, var(--hf-border));

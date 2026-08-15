@@ -64,6 +64,7 @@ class NormalizedProduct:
     unit_price_basis: str | None = None
     base_price: float | None = None
     base_unit_price: float | None = None
+    is_nectar_price: bool = False
     category: str | None = None
     # A storage form, not merely a long shelf life. Retailer adapters prefer an
     # explicit "Frozen" badge/label and fall back to the category path.
@@ -109,6 +110,7 @@ class ProductStatus:
     unit_price: float | None = None
     unit_price_basis: str | None = None
     base_unit_price: float | None = None
+    is_nectar_price: bool = False
     name: str | None = None
     unlisted: bool = False
 

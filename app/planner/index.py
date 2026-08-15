@@ -64,6 +64,7 @@ class Pack:
     #: bought and price the substitution it had to make instead.
     available: bool = True
     stock_checked_at: datetime | None = None
+    is_nectar_price: bool = False
     #: Customer rating and how many people gave it. Cheapest is not best when the
     #: cheap one is a two-star product, so this is a term in the pack choice.
     rating: float | None = None
@@ -499,6 +500,7 @@ def _build_pack(
         # catalogue simply has nothing to say yet, so the pack stays buyable.
         available=product.in_stock != 0,
         stock_checked_at=product.stock_checked_at,
+        is_nectar_price=bool(product.is_nectar_price),
         rating=product.avg_rating,
         ratings_count=product.ratings_count,
         shelf_life_days=product.shelf_life_days,

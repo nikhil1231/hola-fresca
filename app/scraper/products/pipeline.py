@@ -576,6 +576,7 @@ def upsert_product(session: Session, product) -> Product:
     existing.unit_price_basis = product.unit_price_basis
     existing.base_price = product.base_price
     existing.base_unit_price = product.base_unit_price
+    existing.is_nectar_price = product.is_nectar_price
     existing.category = product.category
     existing.is_frozen = product.is_frozen
     existing.in_stock = product.in_stock
