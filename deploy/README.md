@@ -242,8 +242,33 @@ service account, which has zero storage quota, and the escapes Google documents
 (Shared Drives, domain-wide delegation) both need Workspace rather than a
 consumer account. rclone lives at `~/.local/bin/rclone`, outside the repo.
 
-Committing `exports/` is deliberately left manual — the timer refreshes the CSVs
-but does not commit, because writing to whatever branch happens to be checked out
-is a surprising thing for a background job to do. The snapshot is the disaster
-copy; the git history of `exports/` is for reviewing how a mapping decision
-changed over time.
+`commit-exports.sh` commits and pushes the refreshed CSVs, as the step straight
+after the export. This used to be manual, on the grounds that writing to
+whatever branch happens to be checked out is a surprising thing for a background
+job to do. That was right while the box was the machine you worked on. It is not
+that machine any more — it is only ever deployed to — so manual had quietly
+become never, and the history stopped accumulating. The original worry is
+answered by refusing to run on anything but `main` level with origin, rather
+than by not running.
+
+The snapshot is still the disaster copy; the git history of `exports/` is for
+reviewing how a mapping decision changed over time.
+
+It never leaves an unpushed commit behind, which is the whole design. HEAD ahead
+of origin is harmless on its own — the deploy reads it as already deployed — but
+the next push from the laptop makes the two diverge, and a diverged tree is one
+the deploy timer skips *silently*. So the commit and the push are one operation
+and a failed push rolls the commit back; the CSVs stay dirty and tomorrow tries
+again. For the same reason it will not commit when origin has moved ahead:
+fast-forwarding is the deploy timer's job, and doing it here would land prod on
+new code with a stale `dist/` and an unmigrated database.
+
+It stages with `git add --update -- exports/` — tracked, already-modified files
+only, never `-A` — refuses if anything outside `exports/` is staged, and takes
+the deploy lock, since a 03:00 backup and a five-minute deploy timer will
+collide eventually.
+
+`update.sh` correspondingly exempts `exports/` from its dirty-tree guard. That
+guard is there to protect hand-edits to `app/` and `frontend/`, which it still
+catches; blocking on a CSV that a background job rewrote means one failed
+overnight push takes the deploy path down with it until somebody notices.

@@ -109,8 +109,15 @@ if [ "$CHECK" -eq 0 ]; then
 fi
 
 # --- refuse to deploy over local work -------------------------------------
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-    [ "$POLL" -eq 0 ] && git status --short --untracked-files=no >&2
+# exports/*.csv are exempt. They are regenerated nightly by the backup timer and
+# committed by deploy/commit-exports.sh, so they go dirty with no human
+# involved; blocking on them means one failed overnight push takes the whole
+# deploy path down with it until someone notices. This guard exists for
+# hand-edits to app/ and frontend/, and it still catches those. If incoming
+# commits happen to touch exports/ as well, the fast-forward below refuses,
+# which is the honest place to stop.
+if [ -n "$(git status --porcelain --untracked-files=no -- ':(exclude)exports/')" ]; then
+    [ "$POLL" -eq 0 ] && git status --short --untracked-files=no -- ':(exclude)exports/' >&2
     skip_or_die "working tree has uncommitted changes" \
                 "working tree has uncommitted changes — commit, stash or revert them first."
 fi
