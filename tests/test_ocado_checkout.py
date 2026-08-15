@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.ocado import _checkout_items
-from app.ocado.sync import CartLedger, LedgerLine
+from app.api.cart import _checkout_items
+from app.cart.merge import CartLedger, LedgerLine
+from app.ocado.cart_payload import snapshot
 from app.planner.basket import Basket, BasketLine, Cover, PackChoice
 from app.planner.index import Pack
 
@@ -40,7 +41,7 @@ def _ledger(quantity: int | None, *, synced: bool = True, sku: str = "sku-a") ->
     return CartLedger(lines=lines, synced=synced)
 
 
-def _cart(quantities: dict[str, int], totals: dict[str, float] | None = None) -> dict:
+def _cart(quantities: dict[str, int], totals: dict[str, float] | None = None):
     totals = totals or {}
     items = []
     for sku, quantity in quantities.items():
@@ -50,11 +51,9 @@ def _cart(quantities: dict[str, int], totals: dict[str, float] | None = None) ->
                 "finalPrice": {"currency": "GBP", "amount": str(totals[sku])}
             }
         items.append(item)
-    return {
-        "checkoutGroups": {
-            "assignedCheckoutGroups": [{"itemGroups": [{"items": items}]}]
-        }
-    }
+    return snapshot(
+        {"checkoutGroups": {"assignedCheckoutGroups": [{"itemGroups": [{"items": items}]}]}}
+    )
 
 
 @pytest.mark.parametrize(
@@ -73,6 +72,7 @@ def _cart(quantities: dict[str, int], totals: dict[str, float] | None = None) ->
 def test_checkout_statuses(factory, basket_quantity, ledger, cart_quantity, expected):
     rows = _checkout_items(
         factory,
+        "ocado",
         _basket(basket_quantity),
         ledger,
         _cart({"sku-a": cart_quantity} if cart_quantity else {}),
@@ -85,6 +85,7 @@ def test_checkout_statuses(factory, basket_quantity, ledger, cart_quantity, expe
 def test_live_promotional_total_wins_over_planned_cost(factory):
     (row,) = _checkout_items(
         factory,
+        "ocado",
         _basket(2),
         _ledger(2),
         _cart({"sku-a": 2}, {"sku-a": 1.75}),
@@ -102,6 +103,7 @@ def test_live_promotional_total_wins_over_planned_cost(factory):
 def test_unsynced_product_uses_the_planned_line_total(factory):
     (row,) = _checkout_items(
         factory,
+        "ocado",
         _basket(2),
         _ledger(None, synced=False),
         _cart({}),
@@ -114,6 +116,7 @@ def test_unsynced_product_uses_the_planned_line_total(factory):
 def test_pending_removal_stays_visible_and_an_already_deleted_one_costs_zero(factory):
     (row,) = _checkout_items(
         factory,
+        "ocado",
         Basket(),
         _ledger(2),
         _cart({"personal-only": 4}),
@@ -132,11 +135,11 @@ def test_pending_removal_stays_visible_and_an_already_deleted_one_costs_zero(fac
 def test_personal_external_and_owned_products_are_excluded(factory):
     personal_cart = _cart({"personal-only": 4})
     assert _checkout_items(
-        factory, Basket(), _ledger(None), personal_cart, owned_item_keys=set()
+        factory, "ocado", Basket(), _ledger(None), personal_cart, owned_item_keys=set()
     ) == []
     assert _checkout_items(
-        factory, _basket(external=True), _ledger(None), personal_cart, owned_item_keys=set()
+        factory, "ocado", _basket(external=True), _ledger(None), personal_cart, owned_item_keys=set()
     ) == []
     assert _checkout_items(
-        factory, _basket(), _ledger(None), personal_cart, owned_item_keys={"potatoes"}
+        factory, "ocado", _basket(), _ledger(None), personal_cart, owned_item_keys={"potatoes"}
     ) == []

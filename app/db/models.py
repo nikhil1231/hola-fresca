@@ -698,40 +698,57 @@ class OcadoAuthEvent(Base):
 
 
 class OcadoCartSync(Base):
-    """One row, recording that a sync has happened at all.
+    """One row per shop, recording that a sync has happened at all.
 
     Not redundant with an empty :class:`OcadoCartLedger`: no ledger lines means
     "HF owns nothing in the cart", which is true after a checkout empties it and
     false before the first sync ever ran. Only the second case may assume the
     packs already sitting in the cart are its own from a pre-ledger push.
+
+    The table keeps its ``ocado_`` name now that Sainsbury's carts land in it
+    too. That is a wart, and a deliberate one: these two tables are the only
+    ones with a hand-rolled in-place upgrade path in :mod:`app.db.session`, and
+    renaming them would mean rewriting a migration that has already run against
+    the live database to no functional end. The ``retailer`` column is what
+    actually keys them; nothing branches on the name.
     """
 
     __tablename__ = "ocado_cart_sync"
-    __table_args__ = (UniqueConstraint("account_id", name="uq_ocado_cart_sync_account"),)
+    __table_args__ = (
+        UniqueConstraint("retailer", "account_id", name="uq_ocado_cart_sync_retailer_account"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retailer: Mapped[str] = mapped_column(String(64), default="ocado", index=True)
     account_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
     week_start: Mapped[str | None] = mapped_column(String(16), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class OcadoCartLedger(Base):
-    """What the last sync put in the Ocado cart, one row per product.
+    """What the last sync put in a retailer's cart, one row per product.
 
     The cart is shared with the rest of the week's shopping, so a sync has to
-    know its own contributions from yours - see :mod:`app.ocado.sync`. Rows are
+    know its own contributions from yours - see :mod:`app.cart.merge`. Rows are
     written from the cart as re-read after the push, never from what was asked
     for, so a refusal or a partial fill cannot leave the ledger over-claiming.
 
     ``ingredient_name`` is carried purely so a removal can be reported in terms
     that mean something: "Chorizo, which you dropped with the paella", not a
     bare product id.
+
+    See :class:`OcadoCartSync` for why the table name still says Ocado.
     """
 
     __tablename__ = "ocado_cart_ledger"
-    __table_args__ = (UniqueConstraint("account_id", "sku", name="uq_ocado_cart_ledger_account_sku"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "retailer", "account_id", "sku", name="uq_ocado_cart_ledger_retailer_account_sku"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retailer: Mapped[str] = mapped_column(String(64), default="ocado", index=True)
     account_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
     sku: Mapped[str] = mapped_column(String(128), index=True)
     quantity: Mapped[int] = mapped_column(Integer, default=0)

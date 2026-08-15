@@ -8,16 +8,19 @@ fakes the planner - only the shop.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.cart import get_cart_adapter
 from app.api.deps import get_planner_csv_path, get_session, get_session_factory
-from app.api.ocado import get_ocado_client
 from app.api.planner import _stock_checked_at
 from app.db.models import Recipe, RecipeIngredient
 from app.db.session import init_db, make_engine, make_session_factory
 from app.mapping import service
+from app import config
+from app.cart.adapters import AccountInfo, OcadoAdapter
 from app.mapping.candidates import gather_candidates
 from app.ocado import availability
 from app.ocado.availability import ProductStatus
@@ -71,6 +74,34 @@ class FakeCart:
             if not self.quantities[sku]:
                 self.quantities.pop(sku)
         return {"unavailableData": unavailable}
+
+
+class FakeOcadoAdapter(OcadoAdapter):
+    """The real Ocado adapter with a fake cart underneath it.
+
+    Subclassed rather than reimplemented on purpose: everything the adapter does
+    between the router and the cart - the delta merge, the ledger, the stock
+    refresh - is exactly what these tests are for, so only the socket the
+    network would be on gets replaced.
+    """
+
+    def __init__(self, cart):
+        self.cart_client = cart
+
+    def accounts(self):
+        # The configured default, not a made-up id: the ledger is keyed by it,
+        # so inventing one here would file the push's claims where nothing
+        # reads them and every assertion about the ledger would see nothing.
+        return [AccountInfo(id=config.DEFAULT_OCADO_ACCOUNT_ID, label="Ocado")]
+
+    def _runtime(self, account_id=None):
+        return SimpleNamespace(
+            session=None,
+            account=SimpleNamespace(id=config.DEFAULT_OCADO_ACCOUNT_ID),
+        )
+
+    def _client(self, account_id=None):
+        return self.cart_client
 
 
 @pytest.fixture
@@ -130,7 +161,7 @@ def stock_client(tmp_path):
     app.dependency_overrides[get_session] = _override_session
     app.dependency_overrides[get_session_factory] = lambda: factory
     app.dependency_overrides[get_planner_csv_path] = lambda: csv_path
-    app.dependency_overrides[get_ocado_client] = lambda: cart
+    app.dependency_overrides[get_cart_adapter] = lambda: FakeOcadoAdapter(cart)
     yield TestClient(app), recipe_id, cart
     app.dependency_overrides.clear()
 
@@ -257,7 +288,7 @@ def test_a_pack_chosen_for_this_week_costs_no_write_and_reaches_the_push(stock_c
     assert [o["this_week"] for o in line["options"] if o["sku"] == DEARER] == [True]
     assert [o["pinned"] for o in line["options"]] == [False, False], "nothing was written"
 
-    client.post("/api/ocado/basket/push", json=body)
+    client.post("/api/cart/ocado/basket/push", json=body)
     assert cart.quantities == {DEARER: 1}, "pushes what the page showed"
 
     # And the next week, unasked, is back to the planner's own choice.
@@ -290,7 +321,7 @@ def test_a_push_checks_the_shelves_before_filling_the_trolley(stock_client, monk
     client, recipe_id, cart = stock_client
     _shelves(monkeypatch, sold_out=[CHEAP])
 
-    result = client.post("/api/ocado/basket/push", json=_selections(recipe_id)).json()
+    result = client.post("/api/cart/ocado/basket/push", json=_selections(recipe_id)).json()
 
     assert [line["sku"] for line in result["applied"]] == [DEARER]
     assert result["dropped"] == []
@@ -308,7 +339,7 @@ def test_a_refusal_at_the_till_is_recovered_from_and_remembered(stock_client, mo
     _shelves(monkeypatch)
     cart.refuses = {CHEAP}
 
-    result = client.post("/api/ocado/basket/push", json=_selections(recipe_id)).json()
+    result = client.post("/api/cart/ocado/basket/push", json=_selections(recipe_id)).json()
 
     assert [line["sku"] for line in result["applied"]] == [DEARER]
     assert result["dropped"] == []
@@ -323,7 +354,7 @@ def test_a_drop_that_cannot_be_recovered_names_its_ingredient(stock_client, monk
     _shelves(monkeypatch)
     cart.refuses = {CHEAP, DEARER}
 
-    result = client.post("/api/ocado/basket/push", json=_selections(recipe_id)).json()
+    result = client.post("/api/cart/ocado/basket/push", json=_selections(recipe_id)).json()
 
     (dropped,) = result["dropped"]
     assert dropped["ingredient"] == "Rice", "not just the brand name of the pack"
@@ -340,6 +371,6 @@ def test_ocado_being_unreachable_does_not_block_the_push(stock_client, monkeypat
 
     monkeypatch.setattr(availability, "fetch_statuses", boom)
 
-    result = client.post("/api/ocado/basket/push", json=_selections(recipe_id)).json()
+    result = client.post("/api/cart/ocado/basket/push", json=_selections(recipe_id)).json()
 
     assert [line["sku"] for line in result["applied"]] == [CHEAP]

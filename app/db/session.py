@@ -67,8 +67,11 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
     "ingredient_mappings": {"unit_kind": "TEXT DEFAULT 'mass'"},
     "products": {"stock_checked_at": "DATETIME"},
     "plan_settings": {"pack_shortfall_tolerance_pct": "REAL DEFAULT 10"},
-    "ocado_cart_sync": {"account_id": "VARCHAR(64)"},
-    "ocado_cart_ledger": {"account_id": "VARCHAR(64)"},
+    # ``retailer`` is added by 0011 with the unique constraint that goes with it;
+    # it is listed here for the same reason ``account_id`` is, so a database that
+    # was stamped rather than migrated still gets the column the API reads.
+    "ocado_cart_sync": {"account_id": "VARCHAR(64)", "retailer": "VARCHAR(64) DEFAULT 'ocado'"},
+    "ocado_cart_ledger": {"account_id": "VARCHAR(64)", "retailer": "VARCHAR(64) DEFAULT 'ocado'"},
     "recipes": {
         "flagged_suspicious": "INTEGER DEFAULT 0",
         "audited_at": "DATETIME",
@@ -198,6 +201,12 @@ def _init_db(engine: Engine) -> None:
             text("UPDATE ocado_cart_ledger SET account_id = :account_id WHERE account_id IS NULL OR account_id = ''"),
             {"account_id": default_account},
         )
+        # Every row written before the ledger became per-retailer was an Ocado
+        # claim, because Ocado was the only shop that could be pushed to.
+        for table in ("ocado_cart_sync", "ocado_cart_ledger"):
+            conn.execute(
+                text(f"UPDATE {table} SET retailer = 'ocado' WHERE retailer IS NULL OR retailer = ''")
+            )
         _rebuild_old_ocado_ledger_table(conn, default_account)
 
 

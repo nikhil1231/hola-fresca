@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.account import router as account_router
+from app.api.cart import router as cart_router
 from app.api.mapping import router as mapping_router
 from app.api.ocado import router as ocado_router
 from app.api.plan import router as plan_router
@@ -61,6 +62,7 @@ app.include_router(account_router)
 app.include_router(recipes_router)
 app.include_router(mapping_router)
 app.include_router(planner_router)
+app.include_router(cart_router)
 app.include_router(ocado_router)
 app.include_router(schedule_router)
 app.include_router(plan_router)

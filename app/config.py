@@ -88,6 +88,31 @@ OCADO_OTP_IMAP_FOLDER = os.environ.get("OCADO_OTP_IMAP_FOLDER", "INBOX")
 OCADO_OTP_WAIT_S = float(os.environ.get("OCADO_OTP_WAIT_S", "120"))
 OCADO_OTP_POLL_S = float(os.environ.get("OCADO_OTP_POLL_S", "4"))
 
+# Sainsbury's sign-in. One account, because that is what there is; if a second
+# ever turns up this grows the same per-account prefix scheme Ocado uses.
+#
+# Unlike Ocado, no browser is involved: Sainsbury's identity service is a plain
+# OAuth2/OIDC provider and the whole ladder is HTTP (see app/sainsburys/auth.py).
+# What that costs instead is a one-time emailed code, and what it buys is a
+# refresh token — so the code is asked for once, not once a week.
+SAINSBURYS_EMAIL = os.environ.get("SAINSBURYS_EMAIL")
+SAINSBURYS_PASSWORD = os.environ.get("SAINSBURYS_PASSWORD")
+# The mailbox Sainsbury's login codes are read from, for an unattended login.
+#
+# Deliberately NOT defaulted to the Ocado OTP mailbox, even though the two could
+# share one inbox. Inheriting it looks harmless and is not: reading that mailbox
+# only works if the *Sainsbury's* account address forwards into it, and if it
+# does not, every login spends the full OTP wait polling for a message that is
+# never coming — silently, because a poll has nothing to report. Opting in is one
+# line of config; the failure it prevents looks like a hang.
+SAINSBURYS_OTP_IMAP_HOST = os.environ.get("SAINSBURYS_OTP_IMAP_HOST", OCADO_OTP_IMAP_HOST)
+SAINSBURYS_OTP_IMAP_PORT = int(os.environ.get("SAINSBURYS_OTP_IMAP_PORT", str(OCADO_OTP_IMAP_PORT)))
+SAINSBURYS_OTP_IMAP_USER = os.environ.get("SAINSBURYS_OTP_IMAP_USER")
+SAINSBURYS_OTP_IMAP_PASSWORD = os.environ.get("SAINSBURYS_OTP_IMAP_PASSWORD")
+SAINSBURYS_OTP_IMAP_FOLDER = os.environ.get("SAINSBURYS_OTP_IMAP_FOLDER", OCADO_OTP_IMAP_FOLDER)
+SAINSBURYS_OTP_WAIT_S = float(os.environ.get("SAINSBURYS_OTP_WAIT_S", str(OCADO_OTP_WAIT_S)))
+SAINSBURYS_OTP_POLL_S = float(os.environ.get("SAINSBURYS_OTP_POLL_S", str(OCADO_OTP_POLL_S)))
+
 
 @dataclass(frozen=True, slots=True)
 class OcadoAccountConfig:

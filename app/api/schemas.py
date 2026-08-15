@@ -845,25 +845,30 @@ class ManualProductListOut(BaseModel):
     items: list[ManualProductOut] = Field(default_factory=list)
 
 
-# --- Ocado basket/session ----------------------------------------------------
+# --- Cart session and basket push --------------------------------------------
+#
+# Named for the capability rather than the shop: every one of these is now
+# served for any retailer with a cart integration (see app/cart/adapters.py).
+# The Ocado-prefixed aliases at the end of the block are what the endpoints
+# that really are Ocado-only still import.
 
-class OcadoAccountOut(BaseModel):
+class CartAccountOut(BaseModel):
     id: str
     label: str
     email: str | None = None
     status: str
 
 
-class OcadoAccountsOut(BaseModel):
-    items: list[OcadoAccountOut] = Field(default_factory=list)
+class CartAccountsOut(BaseModel):
+    items: list[CartAccountOut] = Field(default_factory=list)
     default_account_id: str
 
 
-class OcadoAccountIn(BaseModel):
+class CartAccountIn(BaseModel):
     account_id: str | None = None
 
 
-class OcadoLoginOut(BaseModel):
+class CartLoginOut(BaseModel):
     account_id: str
     status: str
     #: Which rung of the auth ladder is running, for a caller polling /status
@@ -871,7 +876,7 @@ class OcadoLoginOut(BaseModel):
     stage: str = "idle"
 
 
-class OcadoOtpIn(OcadoAccountIn):
+class CartOtpIn(CartAccountIn):
     code: str = Field(min_length=1)
 
 
@@ -923,7 +928,7 @@ class PushLineOut(BaseModel):
     reason: str | None = None
 
 
-class OcadoSwapOut(BaseModel):
+class SwapOut(BaseModel):
     ingredient: str
     ingredient_key: str
     from_products: list[str] = Field(default_factory=list)
@@ -932,7 +937,7 @@ class OcadoSwapOut(BaseModel):
     tier_changed: bool = False
 
 
-class OcadoPushResultOut(BaseModel):
+class PushResultOut(BaseModel):
     applied: list[PushLineOut] = Field(default_factory=list)
     dropped: list[PushLineOut] = Field(default_factory=list)
     unmapped: list[str] = Field(default_factory=list)
@@ -945,12 +950,12 @@ class OcadoPushResultOut(BaseModel):
     restored: list[PushLineOut] = Field(default_factory=list)
     #: HF items the week no longer needs, taken back out.
     removed: list[PushLineOut] = Field(default_factory=list)
-    swaps: list[OcadoSwapOut] = Field(default_factory=list)
+    swaps: list[SwapOut] = Field(default_factory=list)
     sold_out: list[str] = Field(default_factory=list)
     stock_checked_at: datetime | None = None
 
 
-class OcadoCheckoutItemOut(BaseModel):
+class CheckoutItemOut(BaseModel):
     """One Hola Fresca-managed retailer product and its live sync state."""
 
     sku: str
@@ -965,7 +970,7 @@ class OcadoCheckoutItemOut(BaseModel):
     status: Literal["not_synced", "changed", "deleted", "extra", "synced"]
 
 
-class OcadoPushPlanOut(BaseModel):
+class PushPlanOut(BaseModel):
     """What a push would do, without doing it."""
 
     added: list[PushLineOut] = Field(default_factory=list)
@@ -981,7 +986,7 @@ class OcadoPushPlanOut(BaseModel):
     #: to remove half the cart can be read against "that was last week's shop".
     synced_at: datetime | None = None
     synced_week_start: str | None = None
-    checkout_items: list[OcadoCheckoutItemOut] = Field(default_factory=list)
+    checkout_items: list[CheckoutItemOut] = Field(default_factory=list)
 
 
 class StockRefreshOut(BaseModel):
@@ -1000,7 +1005,7 @@ class StockRefreshOut(BaseModel):
 OcadoStockRefreshOut = StockRefreshOut
 
 
-class OcadoBasketOut(BaseModel):
+class CartBasketOut(BaseModel):
     raw: dict
 
 
@@ -1114,3 +1119,16 @@ class RetailersOut(BaseModel):
 
 class RetailerSelectionIn(BaseModel):
     retailer: str
+
+
+#: The names these had while Ocado was the only shop with a cart.
+OcadoAccountOut = CartAccountOut
+OcadoAccountsOut = CartAccountsOut
+OcadoAccountIn = CartAccountIn
+OcadoLoginOut = CartLoginOut
+OcadoOtpIn = CartOtpIn
+OcadoSwapOut = SwapOut
+OcadoPushResultOut = PushResultOut
+OcadoCheckoutItemOut = CheckoutItemOut
+OcadoPushPlanOut = PushPlanOut
+OcadoBasketOut = CartBasketOut

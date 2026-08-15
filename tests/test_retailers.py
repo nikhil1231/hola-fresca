@@ -36,11 +36,20 @@ def test_manual_is_not_a_shop_you_can_select():
         retailers.get(retailers.MANUAL_RETAILER)
 
 
-def test_ocado_is_shoppable_and_sainsburys_is_only_catalogued():
-    # The capability, not the name, is what the UI branches on.
-    assert retailers.get("ocado").shoppable
-    assert retailers.get("sainsburys").catalogued
-    assert not retailers.get("sainsburys").shoppable
+def test_both_shops_are_catalogued_and_shoppable():
+    # The capability, not the name, is what the UI branches on. Sainsbury's
+    # became shoppable once it had a login and a trolley push of its own; the
+    # point of the flag is that neither the UI nor the API needed telling.
+    for retailer_id in ("ocado", "sainsburys"):
+        assert retailers.get(retailer_id).catalogued
+        assert retailers.get(retailer_id).shoppable
+
+
+def test_a_shop_without_a_cart_integration_degrades_to_a_list():
+    # The flag has to still mean something, or the branches it guards rot.
+    listed_only = retailers.Retailer(id="waitrose", label="Waitrose", shoppable=False)
+    assert listed_only.catalogued
+    assert not listed_only.shoppable
 
 
 def test_resolve_degrades_an_unknown_value_to_the_default():
@@ -135,7 +144,7 @@ def test_lists_every_shop_and_the_active_one(client):
     body = client.get("/api/retailers").json()
     assert body["active"] == "ocado"
     assert [item["id"] for item in body["items"]] == ["ocado", "sainsburys"]
-    assert [item["shoppable"] for item in body["items"]] == [True, False]
+    assert [item["shoppable"] for item in body["items"]] == [True, True]
 
 
 def test_selecting_a_shop_persists_it(client):

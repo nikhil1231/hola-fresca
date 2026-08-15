@@ -47,7 +47,7 @@ class Retailer:
 
 RETAILERS: tuple[Retailer, ...] = (
     Retailer(id="ocado", label="Ocado", catalogued=True, shoppable=True),
-    Retailer(id="sainsburys", label="Sainsbury's", catalogued=True, shoppable=False),
+    Retailer(id="sainsburys", label="Sainsbury's", catalogued=True, shoppable=True),
 )
 
 #: The shop a user who has never chosen one gets, and the value every existing
