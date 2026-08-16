@@ -112,13 +112,20 @@ REQUEST_TIMEOUT_S = 30.0
 class SainsburysSession:
     """One account's cookies and tokens, with the ladder that refreshes them."""
 
+    #: ``jar_path`` is required. It used to default to a single shared file at
+    #: ``data/sainsburys/session.json``, which was right when the app had one
+    #: Sainsbury's login for everybody and is a trap now that sessions belong to
+    #: accounts: a caller that forgot to pass one would write somebody's cookies
+    #: and rotating refresh token to a path nothing reads, and the file would
+    #: quietly reappear after being cleaned up. Whose session this is has to be
+    #: decided by the caller.
     def __init__(
         self,
         *,
-        jar_path: Path | None = None,
+        jar_path: Path,
         http: Any | None = None,
     ):
-        self.jar_path = jar_path or (config.DATA_DIR / "sainsburys" / "session.json")
+        self.jar_path = jar_path
         self.tokens: Tokens | None = None
         self.state: AuthState = AuthState.LOGGED_OUT
         #: A login parked between the password and the code. Held in memory only:

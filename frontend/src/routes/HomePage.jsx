@@ -243,7 +243,7 @@ export default function HomePage() {
   // The last finished shop is shown by default — it is the one you are most
   // likely to be looking back at — and older ones are asked for a few at a time.
   const [pastWeeks, setPastWeeks] = useState(1)
-  const { data: schedule, isLoading, isError, error, isFetching } = useSchedule(pastWeeks)
+  const { data: schedule, isError, error, isFetching, isPaused } = useSchedule(pastWeeks)
   const { getWeekRecipes, removeRecipeFromWeek } = useWeeklyPlan()
   const setSkipped = useSetWeekSkipped()
   const updateSettings = useUpdateScheduleSettings()
@@ -316,11 +316,25 @@ export default function HomePage() {
         </Alert>
       )}
 
+      {/* Three failure states, not one, and the middle one is why this page used
+          to go blank. React Query defaults to ``networkMode: 'online'``: when a
+          request fails and it decides the browser is offline it *pauses* the
+          retry rather than failing, leaving status ``pending``, nothing
+          fetching, no error and no data — permanently. ``isLoading`` is only
+          ``isPending && isFetching``, so it was false, ``isError`` was false,
+          and the render fell through to ``schedule.has_more_past`` and threw on
+          undefined. Hence: report the paused case, and gate the rest on the data
+          itself rather than on a loading flag that does not mean what it looks
+          like. */}
       {isError ? (
         <Alert color="red" title="Couldn't load your schedule" icon={<IconAlertCircle size={18} />}>
           {error?.message ?? 'Please check the backend is running and try again.'}
         </Alert>
-      ) : isLoading ? (
+      ) : isPaused ? (
+        <Alert color="orange" title="Can't reach the backend" icon={<IconAlertCircle size={18} />}>
+          Your schedule will load by itself once the connection is back.
+        </Alert>
+      ) : !schedule ? (
         <Group justify="center" py="xl">
           <Loader color="fresh" />
         </Group>

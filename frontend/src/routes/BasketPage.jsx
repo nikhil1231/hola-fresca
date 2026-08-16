@@ -1283,7 +1283,11 @@ export default function BasketPage() {
 
   const entries = getWeekRecipes(weekStart)
   const selections = useMemo(() => toPlannerSelections(entries), [entries])
-  const { data, isLoading, isError, error } = usePlannerBasket(selections, packOverrides, snapOverrides)
+  const { data, isLoading, isError, error, isPaused } = usePlannerBasket(
+    selections,
+    packOverrides,
+    snapOverrides,
+  )
   const onlineLines = useMemo(
     () => data?.lines?.filter((line) => !line.external) ?? [],
     [data?.lines],
@@ -1525,7 +1529,15 @@ export default function BasketPage() {
               <Alert color="red" title="Couldn't price basket" icon={<IconAlertCircle size={18} />}>
                 {error?.message ?? 'Please check the backend is running and try again.'}
               </Alert>
-            ) : isLoading ? (
+            ) : isPaused ? (
+              <Alert color="orange" title="Can't reach the backend" icon={<IconAlertCircle size={18} />}>
+                The basket will price itself once the connection is back.
+              </Alert>
+            ) : !data ? (
+              // On the data, not on ``isLoading``: a paused or pending query has
+              // no data, no error and nothing fetching, and this fell through to
+              // ``data.unmapped`` below and threw. Same shape as the schedule
+              // crash on the home page — see HomePage.jsx for the full story.
               <Group justify="center" py="xl">
                 <Loader color="fresh" />
               </Group>
