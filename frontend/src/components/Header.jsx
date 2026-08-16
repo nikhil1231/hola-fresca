@@ -12,7 +12,7 @@ import {
 } from '@mantine/core'
 import { IconMenu2 } from '@tabler/icons-react'
 
-import { useAccount } from '../hooks/useAccount.js'
+import { useAccount, useCanEditCatalogue } from '../hooks/useAccount.js'
 import { accountInitials } from '../utils/account.js'
 import AppContainer from './AppContainer.jsx'
 import RetailerChip from './RetailerChip.jsx'
@@ -21,6 +21,9 @@ import classes from './Header.module.css'
 export default function Header() {
   const { pathname } = useLocation()
   const { data: account } = useAccount()
+  // Only hidden when the server actually said this account is not an admin,
+  // never merely because it could not be reached. See useCanEditCatalogue.
+  const { allowed: canEditCatalogue } = useCanEditCatalogue()
   const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
@@ -47,7 +50,7 @@ export default function Header() {
               </NavLink>
               {/* Catalogue editing is admin-only, so a second user is not
                   offered a tab whose every action answers 403. */}
-              {account?.is_admin && (
+              {canEditCatalogue && (
                 <NavLink to="/mapping" className={navClass}>
                   Mapping
                 </NavLink>
@@ -121,7 +124,7 @@ export default function Header() {
           <NavLink to="/basket" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Basket
           </NavLink>
-          {account?.is_admin && (
+          {canEditCatalogue && (
             <NavLink to="/mapping" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
               Mapping
             </NavLink>

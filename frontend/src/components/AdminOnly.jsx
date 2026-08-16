@@ -1,7 +1,7 @@
 import { Navigate } from 'react-router-dom'
 import { Center, Loader } from '@mantine/core'
 
-import { useAccount } from '../hooks/useAccount.js'
+import { useCanEditCatalogue } from '../hooks/useAccount.js'
 
 /** Gate for the pages that edit the shared catalogue.
  *
@@ -10,21 +10,24 @@ import { useAccount } from '../hooks/useAccount.js'
  * stops a second user changing what everybody's basket buys. What this stops is
  * the app *offering* them a page whose every action answers 403.
  *
- * While the account is loading it renders a spinner rather than the page or the
- * redirect. Guessing either way is worse: showing the page flashes it at
- * somebody who may not be allowed it, and redirecting bounces the owner off
- * their own Mapping tab on every cold load.
+ * Three states, not two — see `useCanEditCatalogue`. While the account is
+ * loading this renders a spinner rather than the page or the redirect, because
+ * guessing either way is worse: showing the page flashes it at somebody who may
+ * not be allowed it, and redirecting bounces the owner off their own Mapping tab
+ * on every cold load. When the account could not be *fetched* it renders the
+ * page: the page's own queries will fail too and say so, which is a far better
+ * account of a backend that is down than a silent redirect to the home page.
  */
 export default function AdminOnly({ children }) {
-  const { data: account, isPending } = useAccount()
+  const { allowed, known } = useCanEditCatalogue()
 
-  if (isPending) {
+  if (!allowed && !known) {
     return (
       <Center py="xl">
         <Loader color="fresh" />
       </Center>
     )
   }
-  if (!account?.is_admin) return <Navigate to="/" replace />
+  if (!allowed) return <Navigate to="/" replace />
   return children
 }
