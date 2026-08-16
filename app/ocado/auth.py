@@ -266,6 +266,14 @@ class _BrowserWorker:
 class AuthLadder:
     """Refresh the Ocado cookie jar, escalating from free checks to full login."""
 
+    #: Where this account's Chromium profile lives. ``None`` means this ladder
+    #: cannot drive a browser at all, and asking it to is an error rather than a
+    #: silent fallback — see :attr:`worker`.
+    #:
+    #: It used to default to ``data/ocado/browser-profile``, one profile shared
+    #: by everybody. That was right when Ocado was a single login and is a trap
+    #: now that profiles belong to accounts: a ladder built without one would
+    #: drive, and recreate, a 90MB profile directory that nothing reads.
     profile_dir: Path | None = None
     headless: bool | None = None
     #: Where to read the emailed code from. ``None`` means ask a human for it.
@@ -287,7 +295,6 @@ class AuthLadder:
     _last_silent_at: float | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        self.profile_dir = self.profile_dir or (config.DATA_DIR / "ocado" / "browser-profile")
         if self.headless is None:
             self.headless = config.OCADO_LOGIN_HEADLESS
         if self.otp_mailbox is None:
@@ -296,6 +303,14 @@ class AuthLadder:
     @property
     def worker(self) -> _BrowserWorker:
         if self._worker is None:
+            if self.profile_dir is None:
+                # Better here than three frames down inside Playwright, and far
+                # better than the old fallback, which quietly drove a profile
+                # shared by every account on the box.
+                raise RuntimeError(
+                    "this Ocado ladder has no browser profile directory, so it "
+                    "cannot sign in; build it with profile_dir set"
+                )
             self._worker = _BrowserWorker(self.profile_dir, bool(self.headless))
         return self._worker
 

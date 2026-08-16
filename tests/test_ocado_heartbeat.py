@@ -97,6 +97,21 @@ def test_the_ladder_has_no_long_lived_credential_fields():
     assert not hasattr(ladder, "password")
 
 
+def test_a_ladder_with_no_profile_refuses_rather_than_sharing_one():
+    """It used to fall back to a single profile shared by every account.
+
+    That directory is what a browser login builds up — 90MB of it — and one
+    shared between accounts is both a privacy problem and the reason a stale
+    copy kept reappearing under ``data/ocado`` after being cleaned up. A ladder
+    that was never told where its profile lives now says so.
+    """
+    ladder = AuthLadder(account_id="test", otp_mailbox=None)
+
+    assert ladder.profile_dir is None
+    with pytest.raises(RuntimeError, match="no browser profile"):
+        ladder.worker
+
+
 # -- the rung-2 cap --------------------------------------------------------
 
 

@@ -51,8 +51,12 @@ class Destination:
 class OcadoClient:
     """Small names around Ocado's web endpoints; behaviour lives elsewhere."""
 
-    def __init__(self, session: OcadoSession | None = None):
-        self.session = session or OcadoSession()
+    #: Required rather than defaulted to a shared session: which account's
+    #: trolley this reads and writes is a decision the caller has to have made,
+    #: and a default is how one person's basket ends up in another's. Mirrors
+    #: :class:`app.sainsburys.client.SainsburysClient`.
+    def __init__(self, session: OcadoSession):
+        self.session = session
         self._destination: Destination | None = None
 
     def cart_view(self) -> dict[str, Any]:

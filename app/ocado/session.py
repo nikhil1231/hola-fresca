@@ -33,17 +33,25 @@ AUTH_PROBE_PATH = "/api/cart/v1/carts/active/checkout-walk"
 class OcadoSession:
     """Persisted httpx client with one bounded retry for auth and CSRF churn."""
 
+    #: ``jar_path`` and ``auth`` are both required, and for the same reason.
+    #: They used to default to the single shared pair the pre-registry app
+    #: used — ``data/ocado/session.json`` and ``data/ocado/browser-profile`` —
+    #: which was right when Ocado was one login for everybody and is a trap now
+    #: that sessions belong to accounts. A caller that forgot either would write
+    #: somebody's cookies, or drive a browser profile, at a path nothing reads,
+    #: and both files would quietly reappear after being cleaned up. Whose
+    #: session this is has to be decided by the caller.
     def __init__(
         self,
         *,
+        jar_path: Path,
+        auth: AuthLadder,
         client: httpx.Client | None = None,
-        jar_path: Path | None = None,
-        auth: AuthLadder | None = None,
         base_url: str = BASE_URL,
     ):
         self.base_url = base_url.rstrip("/")
-        self.jar_path = jar_path or (config.DATA_DIR / "ocado" / "session.json")
-        self.auth = auth or AuthLadder()
+        self.jar_path = jar_path
+        self.auth = auth
         self.client = client or httpx.Client(
             base_url=self.base_url,
             follow_redirects=True,
