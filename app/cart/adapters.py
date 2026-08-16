@@ -143,6 +143,20 @@ class CartAdapter(ABC):
     ) -> PushResult:
         ...
 
+    @abstractmethod
+    def clear_personal(
+        self,
+        account_id: str,
+        *,
+        ledger: CartLedger,
+    ) -> dict[str, int]:
+        """Remove every item the ledger does not claim.
+
+        Returns ``{sku: removed_quantity}`` so the caller can report what
+        changed.  Only your own items are touched — anything the ledger
+        says HF put there stays.
+        """
+
     # --- the catalogue behind it ---
 
     def refresh_stock(
@@ -264,6 +278,27 @@ class OcadoAdapter(CartAdapter):
             recover=recover,
         )
 
+    def clear_personal(
+        self,
+        account_id: str,
+        *,
+        ledger: CartLedger,
+    ) -> dict[str, int]:
+        from app.ocado.sync import cart_quantities
+
+        client = self._client(account_id)
+        current = cart_quantities(client.cart_view())
+        ledger_qty = ledger.quantities
+        personal = {
+            sku: max(0, qty - ledger_qty.get(sku, 0))
+            for sku, qty in current.items()
+        }
+        personal = {sku: qty for sku, qty in personal.items() if qty > 0}
+        if personal:
+            deltas = {sku: -qty for sku, qty in personal.items()}
+            client.apply_quantity(deltas)
+        return personal
+
     def refresh_stock(
         self,
         factory: sessionmaker[Session],
@@ -367,6 +402,24 @@ class SainsburysAdapter(CartAdapter):
             owned_item_keys=owned_item_keys,
             recover=recover,
         )
+
+    def clear_personal(
+        self,
+        account_id: str,
+        *,
+        ledger: CartLedger,
+    ) -> dict[str, int]:
+        client = self._client(account_id)
+        lines = {line.sku: line for line in client.lines()}
+        ledger_qty = ledger.quantities
+        removed: dict[str, int] = {}
+        for sku, line in lines.items():
+            personal = max(0, line.quantity - ledger_qty.get(sku, 0))
+            if personal > 0:
+                target = ledger_qty.get(sku, 0)
+                client.set_quantity(line, target)
+                removed[sku] = personal
+        return removed
 
 
 _ADAPTERS: dict[str, CartAdapter] = {

@@ -75,6 +75,10 @@ class FakeAdapter(CartAdapter):
 
         return PushResult(ledger=CartLedger())
 
+    def clear_personal(self, account_id, *, ledger):
+        self.seen.append(account_id)
+        return {}
+
 
 def connect(retailer, *, user_id=None, key=None, email="shopper@example.com"):
     """Give a user a connected account at ``retailer``, with a key of our choosing.

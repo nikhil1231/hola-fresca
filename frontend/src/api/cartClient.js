@@ -101,3 +101,7 @@ export function planCartBasket({
 export function fetchCartBasket(retailer) {
   return getJSON(`${base(retailer)}/basket`)
 }
+
+export function clearPersonalItems(retailer) {
+  return postJSON(`${base(retailer)}/basket/clear-personal`)
+}

@@ -628,3 +628,29 @@ def basket(
     snapshot = adapter.cart(_owned_account(session, user, adapter).key)
     raw = snapshot.raw if isinstance(snapshot.raw, dict) else {"items": list(snapshot.raw or [])}
     return CartBasketOut(raw=raw)
+
+
+@router.post("/basket/clear-personal")
+def clear_personal(
+    adapter: CartAdapter = Depends(get_cart_adapter),
+    session: Session = Depends(get_session),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    user: User = Depends(get_current_user),
+):
+    """Remove every item in the cart that Hola Fresca did not put there.
+
+    Reads the ledger to know what HF claims, then removes everything above
+    that.  The ledger itself is not touched — it still describes exactly what
+    HF synced, which remains true after the clear.
+    """
+    account_id = _owned_account(session, user, adapter).key
+    ledger = read_ledger(factory, account_id=account_id, retailer=adapter.retailer)
+    with _push_lock(adapter.retailer):
+        try:
+            removed = adapter.clear_personal(account_id, ledger=ledger)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"{adapter.retailer} clear personal items failed: {exc}",
+            ) from exc
+    return {"removed": removed}

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  clearPersonalItems,
   fetchCartBasket,
   fetchCartStatus,
   logoutCart,
@@ -116,5 +117,16 @@ export function useCartBasket(retailer, { enabled = true } = {}) {
     queryKey: key('basket', retailer),
     queryFn: () => fetchCartBasket(retailer),
     enabled: enabled && Boolean(retailer),
+  })
+}
+
+export function useCartClearPersonal(retailer) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => clearPersonalItems(retailer),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key('basket', retailer) })
+      qc.invalidateQueries({ queryKey: key('plan', retailer) })
+    },
   })
 }

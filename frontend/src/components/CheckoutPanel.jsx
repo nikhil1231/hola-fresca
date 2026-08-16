@@ -26,6 +26,7 @@ import {
 } from '@tabler/icons-react'
 
 import {
+  useCartClearPersonal,
   useCartPush,
   useCartPushPlan,
 } from '../hooks/useCartQueries.js'
@@ -183,6 +184,7 @@ export default function CheckoutPanel({
     { enabled: connected },
   )
   const [personalItemsOpen, setPersonalItemsOpen] = useState(false)
+  const clearPersonal = useCartClearPersonal(retailer)
   const resetPush = push.reset
   useEffect(() => {
     resetPush()
@@ -386,6 +388,22 @@ export default function CheckoutPanel({
                       </span>
                     </div>
                   ))}
+                  <div className={classes.personalClearRow}>
+                    <Button
+                      variant="subtle"
+                      color="red"
+                      size="compact-sm"
+                      leftSection={<IconTrash size={14} />}
+                      loading={clearPersonal.isPending}
+                      onClick={() => {
+                        if (window.confirm('Are you sure you want to clear all non-HolaFresca items?')) {
+                          clearPersonal.mutate()
+                        }
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </div>
                 </div>
               </Collapse>
             </Box>

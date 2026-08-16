@@ -214,6 +214,13 @@
   text-align: right;
 }
 
+.personalClearRow {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 24px 12px 16px;
+  border-top: 1px solid var(--hf-border);
+}
+
 .visuallyHidden {
   position: absolute;
   width: 1px;
