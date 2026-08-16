@@ -10,6 +10,12 @@ code the first time an account signs in from somewhere new. If a mailbox is
 configured the code is read from it; otherwise this prompts for it. Either way it
 is a one-off — the refresh token it comes back with is what every later session
 is built from, so this should not need running again unless the token is revoked.
+
+Sessions belong to accounts now, so every command works on one: ``--account KEY``
+names it, and the default is the first Sainsbury's row in the registry, which on
+a household database is whoever connected first. ``python -m app.sainsburys
+accounts`` lists them. This is a debugging tool for the box's owner; the way a
+person connects their own account is the Settings page.
 """
 from __future__ import annotations
 
@@ -20,7 +26,36 @@ import sys
 
 from app import config
 from app.sainsburys.auth import AuthError, AuthState
-from app.sainsburys.session import SainsburysSession
+from app.sainsburys.session import SainsburysSession, get_account_session
+
+
+def _registry_accounts() -> list[tuple[str, str | None]]:
+    """``(key, email)`` for every connected Sainsbury's account, oldest first."""
+    from sqlalchemy import select
+
+    from app.db.models import RetailerAccount
+    from app.db.session import init_db, make_engine, make_session_factory
+
+    engine = make_engine(config.DB_PATH)
+    init_db(engine)
+    with make_session_factory(engine)() as db:
+        return [
+            (row.key, row.email)
+            for row in db.execute(
+                select(RetailerAccount.key, RetailerAccount.email)
+                .where(RetailerAccount.retailer == "sainsburys")
+                .order_by(RetailerAccount.id)
+            ).all()
+        ]
+
+
+def _accounts(rows: list[tuple[str, str | None]]) -> int:
+    if not rows:
+        print("No Sainsbury's account is connected. Connect one from Settings.")
+        return 1
+    for key, email in rows:
+        print(f"{key}\t{email or '(no address recorded)'}")
+    return 0
 
 
 def _status(session: SainsburysSession) -> int:
@@ -46,7 +81,7 @@ def _status(session: SainsburysSession) -> int:
     return 0 if usable else 1
 
 
-def _login(session: SainsburysSession) -> int:
+def _login(session: SainsburysSession, default_email: str | None = None) -> int:
     # Each step is announced before it blocks. Signing in is several seconds of
     # network with nothing to show for it, and a CLI that goes quiet for that
     # long is indistinguishable from one that has hung.
@@ -54,7 +89,7 @@ def _login(session: SainsburysSession) -> int:
     # Never waits on the OTP mailbox: whoever ran this can read their own email
     # faster than a forwarding rule can, and the wait is invisible while it
     # happens. Unattended callers (the API) still use the mailbox.
-    default_email = config.SAINSBURYS_EMAIL or ""
+    default_email = default_email or config.SAINSBURYS_EMAIL or ""
     prompt = f"Email [{default_email}]: " if default_email else "Email: "
     email = input(prompt).strip() or default_email
     password = getpass.getpass("Password: ")
@@ -109,19 +144,40 @@ def _basket(session: SainsburysSession) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.sainsburys")
+    parser.add_argument(
+        "--account",
+        help="which connected account to act on; defaults to the first registered",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("accounts", help="list the connected Sainsbury's accounts")
     sub.add_parser("status", help="whether the stored session still shops")
     sub.add_parser("login", help="sign in, asking for the emailed code if needed")
     sub.add_parser("basket", help="print the live trolley")
     sub.add_parser("logout", help="forget the stored session and tokens")
     args = parser.parse_args(argv)
 
-    session = SainsburysSession()
+    rows = _registry_accounts()
+    if args.command == "accounts":
+        return _accounts(rows)
+
+    keys = [key for key, _ in rows]
+    account = args.account or (keys[0] if keys else None)
+    if account is None:
+        print(
+            "No Sainsbury's account is connected. Connect one from Settings first.",
+            file=sys.stderr,
+        )
+        return 1
+    if account not in keys:
+        print(f"No such Sainsbury's account: {account}", file=sys.stderr)
+        return 1
+
+    session = get_account_session(account)
     try:
         if args.command == "status":
             return _status(session)
         if args.command == "login":
-            return _login(session)
+            return _login(session, dict(rows).get(account))
         if args.command == "basket":
             return _basket(session)
         if args.command == "logout":

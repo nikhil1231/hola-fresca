@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
-  useCartAccounts,
   useCartLogin,
   useCartLogout,
   useCartOtp,
@@ -9,29 +8,35 @@ import {
   useCartStatus,
 } from './useCartQueries.js'
 
-// Remembered per shop. One key for both would offer Sainsbury's an Ocado
-// account id on the first render after a switch.
-const accountStorageKey = (retailer) => `holafresca:cart-account-id:${retailer}`
-const manualLogoutStorageKey = (retailer, accountId) =>
-  `holafresca:cart-manual-logout:${retailer}:${accountId}`
+// Remembered per shop, and only to stop the automatic reconnect below from
+// undoing a sign-out the moment the page re-renders. No account id is stored:
+// there is one connection per person per shop, and the server knows which.
+const manualLogoutStorageKey = (retailer) => `holafresca:cart-manual-logout:${retailer}`
+
+// Which shops have had their one automatic reconnect this page load.
+//
+// Module scope rather than a ref, and that is the whole point: a ref is reborn
+// with the component, so anything that remounts the panel — switching tabs,
+// switching shops and back, a parent re-keying — bought another "reconnect
+// once". Each of those attempts leaves the mutation pending for its duration,
+// so a component that remounts often enough never leaves the pending state and
+// the panel sits on "Reusing your saved session…" while the status poll runs at
+// its in-flight rate forever. The reconnect is a fact about the page, not about
+// a component instance, so it is stored where the page can see it.
+const reconnected = new Set()
 
 /** The complete retailer sign-in flow shared by Settings and Checkout. */
 export function useCartConnection(retailer) {
-  const accounts = useCartAccounts(retailer)
-  const [accountId, setAccountId] = useState(null)
-  const selectedAccount = useMemo(
-    () => (accounts.data?.items ?? []).find((account) => account.id === accountId) ?? null,
-    [accounts.data?.items, accountId],
-  )
-  const login = useCartLogin(retailer, accountId)
+  const login = useCartLogin(retailer)
   const logout = useCartLogout(retailer)
-  const sessionRefresh = useCartSessionRefresh(retailer, accountId)
-  const status = useCartStatus(retailer, accountId, {
-    enabled: Boolean(selectedAccount),
-    active: login.isPending || sessionRefresh.isPending,
-  })
-  const otp = useCartOtp(retailer, accountId)
-  const reconnectAttempted = useRef(new Set())
+  const sessionRefresh = useCartSessionRefresh(retailer)
+  // Only a *login* earns the fast poll. It blocks for minutes behind a browser
+  // launch and an emailed code, and the stage it reports moves in the meantime,
+  // so polling is the only way to show progress. A session refresh is a second
+  // at most and writes the status back itself when it lands, so polling it
+  // added nothing but a request every two seconds for as long as it ran.
+  const status = useCartStatus(retailer, { active: login.isPending })
+  const otp = useCartOtp(retailer)
   const actions = useRef(null)
   actions.current = {
     resetLogin: login.reset,
@@ -43,43 +48,35 @@ export function useCartConnection(retailer) {
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
 
+  // The address comes back from the server, so a returning user finds the form
+  // already filled in with the account they connected. The password never does.
+  const knownEmail = status.data?.email ?? ''
   useEffect(() => {
-    const items = accounts.data?.items ?? []
-    if (!items.length) return
-    if (accountId && items.some((account) => account.id === accountId)) return
-    const remembered = window.localStorage.getItem(accountStorageKey(retailer))
-    const next = items.some((account) => account.id === remembered)
-      ? remembered
-      : accounts.data?.default_account_id ?? items[0].id
-    setAccountId(next)
-    window.localStorage.setItem(accountStorageKey(retailer), next)
-  }, [accountId, accounts.data, retailer])
-
-  useEffect(() => {
-    setLoginEmail(selectedAccount?.email ?? '')
+    setLoginEmail(knownEmail)
     setLoginPassword('')
-  }, [retailer, accountId, selectedAccount?.email])
+  }, [retailer, knownEmail])
 
   useEffect(() => {
-    if (!accountId || !retailer) return
-    window.localStorage.setItem(accountStorageKey(retailer), accountId)
+    if (!retailer) return
     setOtpCode('')
     actions.current.resetLogin()
     actions.current.resetLogout()
     actions.current.resetOtp()
-  }, [accountId, retailer])
+  }, [retailer])
 
   useEffect(() => {
-    if (!accountId || !retailer || status.data?.status !== 'logged_out') return
-    const key = `${retailer}:${accountId}`
-    if (window.localStorage.getItem(manualLogoutStorageKey(retailer, accountId)) === '1') return
-    if (reconnectAttempted.current.has(key)) return
-    reconnectAttempted.current.add(key)
+    if (!retailer || status.data?.status !== 'logged_out') return
+    if (window.localStorage.getItem(manualLogoutStorageKey(retailer)) === '1') return
+    if (reconnected.has(retailer)) return
+    reconnected.add(retailer)
     actions.current.refreshSession()
-  }, [accountId, retailer, status.data?.status])
+  }, [retailer, status.data?.status])
 
   const submitLogin = () => {
-    window.localStorage.removeItem(manualLogoutStorageKey(retailer, accountId))
+    window.localStorage.removeItem(manualLogoutStorageKey(retailer))
+    // Signing in by hand is an explicit second chance: let the automatic
+    // reconnect run again if this login leaves the session logged out.
+    reconnected.delete(retailer)
     login.mutate(
       { email: loginEmail.trim(), password: loginPassword },
       { onSettled: () => setLoginPassword('') },
@@ -87,21 +84,16 @@ export function useCartConnection(retailer) {
   }
 
   const disconnect = () => {
-    if (!retailer || !accountId) return
-    const storageKey = manualLogoutStorageKey(retailer, accountId)
+    if (!retailer) return
+    const storageKey = manualLogoutStorageKey(retailer)
     window.localStorage.setItem(storageKey, '1')
     logout.mutate(undefined, {
-      onSuccess: (data) => {
-        window.localStorage.setItem(manualLogoutStorageKey(retailer, data.account_id), '1')
-      },
       onError: () => window.localStorage.removeItem(storageKey),
     })
   }
 
   const stage = status.data?.stage ?? 'idle'
   return {
-    accountId,
-    accounts,
     awaitingOtp: status.data?.status === 'awaiting_otp',
     connected: status.data?.status === 'ready',
     disconnect,
@@ -113,8 +105,6 @@ export function useCartConnection(retailer) {
     otp,
     otpCode,
     reconnecting: sessionRefresh.isPending,
-    selectedAccount,
-    setAccountId,
     setLoginEmail,
     setLoginPassword,
     setOtpCode,

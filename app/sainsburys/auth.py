@@ -11,8 +11,11 @@ catalogue scrape uses — no display, no profile directory, about a second.
 The flow, which is standard once you know which of the two front-ends you are
 talking to (see :mod:`app.scraper.products.sainsburys` for that story):
 
-1. ``GET account.sainsburys.co.uk/oauth2/auth`` with PKCE. The provider parks
-   the request and redirects to its own login UI carrying a ``login_challenge``.
+1. ``GET account.sainsburys.co.uk/oauth2/auth`` with PKCE. **Two outcomes**, and
+   which one you get is the difference between a quiet re-login and an emailed
+   code. If the provider still holds a session for this client it answers with
+   an authorization ``code`` on the spot and steps 2-4 never happen. Otherwise
+   it parks the request and redirects to its login UI with a ``login_challenge``.
 2. ``POST /gol/login`` with the challenge, the email and the password.
 3. The provider redirects to ``/gol/login/mfa``. **Nothing has been sent yet**
    — a separate ``POST /gol/login/send-mfa`` is what dispatches the six-digit
@@ -35,9 +38,22 @@ is therefore a convenience for the first login rather than a load-bearing part
 of the design — and if no mailbox is configured, the ladder parks at
 :attr:`AuthState.AWAITING_OTP` and waits to be handed the code by hand.
 
-A browser that has signed in before is not challenged at all, which is worth
-knowing when comparing this against signing in by hand: the challenge is for
-the device, not the account, and a fresh HTTP client is always a new device.
+A browser that has signed in before is not challenged at all, because it **never
+posts a password**: its provider session cookie answers step 1 with a code
+outright, and posting a password is what makes Sainsbury's send a one-time code.
+
+This client cannot copy that, and the reason is worth recording so nobody tries
+again. Measured against the live provider after a real successful login, the jar
+holds ``oauth2_authentication_csrf`` and ``oauth2_consent_csrf`` and no session
+cookie — the same two an anonymous caller is handed on the way to the login form.
+Sainsbury's simply does not give this client a session to present, whatever
+``is_remember_me`` is set to. So step 1 here always ends at a ``login_challenge``,
+and the thing that keeps the emailed code a one-off is the refresh token from
+step 5, not step 1.
+
+:func:`authorize` reads both outcomes anyway. It is the correct shape, it costs
+nothing while the provider declines to remember us, and it would start paying
+off by itself if that changed.
 """
 from __future__ import annotations
 
@@ -186,32 +202,65 @@ def _query(url: str, key: str) -> str | None:
     return values[0] if values else None
 
 
-def _follow(http: Any, url: str, *, stop_on: str = "code") -> tuple[str, str | None]:
-    """Chase redirects until the chain ends or a query parameter appears.
+def _follow(
+    http: Any, url: str, *, stop_on: str | tuple[str, ...] = "code"
+) -> tuple[str, str, str | None]:
+    """Chase redirects until the chain ends or one of ``stop_on`` appears.
 
-    Stops *before* fetching the URL carrying ``stop_on``, which matters: that URL
-    is the SPA's redirect page, and loading it would spend a request rendering
-    HTML we have no use for — and, worse, hand the one-time authorization code to
-    a page that would try to redeem it first.
+    Returns ``(url, which, value)`` — which of the parameters was found, so a
+    caller watching for more than one outcome can tell them apart.
+
+    Stops *before* fetching the URL carrying the parameter, which matters: for
+    ``code`` that URL is the SPA's redirect page, and loading it would spend a
+    request rendering HTML we have no use for — and, worse, hand the one-time
+    authorization code to a page that would try to redeem it first.
     """
+    keys = (stop_on,) if isinstance(stop_on, str) else stop_on
     current = url
     for _ in range(MAX_REDIRECTS):
-        found = _query(current, stop_on)
-        if found:
-            return current, found
+        for key in keys:
+            found = _query(current, key)
+            if found:
+                return current, key, found
         response = http.get(current, allow_redirects=False, timeout=REQUEST_TIMEOUT_S)
         location = response.headers.get("location")
         if not location:
-            return current, None
+            return current, "", None
         current = urljoin(current, location)
     raise AuthError(f"Sainsbury's redirected more than {MAX_REDIRECTS} times during login")
 
 
-def begin_login(http: Any) -> PendingLogin:
-    """Ask the provider to start an authorization, and take its challenge.
+@dataclass(slots=True)
+class Authorization:
+    """What ``/oauth2/auth`` answered, which is one of exactly two things.
 
-    Nothing here is account-specific — no credential is sent — so a failure at
-    this step is the provider or the network, never a bad password.
+    Either the provider still has a session for this client and hands back an
+    authorization ``code`` outright — no password, no code, nothing asked of
+    anybody — or it does not, and parks the request behind its login UI with a
+    ``pending`` challenge for a password to be posted against.
+
+    Telling those apart is the whole point. See :func:`authorize`.
+    """
+
+    verifier: str
+    code: str | None = None
+    pending: PendingLogin | None = None
+
+
+def authorize(http: Any) -> Authorization:
+    """Start an authorization, and report whether a password is needed at all.
+
+    This is the rung a browser lives on and the one this module used to be
+    missing. A browser that has signed in before is never challenged, and the
+    reason is not that Sainsbury's remembers the *device* — it is that the
+    provider's own session cookie answers this request with a code immediately.
+    A client without that cookie falls through to the login form, and **posting a
+    password is what makes Sainsbury's send a one-time code**. So a ladder with no
+    rung here has no way to be the browser it is comparing itself against: every
+    single login goes through the password step, and therefore through MFA.
+
+    Nothing account-specific is sent, so a failure here is the provider or the
+    network, never a bad password — and it can never cause a code to be emailed.
     """
     verifier, challenge = _pkce_pair()
     state = secrets.token_urlsafe(16)
@@ -228,11 +277,31 @@ def begin_login(http: Any) -> PendingLogin:
         "code_challenge_method": "S256",
     }
     url = f"{IDENTITY_URL}{AUTHORIZE_PATH}?{urlencode(params)}"
-    final, _ = _follow(http, url, stop_on="login_challenge")
-    challenge_id = _query(final, "login_challenge")
-    if not challenge_id:
+    # Both outcomes are watched for. Watching only for the challenge is how this
+    # went wrong before: a provider that answered with a code was followed right
+    # past it onto the SPA redirect page — spending the one-time code — and then
+    # reported "did not offer a login challenge", so the good case looked like a
+    # broken one.
+    _, which, value = _follow(http, url, stop_on=("login_challenge", "code"))
+    if which == "code":
+        log.info("Sainsbury's still had a session for us; no password needed")
+        return Authorization(verifier=verifier, code=value)
+    if not value:
+        raise AuthError("Sainsbury's neither offered a login challenge nor a code")
+    return Authorization(
+        verifier=verifier,
+        pending=PendingLogin(
+            login_challenge=value, code_verifier=verifier, state=state
+        ),
+    )
+
+
+def begin_login(http: Any) -> PendingLogin:
+    """The password-step half of :func:`authorize`, for callers that want only it."""
+    result = authorize(http)
+    if result.pending is None:
         raise AuthError("Sainsbury's did not offer a login challenge")
-    return PendingLogin(login_challenge=challenge_id, code_verifier=verifier, state=state)
+    return result.pending
 
 
 def submit_credentials(http: Any, pending: PendingLogin, email: str, password: str) -> str | None:
@@ -274,7 +343,7 @@ def submit_credentials(http: Any, pending: PendingLogin, email: str, password: s
     if MFA_PATH in urlparse(target).path:
         return None
 
-    _, code = _follow(http, target)
+    _, _, code = _follow(http, target)
     if not code:
         raise AuthError("Sainsbury's accepted the password but issued no authorization code")
     return code
@@ -339,7 +408,7 @@ def submit_code(http: Any, pending: PendingLogin, code: str) -> str:
         # Back to the code form: wrong, expired, or one attempt too many.
         raise AuthError("Sainsbury's would not accept that code")
 
-    _, authorization = _follow(http, target)
+    _, _, authorization = _follow(http, target)
     if not authorization:
         raise AuthError("Sainsbury's accepted the code but issued no authorization code")
     return authorization

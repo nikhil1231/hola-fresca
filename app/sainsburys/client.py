@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.sainsburys.session import SainsburysSession, get_shared_session
+from app.sainsburys.session import SainsburysSession
 
 BASKET_API = "/groceries-api/gol-services/basket"
 BASKET_PATH = f"{BASKET_API}/v2/basket"
@@ -65,8 +65,11 @@ class BasketError(RuntimeError):
 class SainsburysClient:
     """Small names around Sainsbury's basket endpoints; behaviour lives elsewhere."""
 
-    def __init__(self, session: SainsburysSession | None = None):
-        self.session = session or get_shared_session()
+    #: Required rather than defaulted to a shared session: which account's
+    #: trolley this reads and writes is a decision the caller has to have made,
+    #: and a default is how one person's basket ends up in another's.
+    def __init__(self, session: SainsburysSession):
+        self.session = session
 
     def basket(self, *, calculate: bool = True) -> dict[str, Any]:
         """The live trolley.

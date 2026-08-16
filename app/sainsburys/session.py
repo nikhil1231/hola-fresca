@@ -6,8 +6,7 @@ against, and it is short-lived. The **refresh token** is the long-lived half:
 while it survives, a dead cookie jar is one round trip away from being a live one
 and nobody has to read an email.
 
-So :meth:`SainsburysSession.ensure_authenticated` is a ladder of exactly three
-rungs, cheapest first:
+So :meth:`SainsburysSession.ensure_authenticated` is a ladder, cheapest first:
 
 1. the jar as it stands, judged locally and for free — a signed-in commerce
    cookie plus an access token that has not expired. This is a guess, not a
@@ -18,16 +17,36 @@ rungs, cheapest first:
    its own. The cookies die well inside the token's hour, so this is the
    common repair and it spends nothing;
 3. the refresh token, for when the access token has expired too;
-4. a full login, the only rung that can need a one-time code.
+4. a bare authorization request, which the provider answers with a code outright
+   if it still has a session for us — no credential sent, nobody emailed;
+5. a full login, the only rung that can need a one-time code.
 
 Rung 3 is deliberately below rung 2 rather than beside it, because refresh
 tokens **rotate**: every use invalidates the one on disk and issues another, so
 a needless refresh is a credential to re-persist and a window in which a crash
 leaves nothing usable. Rung 2 avoids the whole question.
 
-Ocado's equivalent has neither middle rung, which is the whole reason it needs a
-mailbox and a heartbeat. Here rungs 2 and 3 carry the load and rung 4 should run
-about once.
+Rung 4 is, as of August 2026, **inert against the live provider**, and that is
+worth stating plainly rather than leaving as an optimistic comment. It was added
+on the theory that a browser skips the emailed code because its provider session
+answers rung 4 outright, and that this ladder was asking for codes only because
+it never took that rung. The first half looks right; the second turned out not to
+help, because Sainsbury's does not issue *this* client a session cookie at all.
+Measured after a real, successful, code-and-all login: the jar came back holding
+``oauth2_authentication_csrf`` and ``oauth2_consent_csrf`` and nothing else, both
+of which an anonymous caller is also given on the way to the login form. So rung
+4 is skipped before it costs a request — see
+:meth:`SainsburysSession.has_provider_session` — and it is kept because it is the
+correct mechanism, cheap while it cannot fire, and would start working on its own
+if that ever changed.
+
+What actually keeps the code a one-off is therefore **rung 3**: the refresh token
+survives where a provider session was never given, and rungs 2-3 are what carry
+a signed-in account between logins. If somebody is being asked for a code
+repeatedly, the refresh token is what to look at.
+
+Ocado's equivalent has none of the middle rungs, which is the whole reason it
+needs a mailbox and a heartbeat.
 """
 from __future__ import annotations
 
@@ -47,7 +66,7 @@ from app.sainsburys.auth import (
     AuthState,
     PendingLogin,
     Tokens,
-    begin_login,
+    authorize,
     establish_gol_session,
     exchange_code,
     read_emailed_code,
@@ -71,6 +90,14 @@ log = logging.getLogger("holafresca.sainsburys")
 #: :meth:`SainsburysSession.request` re-authenticates on a 401 rather than
 #: trying to predict one.
 AUTH_COOKIE_PREFIX = "WC_AUTHENTICATION_"
+
+#: Identity cookies that say nothing about being signed in. The provider hands
+#: these to anonymous callers as part of walking them to the login form, so they
+#: are present on a jar that has never authenticated and must not be read as a
+#: session. See :meth:`SainsburysSession.has_provider_session`.
+PROVIDER_FLOW_COOKIES = frozenset(
+    {"oauth2_authentication_csrf", "oauth2_consent_csrf"}
+)
 
 #: Which browser handshake to present. Sainsbury's edge refuses Python's TLS on
 #: every host it fronts, identity included, so the same impersonation the
@@ -202,6 +229,29 @@ class SainsburysSession:
             headers["Authorization"] = f"Bearer {self.tokens.access_token}"
         return headers
 
+    def has_provider_session(self) -> bool:
+        """Whether the identity provider might still recognise this client.
+
+        Cheap and local. Any identity cookie counts *except* the CSRF pair, and
+        that exception is the whole point: those two are per-flow scaffolding
+        that the provider hands out to anonymous callers on the way to the login
+        form, so counting them would mean "we have a session" was true of a
+        client that had never signed in — and the rung would pay for a redirect
+        chase on every page load to be told so.
+
+        Measured against the live provider, a jar this app has *successfully*
+        logged in with holds exactly those two and nothing else — see
+        :meth:`_log_provider_session`. So today this is reliably false and rung
+        four never runs. It is kept because it is the correct mechanism and the
+        one a browser uses; if Sainsbury's ever starts issuing this client a
+        session cookie, the quiet re-login starts working on its own.
+        """
+        return any(
+            "account.sainsburys" in (cookie.domain or "")
+            and cookie.name not in PROVIDER_FLOW_COOKIES
+            for cookie in self._http.cookies.jar
+        )
+
     def looks_authenticated(self) -> bool:
         """Whether this session is worth trying, judged without a request.
 
@@ -244,6 +294,9 @@ class SainsburysSession:
             if self._refresh():
                 return self.state
 
+            if self._reauthorize():
+                return self.state
+
             if not email or not password:
                 self.state = AuthState.NEEDS_PASSWORD
                 return self.state
@@ -260,7 +313,12 @@ class SainsburysSession:
         a tab.
         """
         with self._lock:
-            if self.looks_authenticated() or self._reestablish() or self._refresh():
+            if (
+                self.looks_authenticated()
+                or self._reestablish()
+                or self._refresh()
+                or self._reauthorize()
+            ):
                 self.state = AuthState.READY
             else:
                 self.state = AuthState.NEEDS_PASSWORD
@@ -325,13 +383,57 @@ class SainsburysSession:
         self.save()
         return True
 
+    def _reauthorize(self) -> bool:
+        """Rung four: ask the provider whether it still knows us.
+
+        The rung the browser lives on, and the one that decides whether anybody
+        is emailed a code. It costs one redirect chase and sends no credential,
+        so it can never itself cause a code to be sent — which is why it is also
+        safe on the quiet path that a page load takes.
+
+        Below the token rungs rather than above them: those spend nothing and
+        answer locally, while this is a round trip to the identity provider.
+        Above the password rung because the password rung is the expensive one —
+        it is the step that makes Sainsbury's send a six-digit code, and skipping
+        it is the entire point.
+
+        Skipped outright when we hold no identity cookie, because then the answer
+        is known: a provider session *is* a cookie, so a jar without one cannot
+        have one. Without this guard the rung fires on every page load of an
+        account nobody has ever connected — a second of network, on the quiet
+        path, to be told something the empty jar already said.
+        """
+        if not self.has_provider_session():
+            return False
+        try:
+            result = authorize(self._http)
+        except AuthError as exc:
+            log.info("Sainsbury's would not start an authorization (%s)", exc)
+            return False
+        if result.code is None:
+            return False
+        try:
+            self._settle_authorization(result.code, result.verifier)
+        except AuthError as exc:
+            # The provider offered a code and then would not honour it. Nothing
+            # is broken that a full login cannot fix, so fall through to one.
+            log.info("Sainsbury's session did not survive being redeemed (%s)", exc)
+            return False
+        return True
+
     def _login(
         self, *, email: str, password: str, allow_mailbox: bool = True
     ) -> AuthState:
         """Full login with request-local credentials, which may need an OTP."""
         started = time.time()
         log.info("Signing in to Sainsbury's")
-        pending = begin_login(self._http)
+        result = authorize(self._http)
+        if result.code is not None:
+            # The provider answered without wanting the password we were about
+            # to send. Nothing to do but take it.
+            self._settle_authorization(result.code, result.verifier)
+            return self.state
+        pending = result.pending
         try:
             code = submit_credentials(self._http, pending, email, password)
         except AuthError:
@@ -371,11 +473,42 @@ class SainsburysSession:
             return self.state
 
     def _settle(self, pending: PendingLogin, authorization_code: str) -> None:
-        self.tokens = exchange_code(self._http, authorization_code, pending.code_verifier)
+        self._settle_authorization(authorization_code, pending.code_verifier)
+
+    def _settle_authorization(self, authorization_code: str, verifier: str) -> None:
+        """Redeem an authorization code for a session, however it was obtained.
+
+        Shared by the two ways one arrives: the provider handing one over
+        because it still knows us, and a password (and usually a code) earning
+        one. From here they are the same thing.
+        """
+        self.tokens = exchange_code(self._http, authorization_code, verifier)
         establish_gol_session(self._http, self.tokens)
         self.pending = None
         self.state = AuthState.READY
         self.save()
+        self._log_provider_session()
+
+    def _log_provider_session(self) -> None:
+        """Record whether the provider left us a session cookie of its own.
+
+        Rung 4 only works if it did, and whether it does is the provider's
+        choice, not ours — so this is the one line that says whether the next
+        re-login will be quiet or will email somebody a code. Names only: these
+        are credentials, and the log is not the place for their values.
+        """
+        names = sorted(
+            cookie.name
+            for cookie in self._http.cookies.jar
+            if "account.sainsburys" in (cookie.domain or "")
+        )
+        log.info(
+            "Sainsbury's identity cookies now held: %s%s",
+            ", ".join(names) or "none",
+            ""
+            if any(name.endswith("_session") for name in names)
+            else " (no provider session — the next login will need a code)",
+        )
 
     # --- requests ------------------------------------------------------------
 
@@ -458,19 +591,34 @@ def _cookie_from_json(item: dict[str, Any]) -> Cookie:
     )
 
 
-_SESSION: SainsburysSession | None = None
-_SESSION_LOCK = threading.Lock()
+_SESSIONS: dict[str, SainsburysSession] = {}
+_SESSIONS_LOCK = threading.Lock()
 
 
-def get_shared_session() -> SainsburysSession:
-    """The process-wide Sainsbury's session.
+def account_dir(account_id: str) -> Path:
+    """Where one account's session lives. Mirrors :func:`app.ocado.session.account_dir`.
 
-    One per process, not per request: the cookie jar and the parked login are
-    shared state, and a per-request session would drop the login between the
-    password and the code.
+    Note what is *not* here: the pre-registry jar at ``data/sainsburys/session.json``
+    is no longer read. It was written when the app had one Sainsbury's login for
+    everybody, so there is no honest answer to whose it is, and adopting it for
+    whoever signed in first would hand them somebody else's trolley. It costs one
+    sign-in to replace and the file can be deleted.
     """
-    global _SESSION
-    with _SESSION_LOCK:
-        if _SESSION is None:
-            _SESSION = SainsburysSession()
-        return _SESSION
+    return config.DATA_DIR / "sainsburys" / "accounts" / account_id
+
+
+def get_account_session(account_id: str) -> SainsburysSession:
+    """The process-wide session for one Sainsbury's account.
+
+    One per process per account, not per request: the cookie jar, the rotating
+    refresh token and the parked login are all shared state, and a per-request
+    session would drop the login between the password and the emailed code.
+    """
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(account_id)
+        if session is None:
+            session = SainsburysSession(
+                jar_path=account_dir(account_id) / "session.json"
+            )
+            _SESSIONS[account_id] = session
+        return session

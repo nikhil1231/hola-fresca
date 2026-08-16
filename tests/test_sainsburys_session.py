@@ -12,8 +12,19 @@ import pytest
 from app.sainsburys import session as session_module
 from datetime import datetime, timedelta, timezone
 
-from app.sainsburys.auth import AuthError, AuthState, PendingLogin, Tokens
-from app.sainsburys.session import SainsburysSession
+from app.sainsburys.auth import (
+    AuthError,
+    Authorization,
+    AuthState,
+    PendingLogin,
+    Tokens,
+)
+from app.sainsburys.session import SainsburysSession, _cookie_from_json
+
+PARKED = Authorization(
+    verifier="v",
+    pending=PendingLogin(login_challenge="c", code_verifier="v", state="s"),
+)
 
 
 class FakeHttp:
@@ -56,6 +67,9 @@ class _Response:
     def __init__(self, status_code):
         self.status_code = status_code
         self.content = b""
+        # No ``location``, so a redirect chase ends here rather than walking off
+        # into the real provider. The unpatched authorize rung reaches this.
+        self.headers = {}
 
     def json(self):
         return {}
@@ -64,11 +78,9 @@ class _Response:
 @pytest.fixture
 def session(tmp_path, monkeypatch):
     # Nothing below should reach the network; anything that tries fails loudly.
-    monkeypatch.setattr(
-        session_module,
-        "begin_login",
-        lambda http: PendingLogin(login_challenge="c", code_verifier="v", state="s"),
-    )
+    # The provider does not remember this client, so every login reaches the
+    # password step. The rung that avoids that has its own tests below.
+    monkeypatch.setattr(session_module, "authorize", lambda http: PARKED)
     monkeypatch.setattr(session_module, "submit_credentials", lambda *a, **k: None)
     return SainsburysSession(
         jar_path=tmp_path / "session.json",
@@ -140,6 +152,149 @@ def test_a_quiet_refresh_never_reaches_the_password(session, monkeypatch):
 
     assert session.refresh_quietly() == AuthState.NEEDS_PASSWORD
     assert attempted == []
+
+
+# --- the rung that decides whether anybody is emailed a code ----------------
+#
+# Signing in through a browser never asks for a one-time code, while this ladder
+# always did. The reason was not that Sainsbury's trusts the browser's device: it
+# is that the browser never posts a password, because the provider answers its
+# authorization request with a code outright. Posting a password is what sends
+# the email, so a ladder that always reached the password step always paid for
+# one. These pin the rung that avoids it.
+
+
+def _provider_cookie(session):
+    """Give the jar an identity cookie, so rung 4 is worth attempting.
+
+    Without one the rung is skipped on principle: a provider session *is* a
+    cookie, so an empty jar cannot have one and the round trip would be spent
+    learning what the jar already said.
+    """
+    # A real Cookie rather than a stand-in: these get written out by save(),
+    # which reads fields a stub does not have.
+    session.http.cookies.jar.set_cookie(
+        _cookie_from_json(
+            {
+                "name": "oauth2_authentication_session",
+                "value": "provider-session",
+                "domain": "account.sainsburys.co.uk",
+            }
+        )
+    )
+
+
+def _settled(session, monkeypatch, seen):
+    """Redeeming a code works, without a network."""
+    monkeypatch.setattr(
+        session_module,
+        "exchange_code",
+        lambda http, code, verifier: seen.append((code, verifier))
+        or Tokens(access_token="fresh", refresh_token="r"),
+    )
+    monkeypatch.setattr(session_module, "establish_gol_session", lambda http, tokens: None)
+
+
+def test_a_remembered_provider_session_signs_in_without_a_password(session, monkeypatch):
+    """The whole point: no credential sent, so no code can be emailed."""
+    seen: list[tuple[str, str]] = []
+    _provider_cookie(session)
+    _settled(session, monkeypatch, seen)
+    monkeypatch.setattr(
+        session_module, "authorize", lambda http: Authorization(verifier="v2", code="auth-code")
+    )
+    attempted = []
+    monkeypatch.setattr(
+        session_module, "submit_credentials", lambda *a, **k: attempted.append(True)
+    )
+
+    state = session.ensure_authenticated(
+        trust_existing=False, email="a@b.com", password="pw"
+    )
+
+    assert state == AuthState.READY
+    assert seen == [("auth-code", "v2")], "the offered code should have been redeemed"
+    assert attempted == [], "a password must not be posted when none was asked for"
+
+
+def test_the_quiet_path_can_use_it_too(session, monkeypatch):
+    """It sends no credential, so a page load may take this rung safely."""
+    _provider_cookie(session)
+    _settled(session, monkeypatch, [])
+    monkeypatch.setattr(
+        session_module, "authorize", lambda http: Authorization(verifier="v", code="c")
+    )
+
+    assert session.refresh_quietly() == AuthState.READY
+
+
+def test_a_provider_that_wants_a_password_still_falls_through_to_one(session, monkeypatch):
+    """The rung is an optimisation, not a replacement."""
+    posted = []
+    monkeypatch.setattr(
+        session_module, "submit_credentials", lambda *a, **k: posted.append(True)
+    )
+
+    session.ensure_authenticated(trust_existing=False, email="a@b.com", password="pw")
+
+    assert posted == [True]
+
+
+def test_a_provider_session_that_will_not_redeem_is_not_fatal(session, monkeypatch):
+    """An offered code the token endpoint then refuses. Fall back, do not crash."""
+    _provider_cookie(session)
+    monkeypatch.setattr(
+        session_module, "authorize", lambda http: Authorization(verifier="v", code="c")
+    )
+
+    def refuse(*args, **kwargs):
+        raise AuthError("no")
+
+    monkeypatch.setattr(session_module, "exchange_code", refuse)
+
+    assert session.refresh_quietly() == AuthState.NEEDS_PASSWORD
+
+
+def test_the_csrf_pair_alone_is_not_a_session(session, monkeypatch):
+    """What a jar holds after a *successful* login, measured against the live site.
+
+    The provider issues these two on the way to the login form, to anyone. A
+    jar that has genuinely signed in holds exactly these and nothing else, so
+    reading them as "we have a session" would make rung four fire on every page
+    load and always fall through to the password step it exists to avoid.
+    """
+    asked = []
+    monkeypatch.setattr(
+        session_module, "authorize", lambda http: asked.append(True) or PARKED
+    )
+    for name in ("oauth2_authentication_csrf", "oauth2_consent_csrf"):
+        session.http.cookies.jar.set_cookie(
+            _cookie_from_json(
+                {"name": name, "value": "x", "domain": "account.sainsburys.co.uk"}
+            )
+        )
+
+    assert session.has_provider_session() is False
+    assert session.refresh_quietly() == AuthState.NEEDS_PASSWORD
+    assert asked == []
+
+
+def test_an_empty_jar_does_not_pay_for_a_round_trip_to_learn_nothing(
+    session, monkeypatch
+):
+    """The page-load path for an account nobody has connected.
+
+    A provider session is a cookie. With no identity cookie in the jar there can
+    be no session to find, and asking cost a second of network on every page
+    load before this guard existed.
+    """
+    asked = []
+    monkeypatch.setattr(
+        session_module, "authorize", lambda http: asked.append(True) or PARKED
+    )
+
+    assert session.refresh_quietly() == AuthState.NEEDS_PASSWORD
+    assert asked == [], "nothing to ask about, so nothing should have been asked"
 
 
 def _expired() -> datetime:
