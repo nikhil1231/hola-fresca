@@ -3,6 +3,13 @@
 Lists the proposed mappings (spend-weighted), serves one ingredient's full
 candidate set with the current decision overlaid, and persists human decisions.
 Backs the ``/mapping`` review UI.
+
+**Every write here is admin-only.** The mappings, the manual products and the
+aliases are shared by everybody, so approving one is not a personal act: it
+changes what every other user's basket buys and what every other user's week
+costs. Reads are left open — the queue and its candidates are catalogue data,
+not anybody's — so a non-admin who follows a link sees the review page rather
+than a wall of errors, and simply cannot commit anything from it.
 """
 from __future__ import annotations
 
@@ -13,7 +20,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app import retailers as retailers_mod
-from app.api.deps import get_active_retailer, get_session
+from app.api.deps import get_active_retailer, get_session, require_admin
+from app.db.models import User
 from app.retailers import DEFAULT_RETAILER
 from app.api.schemas import (
     AliasIn,
@@ -217,6 +225,7 @@ def save_ingredient(
     body: DecisionIn,
     session: Session = Depends(get_session),
     retailer: str = Depends(get_active_retailer),
+    _admin: User = Depends(require_admin),
 ) -> MappingDetailOut:
     ic = _ic(session, key, retailer)
     decision = service.DecisionInput(
@@ -243,6 +252,7 @@ def search_ingredient(
     body: SearchIn,
     session: Session = Depends(get_session),
     retailer: str = Depends(get_active_retailer),
+    _admin: User = Depends(require_admin),
 ) -> MappingDetailOut:
     """Re-search the active retailer with the reviewer's own wording.
 
@@ -327,6 +337,7 @@ def set_alias(
     body: AliasIn,
     session: Session = Depends(get_session),
     retailer: str = Depends(get_active_retailer),
+    _admin: User = Depends(require_admin),
 ) -> MappingDetailOut:
     """Link this ingredient to another (or clear the link when alias_of is null)."""
     from app.api.deps import _session_factory
@@ -344,7 +355,9 @@ def set_alias(
 
 @router.post("/generate", response_model=JobOut)
 def start_generate(
-    body: GenerateIn, retailer: str = Depends(get_active_retailer)
+    body: GenerateIn,
+    retailer: str = Depends(get_active_retailer),
+    _admin: User = Depends(require_admin),
 ) -> JobOut:
     """Pull the next batch of ingredients into the review queue, in the background.
 
@@ -379,6 +392,7 @@ def bulk_approve(
     body: BulkApproveIn,
     session: Session = Depends(get_session),
     retailer: str = Depends(get_active_retailer),
+    _admin: User = Depends(require_admin),
 ) -> dict:
     n = service.bulk_approve(session, body.keys, retailer)
     return {"approved": n}
@@ -404,7 +418,9 @@ def list_manual_products(session: Session = Depends(get_session)) -> ManualProdu
 
 @router.post("/manual-products", response_model=ManualProductListOut)
 def save_manual_product(
-    body: ManualProductIn, session: Session = Depends(get_session)
+    body: ManualProductIn,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
 ) -> ManualProductListOut:
     """Create or update a manual product (keyed on its name)."""
     from app.mapping import manual
@@ -418,7 +434,11 @@ def save_manual_product(
 
 
 @router.delete("/manual-products/{sku:path}", response_model=ManualProductListOut)
-def delete_manual_product(sku: str, session: Session = Depends(get_session)) -> ManualProductListOut:
+def delete_manual_product(
+    sku: str,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+) -> ManualProductListOut:
     from app.mapping import manual
 
     try:
@@ -436,6 +456,7 @@ def resolve_with_manual_product(
     body: ManualResolveIn,
     session: Session = Depends(get_session),
     retailer: str = Depends(get_active_retailer),
+    _admin: User = Depends(require_admin),
 ) -> MappingDetailOut:
     """"This shop does not sell it" — record what you buy instead and approve it."""
     from app.mapping import manual
@@ -466,6 +487,7 @@ def attach_manual_product(
     sku: str,
     session: Session = Depends(get_session),
     retailer: str = Depends(get_active_retailer),
+    _admin: User = Depends(require_admin),
 ) -> MappingDetailOut:
     """Offer an existing manual product as a candidate for another ingredient."""
     from app.mapping import manual
