@@ -10,6 +10,14 @@ The retailer is a path segment rather than a query parameter because it decides
 *which cart is written to*. A typo in a query parameter that silently defaults is
 tolerable when it picks a catalogue to read; it is not when it picks whose
 trolley the week's shopping lands in.
+
+**Which account is never named by the caller.** It is looked up from the signed-in
+user and the retailer in the path, through :func:`_owned_account`. The endpoints
+used to take an ``account_id`` from the query string or the request body and hand
+it straight to the adapter, which meant anyone who could reach the API could read,
+fill and empty anybody else's trolley, and sign them out of their shop. There is
+now no parameter to abuse: the registry answers "whose account is this" and the
+question the client used to answer is not asked.
 """
 from __future__ import annotations
 
@@ -40,9 +48,6 @@ from app.api.planner import (
 from app.api.schedule import pack_shortfall_tolerance_pct
 from app.api.schemas import (
     BasketIn,
-    CartAccountIn,
-    CartAccountOut,
-    CartAccountsOut,
     CartBasketOut,
     CartLoginIn,
     CartLoginOut,
@@ -56,6 +61,7 @@ from app.api.schemas import (
 from app.cart.adapters import CartAdapter, CartSnapshot, get_adapter
 from app.cart.ledger import read_ledger, write_ledger
 from app.cart.merge import CartLedger, PushLine, basket_targets
+from app.db import retailer_accounts
 from app.db.models import Product, RetailerAccount, User
 from app.planner.basket import Basket, Selection, build_basket
 from app.planner.index import PlanIndex
@@ -96,88 +102,84 @@ def get_cart_adapter(
         ) from None
 
 
-def _account(adapter: CartAdapter, account_id: str | None) -> str:
-    try:
-        return adapter.resolve_account(account_id)
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown {adapter.retailer} account: {exc.args[0]}",
-        ) from exc
-
-
-def _login_out(status) -> CartLoginOut:
+def _login_out(status, account: RetailerAccount | None = None) -> CartLoginOut:
     return CartLoginOut(
-        account_id=status.account_id,
         status=status.status,
         stage=status.stage or "idle",
+        email=account.email if account is not None else None,
     )
 
 
-def _owned_account(session: Session, user: User, adapter: CartAdapter) -> str:
-    """Resolve the caller's account without accepting an account id from them.
+def _account_row(
+    session: Session, user: User, adapter: CartAdapter
+) -> RetailerAccount | None:
+    """The caller's account at this shop, or ``None`` if they have not connected."""
+    return retailer_accounts.find(session, user.id, adapter.retailer)
 
-    Ocado's migrated registry already has one row per user and retailer. During
-    the transition Sainsbury's still has its single legacy runtime and no row;
-    only a retailer with no registry rows at all may use that sole account.
+
+def _owned_account(
+    session: Session, user: User, adapter: CartAdapter
+) -> RetailerAccount:
+    """The caller's account at this shop, or 404.
+
+    Everything that touches a trolley goes through here. There is no fallback to
+    "the only account configured": a shop nobody has connected has no basket to
+    read, and inventing one would mean serving somebody else's.
     """
-    account_id = session.scalar(
-        select(RetailerAccount.key).where(
-            RetailerAccount.user_id == user.id,
-            RetailerAccount.retailer == adapter.retailer,
+    account = _account_row(session, user, adapter)
+    if account is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No {adapter.retailer} account is connected for this user",
         )
-    )
-    if account_id is not None:
-        return _account(adapter, account_id)
-
-    any_registered = session.scalar(
-        select(RetailerAccount.id)
-        .where(RetailerAccount.retailer == adapter.retailer)
-        .limit(1)
-    )
-    if any_registered is None and len(adapter.accounts()) == 1:
-        return adapter.default_account_id
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"No {adapter.retailer} account is connected for this user",
-    )
+    return account
 
 
 # --- accounts and sessions ---------------------------------------------------
 
 
-@router.get("/accounts", response_model=CartAccountsOut)
-def accounts(adapter: CartAdapter = Depends(get_cart_adapter)) -> CartAccountsOut:
-    items = adapter.accounts()
-    return CartAccountsOut(
-        default_account_id=items[0].id,
-        items=[
-            CartAccountOut(id=item.id, label=item.label, email=item.email, status=item.status)
-            for item in items
-        ],
-    )
-
-
 @router.get("/status", response_model=CartLoginOut)
 def status(
-    account_id: str | None = None, adapter: CartAdapter = Depends(get_cart_adapter)
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+    adapter: CartAdapter = Depends(get_cart_adapter),
 ) -> CartLoginOut:
-    return _login_out(adapter.status(_account(adapter, account_id)))
+    """Where the caller stands with this shop.
+
+    Not connecting one is an ordinary answer rather than a 404: the page asks
+    this before anybody has signed in anywhere, and "logged out" is exactly what
+    it needs to hear in order to offer the form.
+    """
+    account = _account_row(session, user, adapter)
+    if account is None:
+        return CartLoginOut(status="logged_out")
+    return _login_out(adapter.status(account.key), account)
 
 
 @router.post("/login", response_model=CartLoginOut)
 def login(
-    body: CartLoginIn, adapter: CartAdapter = Depends(get_cart_adapter)
+    body: CartLoginIn,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+    adapter: CartAdapter = Depends(get_cart_adapter),
 ) -> CartLoginOut:
-    account_id = _account(adapter, body.account_id)
+    """Sign in to this shop as the caller, and connect the account if it is new.
+
+    The credentials live for this request. They are handed to the adapter, which
+    passes them to the ladder's login rung, and nothing writes them anywhere: the
+    registry has no password column, and what survives the request is the session
+    the login produced.
+    """
     email = body.email.strip()
     password = body.password.get_secret_value()
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required")
+    account = _account_row(session, user, adapter) or retailer_accounts.connect(
+        session, user.id, adapter.retailer, email=email
+    )
     try:
-        return _login_out(
-            adapter.ensure_authenticated(account_id, email=email, password=password)
+        auth = adapter.ensure_authenticated(
+            account.key, email=email, password=password
         )
     except Exception as exc:  # noqa: BLE001 - login failures surface as bad gateway
         raise HTTPException(
@@ -185,37 +187,54 @@ def login(
         ) from exc
     finally:
         del password
+    retailer_accounts.record_status(
+        session, account, auth.status, email=email, after_login=True
+    )
+    return _login_out(auth, account)
 
 
 @router.post("/session/refresh", response_model=CartLoginOut)
 def refresh_session(
-    body: CartAccountIn, adapter: CartAdapter = Depends(get_cart_adapter)
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+    adapter: CartAdapter = Depends(get_cart_adapter),
 ) -> CartLoginOut:
     """Become ready if that is possible without asking the user anything.
 
     Safe to call automatically on page load: it stops before the password step,
     which is what would email a code to someone who only opened the page.
     """
-    account_id = _account(adapter, body.account_id)
+    account = _account_row(session, user, adapter)
+    if account is None:
+        return CartLoginOut(status="logged_out")
     try:
-        return _login_out(adapter.ensure_authenticated(account_id))
+        auth = adapter.ensure_authenticated(account.key)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502, detail=f"{adapter.retailer} session refresh failed: {exc}"
         ) from exc
+    retailer_accounts.record_status(session, account, auth.status)
+    return _login_out(auth, account)
 
 
 @router.post("/otp", response_model=CartLoginOut)
-def otp(body: CartOtpIn, adapter: CartAdapter = Depends(get_cart_adapter)) -> CartLoginOut:
-    account_id = _account(adapter, body.account_id)
+def otp(
+    body: CartOtpIn,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+    adapter: CartAdapter = Depends(get_cart_adapter),
+) -> CartLoginOut:
+    account = _owned_account(session, user, adapter)
     try:
-        return _login_out(adapter.submit_otp(body.code, account_id))
+        auth = adapter.submit_otp(body.code, account.key)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502, detail=f"{adapter.retailer} OTP failed: {exc}"
         ) from exc
+    retailer_accounts.record_status(session, account, auth.status, after_login=True)
+    return _login_out(auth, account)
 
 
 @router.post("/logout", response_model=CartLoginOut)
@@ -225,13 +244,15 @@ def logout(
     adapter: CartAdapter = Depends(get_cart_adapter),
 ) -> CartLoginOut:
     """Disconnect the current user's account at the retailer in the path."""
-    account_id = _owned_account(session, user, adapter)
+    account = _owned_account(session, user, adapter)
     try:
-        return _login_out(adapter.logout(account_id))
+        auth = adapter.logout(account.key)
     except Exception as exc:  # noqa: BLE001 - filesystem/session failures surface cleanly
         raise HTTPException(
             status_code=502, detail=f"{adapter.retailer} logout failed: {exc}"
         ) from exc
+    retailer_accounts.disconnect(session, account)
+    return _login_out(auth, account)
 
 
 # --- shared basket machinery -------------------------------------------------
@@ -476,7 +497,7 @@ def plan(
     The question it answers - what of yours gets touched - does not depend on
     which pack of sesame seeds wins.
     """
-    account_id = _account(adapter, body.account_id)
+    account_id = _owned_account(session, user, adapter).key
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
@@ -531,7 +552,7 @@ def push(
     user: User = Depends(get_current_user),
 ) -> PushResultOut:
     _refuse_past_week(body.week_start)
-    account_id = _account(adapter, body.account_id)
+    account_id = _owned_account(session, user, adapter).key
     recipe_ids = list(dict.fromkeys(s.recipe_id for s in body.selections))
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
@@ -600,8 +621,10 @@ def push(
 
 @router.get("/basket", response_model=CartBasketOut)
 def basket(
-    account_id: str | None = None, adapter: CartAdapter = Depends(get_cart_adapter)
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+    adapter: CartAdapter = Depends(get_cart_adapter),
 ) -> CartBasketOut:
-    snapshot = adapter.cart(_account(adapter, account_id))
+    snapshot = adapter.cart(_owned_account(session, user, adapter).key)
     raw = snapshot.raw if isinstance(snapshot.raw, dict) else {"items": list(snapshot.raw or [])}
     return CartBasketOut(raw=raw)

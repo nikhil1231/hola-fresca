@@ -4,6 +4,11 @@ These used to be Ocado's alone at ``/api/ocado/*``. The point of most of what
 follows is that they are now written once: the same request against
 ``/api/cart/ocado`` and ``/api/cart/sainsburys`` should behave the same way, and
 a shop with no cart integration should be told apart from a typo.
+
+The other half of what is asserted here is *whose* trolley a request reaches.
+No endpoint takes an account id any more, so every one of these has to resolve
+the caller's own account — and a caller with none connected must be refused
+rather than served somebody else's.
 """
 from __future__ import annotations
 
@@ -11,12 +16,13 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 import main
 from app.api import cart as cart_api
 from app.api.cart import get_cart_adapter
 from app.api.deps import get_current_user, get_session_factory
-from app.cart.adapters import AccountInfo, AuthStatus, CartAdapter, CartItem, CartSnapshot
+from app.cart.adapters import AuthStatus, CartAdapter, CartItem, CartSnapshot
 from app.db.models import RetailerAccount, User
 from app.cart.merge import CartLedger, PushPlan
 from app.planner.basket import Basket
@@ -27,33 +33,35 @@ SHOPS = ["ocado", "sainsburys"]
 class FakeAdapter(CartAdapter):
     """A shop that answers everything without a network or a login."""
 
-    def __init__(self, retailer="ocado", *, accounts=("default",)):
+    def __init__(self, retailer="ocado"):
         self.retailer = retailer
-        self._accounts = accounts
         self.pushed: list[str] = []
         self.logged_out: list[str] = []
+        #: Every account key the router asked this adapter about, so a test can
+        #: assert which account a request actually reached.
+        self.seen: list[str] = []
 
-    def accounts(self):
-        return [AccountInfo(id=account, label=account.title()) for account in self._accounts]
+    def status(self, account_id):
+        self.seen.append(account_id)
+        return AuthStatus(account_id=account_id, status="logged_out", stage="idle")
 
-    def status(self, account_id=None):
-        return AuthStatus(account_id=account_id or "default", status="logged_out", stage="idle")
-
-    def ensure_authenticated(self, account_id=None, *, email=None, password=None):
+    def ensure_authenticated(self, account_id, *, email=None, password=None):
+        self.seen.append(account_id)
         return AuthStatus(
-            account_id=account_id or "default",
+            account_id=account_id,
             status="ready" if email and password else "needs_password",
         )
 
-    def submit_otp(self, code, account_id=None):
-        return AuthStatus(account_id=account_id or "default", status="ready")
+    def submit_otp(self, code, account_id):
+        self.seen.append(account_id)
+        return AuthStatus(account_id=account_id, status="ready")
 
-    def logout(self, account_id=None):
-        account_id = account_id or "default"
+    def logout(self, account_id):
         self.logged_out.append(account_id)
         return AuthStatus(account_id=account_id, status="logged_out", stage="idle")
 
-    def cart(self, account_id=None):
+    def cart(self, account_id):
+        self.seen.append(account_id)
         return CartSnapshot(
             items=(CartItem(sku="sku-a", quantity=2, cost=3.5),), raw={"items": ["raw"]}
         )
@@ -66,6 +74,32 @@ class FakeAdapter(CartAdapter):
         from app.cart.merge import PushResult
 
         return PushResult(ledger=CartLedger())
+
+
+def connect(retailer, *, user_id=None, key=None, email="shopper@example.com"):
+    """Give a user a connected account at ``retailer``, with a key of our choosing.
+
+    Adopts the row if there already is one, because ``init_db`` seeds the
+    bootstrap user an Ocado account from the legacy config — and one account per
+    user per shop is a constraint, so a second insert would fail rather than give
+    this test a second account to confuse itself with.
+    """
+    with get_session_factory()() as session:
+        if user_id is None:
+            user_id = session.scalar(select(User.id).order_by(User.id).limit(1))
+        account = session.scalar(
+            select(RetailerAccount).where(
+                RetailerAccount.user_id == user_id,
+                RetailerAccount.retailer == retailer,
+            )
+        )
+        if account is None:
+            account = RetailerAccount(user_id=user_id, retailer=retailer)
+            session.add(account)
+        account.key = key or f"{retailer}-key"
+        account.email = email
+        session.commit()
+        return account.key
 
 
 @pytest.fixture
@@ -86,9 +120,17 @@ def client():
     main.app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def connected(client):
+    """A client whose user has an account connected at both shops."""
+    keys = {retailer: connect(retailer, key=f"{retailer}-mine") for retailer in SHOPS}
+    client.keys = keys
+    return client
+
+
 @pytest.mark.parametrize("retailer", SHOPS)
-def test_status_reports_the_ladder_state(client, retailer):
-    response = client.get(f"/api/cart/{retailer}/status")
+def test_status_reports_the_ladder_state(connected, retailer):
+    response = connected.get(f"/api/cart/{retailer}/status")
 
     assert response.status_code == 200
     assert response.json()["status"] in {
@@ -97,39 +139,58 @@ def test_status_reports_the_ladder_state(client, retailer):
 
 
 @pytest.mark.parametrize("retailer", SHOPS)
-def test_status_also_reports_the_stage(client, retailer):
+def test_status_also_reports_the_stage(connected, retailer):
     """What the page polls for while a login request is still blocked."""
-    assert client.get(f"/api/cart/{retailer}/status").json()["stage"] == "idle"
+    assert connected.get(f"/api/cart/{retailer}/status").json()["stage"] == "idle"
 
 
 @pytest.mark.parametrize("retailer", SHOPS)
-def test_accounts_are_listed_with_a_default(client, retailer):
-    body = client.get(f"/api/cart/{retailer}/accounts").json()
+def test_status_is_logged_out_rather_than_404_before_connecting(client, retailer):
+    """The page asks this in order to decide whether to offer the form."""
+    body = client.get(f"/api/cart/{retailer}/status").json()
 
-    assert body["default_account_id"] == "default"
-    assert [item["id"] for item in body["items"]] == ["default"]
+    assert body["status"] == "logged_out"
+    assert body["email"] is None
 
 
 @pytest.mark.parametrize("retailer", SHOPS)
-def test_the_basket_comes_back_for_either_shop(client, retailer):
-    response = client.get(f"/api/cart/{retailer}/basket")
+def test_status_hands_back_the_address_to_fill_the_form_in_with(connected, retailer):
+    assert connected.get(f"/api/cart/{retailer}/status").json()["email"] == (
+        "shopper@example.com"
+    )
+
+
+@pytest.mark.parametrize("retailer", SHOPS)
+def test_no_response_carries_the_account_key(connected, retailer):
+    """It names a cookie jar on disk, and the client has no business with it."""
+    body = connected.get(f"/api/cart/{retailer}/status").json()
+
+    assert "account_id" not in body
+    assert connected.keys[retailer] not in connected.get(
+        f"/api/cart/{retailer}/status"
+    ).text
+
+
+@pytest.mark.parametrize("retailer", SHOPS)
+def test_the_basket_comes_back_for_either_shop(connected, retailer):
+    response = connected.get(f"/api/cart/{retailer}/basket")
 
     assert response.status_code == 200
     assert response.json()["raw"] == {"items": ["raw"]}
 
 
 @pytest.mark.parametrize("retailer", SHOPS)
-def test_otp_rejects_an_empty_code(client, retailer):
-    assert client.post(f"/api/cart/{retailer}/otp", json={"code": ""}).status_code == 422
+def test_otp_rejects_an_empty_code(connected, retailer):
+    assert connected.post(f"/api/cart/{retailer}/otp", json={"code": ""}).status_code == 422
 
 
 @pytest.mark.parametrize("retailer", SHOPS)
-def test_a_quiet_refresh_never_climbs_to_the_password(client, retailer):
+def test_a_quiet_refresh_never_climbs_to_the_password(connected, retailer):
     """The rung that would email somebody a code, for opening a page."""
-    body = client.post(f"/api/cart/{retailer}/session/refresh", json={}).json()
+    body = connected.post(f"/api/cart/{retailer}/session/refresh").json()
 
     assert body["status"] == "needs_password"
-    login = client.post(
+    login = connected.post(
         f"/api/cart/{retailer}/login",
         json={"email": "a@example.com", "password": "secret"},
     )
@@ -137,37 +198,106 @@ def test_a_quiet_refresh_never_climbs_to_the_password(client, retailer):
 
 
 @pytest.mark.parametrize("retailer", SHOPS)
-def test_logout_forgets_the_selected_retailers_session(client, retailer):
-    response = client.post(f"/api/cart/{retailer}/logout")
+def test_logout_forgets_the_callers_session(connected, retailer):
+    response = connected.post(f"/api/cart/{retailer}/logout")
 
     assert response.status_code == 200
     assert response.json()["status"] == "logged_out"
-    assert client.adapters[retailer].logged_out == ["default"]
+    assert connected.adapters[retailer].logged_out == [connected.keys[retailer]]
 
 
-def test_logout_resolves_the_retailer_account_owned_by_the_current_user(client):
+@pytest.mark.parametrize(
+    "method, path, payload",
+    [
+        ("get", "basket", None),
+        ("post", "basket/plan", {"selections": []}),
+        ("post", "basket/push", {"selections": []}),
+        ("post", "otp", {"code": "123456"}),
+        ("post", "logout", None),
+    ],
+)
+def test_touching_a_trolley_without_connecting_one_is_refused(client, method, path, payload):
+    """The alternative would be serving whichever account happened to exist."""
+    call = getattr(client, method)
+    response = call(f"/api/cart/sainsburys/{path}", **({"json": payload} if payload else {}))
+
+    assert response.status_code == 404
+    assert "connected" in response.json()["detail"]
+
+
+def test_a_request_reaches_the_callers_own_account_and_no_other(client):
+    """The regression this whole change exists for.
+
+    Two people, each with an Ocado account. Whichever one is signed in, the
+    adapter must be asked about their key — and there is no longer any parameter
+    with which to ask for the other's.
+    """
+    mine = connect("ocado", key="mine")
     with get_session_factory()() as session:
-        user = User(email="second@example.com")
-        session.add(user)
+        other = User(email="second@example.com")
+        session.add(other)
         session.flush()
-        session.add(
-            RetailerAccount(
-                user_id=user.id,
-                retailer="ocado",
-                key="second",
-                email="shopper@example.com",
-            )
-        )
+        other_id = other.id
         session.commit()
-        user_id = user.id
+    theirs = connect("ocado", user_id=other_id, key="theirs")
 
-    main.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=user_id)
-    client.adapters["ocado"] = FakeAdapter("ocado", accounts=("default", "second"))
+    client.get("/api/cart/ocado/basket")
+    assert client.adapters["ocado"].seen == [mine]
 
-    response = client.post("/api/cart/ocado/logout")
+    main.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=other_id)
+    client.get("/api/cart/ocado/basket")
+
+    assert client.adapters["ocado"].seen == [mine, theirs]
+
+
+def test_logging_in_connects_an_account_the_first_time(client):
+    """A user with no row gets one, which is how anybody ever connects a shop."""
+    assert client.get("/api/cart/sainsburys/status").json()["status"] == "logged_out"
+
+    response = client.post(
+        "/api/cart/sainsburys/login",
+        json={"email": "new@example.com", "password": "secret"},
+    )
 
     assert response.status_code == 200
-    assert client.adapters["ocado"].logged_out == ["second"]
+    assert response.json() == {
+        "status": "ready", "stage": "idle", "email": "new@example.com"
+    }
+    with get_session_factory()() as session:
+        row = session.scalar(
+            select(RetailerAccount).where(RetailerAccount.retailer == "sainsburys")
+        )
+        assert row.status == "connected"
+        assert row.last_ok_at is not None
+
+
+def test_logging_in_again_keeps_the_same_account_key(connected):
+    """The key names a browser profile Ocado has learned to trust. It survives."""
+    connected.post(
+        "/api/cart/ocado/login",
+        json={"email": "changed@example.com", "password": "secret"},
+    )
+
+    with get_session_factory()() as session:
+        rows = list(
+            session.scalars(
+                select(RetailerAccount).where(RetailerAccount.retailer == "ocado")
+            )
+        )
+    assert [row.key for row in rows] == [connected.keys["ocado"]]
+    assert rows[0].email == "changed@example.com"
+
+
+def test_logging_out_keeps_the_row_so_the_browser_profile_survives(connected):
+    connected.post("/api/cart/ocado/logout")
+
+    with get_session_factory()() as session:
+        row = session.scalar(
+            select(RetailerAccount).where(RetailerAccount.retailer == "ocado")
+        )
+    assert row is not None, "disconnecting must not throw away the account key"
+    assert row.status == "never"
+    assert row.last_ok_at is None
 
 
 def test_login_requires_credentials_without_echoing_the_password(client):
@@ -180,21 +310,24 @@ def test_login_requires_credentials_without_echoing_the_password(client):
     assert "do-not-echo" not in response.text
 
 
+def test_a_short_password_is_not_echoed_back_by_a_validation_error(client):
+    """Why the field carries no length constraint: a 422 quotes the input."""
+    response = client.post("/api/cart/ocado/login", json={"email": "a@b.c", "password": "x"})
+
+    assert "x" not in response.json().get("detail", "")
+
+
 def test_a_shop_with_no_cart_integration_is_a_404(client):
     assert client.get("/api/cart/waitrose/status").status_code == 404
 
 
-def test_an_unknown_account_is_rejected(client):
-    assert client.get("/api/cart/ocado/status?account_id=__missing__").status_code == 404
-
-
-def test_each_shop_gets_its_own_adapter(client):
+def test_each_shop_gets_its_own_adapter(connected):
     """The retailer in the path is what decides whose trolley is written to."""
-    client.post("/api/cart/ocado/basket/push", json={"selections": []})
-    client.post("/api/cart/sainsburys/basket/push", json={"selections": []})
+    connected.post("/api/cart/ocado/basket/push", json={"selections": []})
+    connected.post("/api/cart/sainsburys/basket/push", json={"selections": []})
 
-    assert client.adapters["ocado"].pushed == ["ocado"]
-    assert client.adapters["sainsburys"].pushed == ["sainsburys"]
+    assert connected.adapters["ocado"].pushed == ["ocado"]
+    assert connected.adapters["sainsburys"].pushed == ["sainsburys"]
 
 
 def test_plan_exposes_checkout_items_and_accepts_an_empty_week(client, monkeypatch):

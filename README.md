@@ -27,11 +27,34 @@ Everything personal — the plan, ratings, wishlist, hidden recipes, the shoppin
 schedule, standing pack choices — belongs to a user. Everything shared — the
 recipe library, the product cache, ingredient mappings — does not.
 
-There is no login yet. `app.api.deps.get_current_user` resolves the single
-account the app bootstraps on first run, and every personal read and write goes
-through it, so adding sign-in is a change to that one function. Catalogue writes
-(mapping review, manual products, the recipe audit) are already marked
-`require_admin`.
+`app.api.deps.get_current_user` answers *whose* data a request is about: the
+address Cloudflare Access signed for, or — over the LAN, where there is no
+assertion — the account the app bootstrapped. Every personal read and write goes
+through it. Catalogue writes (mapping review, manual products, the recipe audit)
+are marked `require_admin`, because they change what everyone else sees.
+
+### Connecting a shop
+
+A retailer account belongs to a person, not to the process. `retailer_accounts`
+is the registry: one row per user per shop, holding the address they sign in
+with and an opaque `key` that names their cookie jar and browser profile on
+disk. There is **no password column**, and that is the design rather than an
+omission — credentials are an input to one interactive login and nothing more.
+You type them into Settings, they cross one request, the login rung uses them,
+and what survives is the session they produced.
+
+What that costs is honest to state: when the quiet rungs of the auth ladder can
+no longer revive a session, there is no stored password to fall back on and the
+shop has to be signed into again. How often that happens is measured rather than
+guessed — see the auth heartbeat below.
+
+**No endpoint takes an account id.** `/api/cart/{retailer}/*` resolves the
+caller's own row from their identity and the shop in the path; there is no
+parameter with which to name somebody else's trolley, and no account picker in
+the UI, because you have exactly one connection per shop. Signing out forgets
+the session but keeps the row: its key names a browser profile Ocado has learned
+to trust, and handing it a brand-new identity makes the next login's invisible
+reCAPTCHA far more likely to stall.
 
 ## Retailers
 

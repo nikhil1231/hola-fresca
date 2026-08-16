@@ -385,7 +385,6 @@ class PlannerFiltersIn(BaseModel):
 class BasketIn(BaseModel):
     selections: list[PlannerSelectionIn] = Field(default_factory=list)
     owned_item_keys: list[str] = Field(default_factory=list)
-    account_id: str | None = None
     #: Which week this basket is for. Recorded against the cart ledger so a
     #: stale claim can be read as "that was last week's shop", and ignored
     #: everywhere else.
@@ -499,6 +498,7 @@ class BasketPackChoiceOut(BaseModel):
     retailer: str
     external: bool = False
     is_nectar_price: bool = False
+    is_frozen: bool = False
 
 
 class BasketPackOptionOut(BaseModel):
@@ -524,6 +524,7 @@ class BasketPackOptionOut(BaseModel):
     better_value: bool = False
     match_type: str = "exact"
     form_differs: bool = False
+    is_frozen: bool = False
     shortfall: float = 0.0
     shortfall_pct: float = 0.0
     recommended: bool = False
@@ -854,36 +855,38 @@ class ManualProductListOut(BaseModel):
 # The Ocado-prefixed aliases at the end of the block are what the endpoints
 # that really are Ocado-only still import.
 
-class CartAccountOut(BaseModel):
-    id: str
-    label: str
-    email: str | None = None
-    status: str
+class CartLoginIn(BaseModel):
+    """Credentials for one interactive sign-in, and nothing else.
 
+    There is deliberately no account id: which account a login connects is the
+    caller's own, resolved from their identity. ``password`` is a ``SecretStr``
+    so that nothing which formats this model — a log record, a traceback, a
+    validation error — can print it. For the same reason the field carries no
+    length constraint: a 422 echoes the offending input back, and "too short"
+    is not worth putting somebody's password in a response body for.
+    """
 
-class CartAccountsOut(BaseModel):
-    items: list[CartAccountOut] = Field(default_factory=list)
-    default_account_id: str
-
-
-class CartAccountIn(BaseModel):
-    account_id: str | None = None
-
-
-class CartLoginIn(CartAccountIn):
     email: str
     password: SecretStr
 
 
 class CartLoginOut(BaseModel):
-    account_id: str
+    """Where the caller's connection to one shop currently stands.
+
+    The account key is not here. It names a cookie jar on disk and a directory
+    the browser profile lives in, the client has no use for it, and the surest
+    way to stop an id being sent back up is not to send it down.
+    """
+
     status: str
     #: Which rung of the auth ladder is running, for a caller polling /status
     #: while a slow login is in flight. "idle" when nothing is.
     stage: str = "idle"
+    #: The address this account signs in with, so the form comes back filled in.
+    email: str | None = None
 
 
-class CartOtpIn(CartAccountIn):
+class CartOtpIn(BaseModel):
     code: str = Field(min_length=1)
 
 
@@ -1034,7 +1037,6 @@ class OcadoSlotsOut(BaseModel):
 
 
 class OcadoReserveIn(BaseModel):
-    account_id: str | None = None
     slot_id: str
     ddid: str | None = None
     region: str | None = None
@@ -1129,15 +1131,3 @@ class RetailersOut(BaseModel):
 class RetailerSelectionIn(BaseModel):
     retailer: str
 
-
-#: The names these had while Ocado was the only shop with a cart.
-OcadoAccountOut = CartAccountOut
-OcadoAccountsOut = CartAccountsOut
-OcadoAccountIn = CartAccountIn
-OcadoLoginOut = CartLoginOut
-OcadoOtpIn = CartOtpIn
-OcadoSwapOut = SwapOut
-OcadoPushResultOut = PushResultOut
-OcadoCheckoutItemOut = CheckoutItemOut
-OcadoPushPlanOut = PushPlanOut
-OcadoBasketOut = CartBasketOut

@@ -4,6 +4,10 @@
 // now a path segment rather than something baked into the URL, because it
 // decides *which trolley gets written to* — see app/api/cart.py. Delivery slots
 // stayed behind in ocadoClient.js: only Ocado has them.
+//
+// Nothing here sends an account id. The server resolves the caller's own account
+// from their identity, so there is no longer a "which account" for the client to
+// get wrong, remember in localStorage, or be handed by somebody else's browser.
 
 async function responseError(res) {
   let detail = null
@@ -32,13 +36,6 @@ async function postJSON(path, body = {}) {
   return res.json()
 }
 
-function accountQuery(accountId) {
-  const params = new URLSearchParams()
-  if (accountId) params.set('account_id', accountId)
-  const query = params.toString()
-  return query ? `?${query}` : ''
-}
-
 // Every call here needs one, and a missing retailer would otherwise land on a
 // URL like /api/cart/undefined/status and come back a puzzling 404.
 function base(retailer) {
@@ -46,28 +43,20 @@ function base(retailer) {
   return `/api/cart/${encodeURIComponent(retailer)}`
 }
 
-export function fetchCartAccounts(retailer) {
-  return getJSON(`${base(retailer)}/accounts`)
+export function fetchCartStatus(retailer) {
+  return getJSON(`${base(retailer)}/status`)
 }
 
-export function fetchCartStatus(retailer, accountId) {
-  return getJSON(`${base(retailer)}/status${accountQuery(accountId)}`)
+export function startCartLogin({ retailer, email, password }) {
+  return postJSON(`${base(retailer)}/login`, { email, password })
 }
 
-export function startCartLogin({ retailer, accountId, email, password }) {
-  return postJSON(`${base(retailer)}/login`, {
-    account_id: accountId,
-    email,
-    password,
-  })
+export function refreshCartSession(retailer) {
+  return postJSON(`${base(retailer)}/session/refresh`)
 }
 
-export function refreshCartSession(retailer, accountId) {
-  return postJSON(`${base(retailer)}/session/refresh`, { account_id: accountId })
-}
-
-export function submitCartOtp({ retailer, accountId, code }) {
-  return postJSON(`${base(retailer)}/otp`, { account_id: accountId, code })
+export function submitCartOtp({ retailer, code }) {
+  return postJSON(`${base(retailer)}/otp`, { code })
 }
 
 export function logoutCart(retailer) {
@@ -76,7 +65,6 @@ export function logoutCart(retailer) {
 
 export function pushCartBasket({
   retailer,
-  accountId,
   selections,
   ownedItemKeys = [],
   packOverrides = {},
@@ -84,7 +72,6 @@ export function pushCartBasket({
   weekStart = null,
 }) {
   return postJSON(`${base(retailer)}/basket/push`, {
-    account_id: accountId,
     selections,
     owned_item_keys: ownedItemKeys,
     pack_overrides: packOverrides,
@@ -98,14 +85,12 @@ export function pushCartBasket({
 // the button safe to press: it names what of yours gets left alone.
 export function planCartBasket({
   retailer,
-  accountId,
   selections,
   ownedItemKeys = [],
   packOverrides = {},
   snapOverrides = {},
 }) {
   return postJSON(`${base(retailer)}/basket/plan`, {
-    account_id: accountId,
     selections,
     owned_item_keys: ownedItemKeys,
     pack_overrides: packOverrides,
@@ -113,6 +98,6 @@ export function planCartBasket({
   })
 }
 
-export function fetchCartBasket(retailer, accountId) {
-  return getJSON(`${base(retailer)}/basket${accountQuery(accountId)}`)
+export function fetchCartBasket(retailer) {
+  return getJSON(`${base(retailer)}/basket`)
 }

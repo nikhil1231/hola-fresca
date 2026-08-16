@@ -9,7 +9,9 @@ export function useOcadoSlots(params, { enabled = true } = {}) {
   return useQuery({
     queryKey: ['ocado-slots', params],
     queryFn: () => fetchOcadoSlots(params),
-    enabled: enabled && Boolean(params?.accountId),
+    // Gated on the connection rather than on an account id, which the caller no
+    // longer has: without a connected account this is a guaranteed 404.
+    enabled,
   })
 }
 

@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_session, require_admin
+from app.api.deps import get_current_user, get_session, require_admin
 from app.api.schemas import (
     OcadoAuthAccountSummaryOut,
     OcadoAuthEventOut,
@@ -33,6 +33,7 @@ from app.api.schemas import (
     OcadoSlotOut,
     OcadoSlotsOut,
 )
+from app.db import retailer_accounts
 from app.db.models import OcadoAuthEvent, User
 from app.ocado.client import OcadoClient
 from app.ocado.session import get_shared_session
@@ -42,8 +43,24 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ocado", tags=["ocado"])
 
 
-def get_ocado_client(account_id: str | None = None) -> OcadoClient:
-    return OcadoClient(get_shared_session(account_id))
+def get_ocado_client(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> OcadoClient:
+    """The signed-in caller's Ocado session, or 404.
+
+    A slot is booked against a delivery address and paid for by a card, both of
+    which belong to whoever's account holds the session — so this resolves the
+    account the same way the cart endpoints do rather than taking an id from the
+    request. It used to accept ``?account_id=``, which meant anyone could read,
+    and reserve, somebody else's delivery slots.
+    """
+    account = retailer_accounts.find(session, user.id, "ocado")
+    if account is None:
+        raise HTTPException(
+            status_code=404, detail="No Ocado account is connected for this user"
+        )
+    return OcadoClient(get_shared_session(account.key))
 
 
 @router.get("/auth-events", response_model=OcadoAuthEventsOut)
@@ -129,7 +146,6 @@ def auth_events(
 
 @router.get("/slots", response_model=OcadoSlotsOut)
 def slots(
-    account_id: str | None = None,
     ddid: str | None = None,
     region: str | None = None,
     client: OcadoClient = Depends(get_ocado_client),
@@ -144,11 +160,8 @@ def slots(
 @router.post("/slots/reserve", response_model=OcadoReserveOut)
 def reserve(
     body: OcadoReserveIn,
-    injected_client: OcadoClient = Depends(get_ocado_client),
+    client: OcadoClient = Depends(get_ocado_client),
 ) -> OcadoReserveOut:
-    client = injected_client
-    if body.account_id is not None:
-        client = OcadoClient(get_shared_session(body.account_id))
     try:
         payload = client.reserve(body.slot_id, ddid=body.ddid, region=body.region)
     except Exception as exc:  # noqa: BLE001

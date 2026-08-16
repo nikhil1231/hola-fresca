@@ -9,10 +9,6 @@ against.
 So the differences are named here, once, and everything above this line asks for
 a capability rather than a shop. What actually differs is smaller than it looks:
 
-* **accounts.** Ocado has several, each with its own cookie jar and ledger.
-  Sainsbury's has one. The interface is always a list, so the caller does not
-  branch; :attr:`CartAdapter.multi_account` exists only so the UI can decide
-  whether an account picker is worth showing.
 * **the auth ladder.** Ocado's drives a browser and can stop at an emailed code
   on any given day. Sainsbury's is HTTP and stops at a code roughly once ever.
   Both reduce to the same three states.
@@ -22,6 +18,11 @@ a capability rather than a shop. What actually differs is smaller than it looks:
 * **how a change is expressed.** Deltas at Ocado, absolute quantities at
   Sainsbury's - but that is settled inside each ``push_basket`` and never
   surfaces here.
+
+Every method takes an ``account_id`` and none of them will invent one. It is the
+key of a :class:`app.db.models.RetailerAccount` row, and the only way to hold one
+is to have looked up the row belonging to the person making the request — which
+is what stops a caller naming somebody else's trolley.
 """
 from __future__ import annotations
 
@@ -33,14 +34,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.cart.merge import CartLedger, PushPlan, PushResult
 from app.planner.basket import Basket
-
-
-@dataclass(frozen=True, slots=True)
-class AccountInfo:
-    id: str
-    label: str
-    email: str | None = None
-    status: str = "logged_out"
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,37 +84,17 @@ class CartAdapter(ABC):
     """What the API needs of a shop that can be shopped at."""
 
     retailer: str
-    #: Whether this shop has more than one account configured. Presentation only.
-    multi_account: bool = False
-
-    # --- accounts ---
-
-    @abstractmethod
-    def accounts(self) -> list[AccountInfo]:
-        ...
-
-    @property
-    def default_account_id(self) -> str:
-        return self.accounts()[0].id
-
-    def resolve_account(self, account_id: str | None) -> str:
-        """Normalise an account id, raising ``KeyError`` for one that is not ours."""
-        if account_id is None:
-            return self.default_account_id
-        if account_id not in {account.id for account in self.accounts()}:
-            raise KeyError(account_id)
-        return account_id
 
     # --- authentication ---
 
     @abstractmethod
-    def status(self, account_id: str | None = None) -> AuthStatus:
+    def status(self, account_id: str) -> AuthStatus:
         ...
 
     @abstractmethod
     def ensure_authenticated(
         self,
-        account_id: str | None = None,
+        account_id: str,
         *,
         email: str | None = None,
         password: str | None = None,
@@ -133,17 +106,17 @@ class CartAdapter(ABC):
         """
 
     @abstractmethod
-    def submit_otp(self, code: str, account_id: str | None = None) -> AuthStatus:
+    def submit_otp(self, code: str, account_id: str) -> AuthStatus:
         ...
 
     @abstractmethod
-    def logout(self, account_id: str | None = None) -> AuthStatus:
+    def logout(self, account_id: str) -> AuthStatus:
         """Forget the persisted session for one retailer account."""
 
     # --- the cart ---
 
     @abstractmethod
-    def cart(self, account_id: str | None = None) -> CartSnapshot:
+    def cart(self, account_id: str) -> CartSnapshot:
         ...
 
     @abstractmethod
@@ -153,7 +126,7 @@ class CartAdapter(ABC):
         *,
         ledger: CartLedger,
         owned_item_keys: set[str],
-        account_id: str | None = None,
+        account_id: str,
         snapshot: CartSnapshot | None = None,
     ) -> PushPlan:
         ...
@@ -165,7 +138,7 @@ class CartAdapter(ABC):
         *,
         ledger: CartLedger,
         owned_item_keys: set[str],
-        account_id: str | None = None,
+        account_id: str,
         recover: Callable[[list[str]], Basket | None] | None = None,
     ) -> PushResult:
         ...
@@ -177,7 +150,7 @@ class CartAdapter(ABC):
         factory: sessionmaker[Session],
         skus: Sequence[str],
         *,
-        account_id: str | None = None,
+        account_id: str,
     ) -> None:
         """Best-effort live stock read before a push.
 
@@ -197,32 +170,18 @@ class CartAdapter(ABC):
 
 class OcadoAdapter(CartAdapter):
     retailer = "ocado"
-    multi_account = True
 
-    def accounts(self) -> list[AccountInfo]:
-        from app.ocado.session import list_account_runtimes
-
-        return [
-            AccountInfo(
-                id=runtime.account.id,
-                label=runtime.account.label,
-                email=runtime.account.email,
-                status=str(runtime.auth.state),
-            )
-            for runtime in list_account_runtimes()
-        ]
-
-    def _runtime(self, account_id: str | None):
+    def _runtime(self, account_id: str):
         from app.ocado.session import get_account_runtime
 
         return get_account_runtime(account_id)
 
-    def _client(self, account_id: str | None):
+    def _client(self, account_id: str):
         from app.ocado.client import OcadoClient
 
         return OcadoClient(self._runtime(account_id).session)
 
-    def status(self, account_id: str | None = None) -> AuthStatus:
+    def status(self, account_id: str) -> AuthStatus:
         runtime = self._runtime(account_id)
         return AuthStatus(
             account_id=runtime.account.id,
@@ -232,7 +191,7 @@ class OcadoAdapter(CartAdapter):
 
     def ensure_authenticated(
         self,
-        account_id: str | None = None,
+        account_id: str,
         *,
         email: str | None = None,
         password: str | None = None,
@@ -245,14 +204,14 @@ class OcadoAdapter(CartAdapter):
             account_id=runtime.account.id, status=str(state), stage=str(runtime.auth.stage)
         )
 
-    def submit_otp(self, code: str, account_id: str | None = None) -> AuthStatus:
+    def submit_otp(self, code: str, account_id: str) -> AuthStatus:
         runtime = self._runtime(account_id)
         state = runtime.auth.submit_otp(code)
         return AuthStatus(
             account_id=runtime.account.id, status=str(state), stage=str(runtime.auth.stage)
         )
 
-    def logout(self, account_id: str | None = None) -> AuthStatus:
+    def logout(self, account_id: str) -> AuthStatus:
         runtime = self._runtime(account_id)
         runtime.auth.forget(runtime.session)
         return AuthStatus(
@@ -261,7 +220,7 @@ class OcadoAdapter(CartAdapter):
             stage=str(runtime.auth.stage),
         )
 
-    def cart(self, account_id: str | None = None) -> CartSnapshot:
+    def cart(self, account_id: str) -> CartSnapshot:
         from app.ocado.cart_payload import snapshot
 
         return snapshot(self._client(account_id).cart_view())
@@ -272,7 +231,7 @@ class OcadoAdapter(CartAdapter):
         *,
         ledger: CartLedger,
         owned_item_keys: set[str],
-        account_id: str | None = None,
+        account_id: str,
         snapshot: CartSnapshot | None = None,
     ) -> PushPlan:
         from app.ocado.sync import plan_push
@@ -292,7 +251,7 @@ class OcadoAdapter(CartAdapter):
         *,
         ledger: CartLedger,
         owned_item_keys: set[str],
-        account_id: str | None = None,
+        account_id: str,
         recover: Callable[[list[str]], Basket | None] | None = None,
     ) -> PushResult:
         from app.ocado.sync import push_basket
@@ -310,7 +269,7 @@ class OcadoAdapter(CartAdapter):
         factory: sessionmaker[Session],
         skus: Sequence[str],
         *,
-        account_id: str | None = None,
+        account_id: str,
     ) -> None:
         from app.ocado.availability import refresh_stock
 
@@ -321,63 +280,46 @@ class OcadoAdapter(CartAdapter):
 
 class SainsburysAdapter(CartAdapter):
     retailer = "sainsburys"
-    multi_account = False
 
-    #: The single account's id. Sainsbury's has one login, but the ledger and the
-    #: API are both keyed by account anyway, so it needs a name.
-    ACCOUNT_ID = "default"
+    def _session(self, account_id: str):
+        from app.sainsburys.session import get_account_session
 
-    def accounts(self) -> list[AccountInfo]:
-        from app import config
-        from app.sainsburys.session import get_shared_session
+        return get_account_session(account_id)
 
-        session = get_shared_session()
-        return [
-            AccountInfo(
-                id=self.ACCOUNT_ID,
-                label="Sainsbury's",
-                email=config.SAINSBURYS_EMAIL,
-                status=str(session.state),
-            )
-        ]
-
-    def _session(self):
-        from app.sainsburys.session import get_shared_session
-
-        return get_shared_session()
-
-    def _client(self):
+    def _client(self, account_id: str):
         from app.sainsburys.client import SainsburysClient
 
-        return SainsburysClient(self._session())
+        return SainsburysClient(self._session(account_id))
 
-    def status(self, account_id: str | None = None) -> AuthStatus:
-        return AuthStatus(account_id=self.ACCOUNT_ID, status=str(self._session().state))
+    def status(self, account_id: str) -> AuthStatus:
+        return AuthStatus(
+            account_id=account_id, status=str(self._session(account_id).state)
+        )
 
     def ensure_authenticated(
         self,
-        account_id: str | None = None,
+        account_id: str,
         *,
         email: str | None = None,
         password: str | None = None,
     ) -> AuthStatus:
-        session = self._session()
+        session = self._session(account_id)
         return AuthStatus(
-            account_id=self.ACCOUNT_ID,
+            account_id=account_id,
             status=str(session.ensure_authenticated(email=email, password=password)),
         )
 
-    def submit_otp(self, code: str, account_id: str | None = None) -> AuthStatus:
+    def submit_otp(self, code: str, account_id: str) -> AuthStatus:
         return AuthStatus(
-            account_id=self.ACCOUNT_ID, status=str(self._session().submit_otp(code))
+            account_id=account_id, status=str(self._session(account_id).submit_otp(code))
         )
 
-    def logout(self, account_id: str | None = None) -> AuthStatus:
-        self._session().forget()
-        return AuthStatus(account_id=self.ACCOUNT_ID, status="logged_out")
+    def logout(self, account_id: str) -> AuthStatus:
+        self._session(account_id).forget()
+        return AuthStatus(account_id=account_id, status="logged_out")
 
-    def cart(self, account_id: str | None = None) -> CartSnapshot:
-        client = self._client()
+    def cart(self, account_id: str) -> CartSnapshot:
+        client = self._client(account_id)
         payload = client.basket()
         from app.sainsburys.client import basket_lines
 
@@ -395,13 +337,16 @@ class SainsburysAdapter(CartAdapter):
         *,
         ledger: CartLedger,
         owned_item_keys: set[str],
-        account_id: str | None = None,
+        account_id: str,
         snapshot: CartSnapshot | None = None,
     ) -> PushPlan:
         from app.sainsburys.sync import plan_push
 
         return plan_push(
-            self._client(), basket, ledger=ledger, owned_item_keys=owned_item_keys
+            self._client(account_id),
+            basket,
+            ledger=ledger,
+            owned_item_keys=owned_item_keys,
         )
 
     def push_basket(
@@ -410,13 +355,13 @@ class SainsburysAdapter(CartAdapter):
         *,
         ledger: CartLedger,
         owned_item_keys: set[str],
-        account_id: str | None = None,
+        account_id: str,
         recover: Callable[[list[str]], Basket | None] | None = None,
     ) -> PushResult:
         from app.sainsburys.sync import push_basket
 
         return push_basket(
-            self._client(),
+            self._client(account_id),
             basket,
             ledger=ledger,
             owned_item_keys=owned_item_keys,

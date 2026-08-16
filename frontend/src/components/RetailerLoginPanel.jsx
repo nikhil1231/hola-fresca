@@ -6,7 +6,6 @@ import {
   Group,
   Loader,
   PasswordInput,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -36,33 +35,24 @@ function stageLabel(stage, fallback) {
   return STAGE_LABELS[stage] ?? fallback
 }
 
+// There is no account picker any more: you have one connection per shop, it is
+// yours, and the server resolves it. What is left to show is whether it works.
 export function RetailerAccountStatus({ connection, shop = DEFAULT_SHOP }) {
-  const { accountId, accounts, connected, reconnecting, setAccountId, status } = connection
+  const { connected, reconnecting, status } = connection
+  const label = reconnecting ? 'checking' : statusLabel(status.data?.status)
   return (
-    <>
-      <Select
-        aria-label={`${shop} account`}
-        value={accountId}
-        onChange={(value) => value && setAccountId(value)}
-        data={(accounts.data?.items ?? []).map((account) => ({
-          value: account.id,
-          label: account.label,
-        }))}
-        disabled={accounts.isLoading || (accounts.data?.items ?? []).length <= 1}
-        allowDeselect={false}
-        size="xs"
-        w={180}
-      />
-      <Badge color={connected ? 'green' : reconnecting ? 'yellow' : 'gray'} variant="light">
-        {reconnecting ? 'checking' : statusLabel(status.data?.status)}
-      </Badge>
-    </>
+    <Badge
+      color={connected ? 'green' : reconnecting ? 'yellow' : 'gray'}
+      variant="light"
+      aria-label={`${shop} connection: ${label}`}
+    >
+      {label}
+    </Badge>
   )
 }
 
 export default function RetailerLoginPanel({ connection, shop = DEFAULT_SHOP }) {
   const {
-    accountId,
     awaitingOtp,
     handlingCode,
     login,
@@ -140,7 +130,7 @@ export default function RetailerLoginPanel({ connection, shop = DEFAULT_SHOP }) 
             />
             <Button
               leftSection={signingIn ? null : <IconLogin size={16} />}
-              disabled={!accountId || !loginEmail.trim() || !loginPassword || signingIn}
+              disabled={!loginEmail.trim() || !loginPassword || signingIn}
               loading={signingIn}
               onClick={submitLogin}
             >

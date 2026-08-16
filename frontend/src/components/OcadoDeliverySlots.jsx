@@ -78,7 +78,7 @@ function useCountdown(expiry) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-function SlotTabs({ accountId, days, reserve, onReserved }) {
+function SlotTabs({ days, reserve, onReserved }) {
   const [activeDay, setActiveDay] = useState(null)
 
   useEffect(() => {
@@ -117,7 +117,7 @@ function SlotTabs({ accountId, days, reserve, onReserved }) {
                 loading={reserve.isPending && reserve.variables?.slotId === slot.slot_id}
                 onClick={() =>
                   reserve.mutate(
-                    { accountId, slotId: slot.slot_id },
+                    { slotId: slot.slot_id },
                     { onSuccess: onReserved },
                   )
                 }
@@ -139,9 +139,9 @@ function SlotTabs({ accountId, days, reserve, onReserved }) {
 
 // Preserved for the next checkout iteration. Deliberately not mounted by the
 // combined Basket/Checkout page yet.
-export default function OcadoDeliverySlots({ accountId, connected }) {
+export default function OcadoDeliverySlots({ connected }) {
   const [reservation, setReservation] = useState(null)
-  const slots = useOcadoSlots({ accountId }, { enabled: connected })
+  const slots = useOcadoSlots({}, { enabled: connected })
   const reserve = useOcadoReserve()
   const days = useMemo(() => groupSlotsByDay(slots.data?.items ?? []), [slots.data?.items])
   const countdown = useCountdown(extractExpiry(reservation?.raw))
@@ -177,7 +177,7 @@ export default function OcadoDeliverySlots({ accountId, connected }) {
             Slot reserved. Confirm the order on Ocado before the hold expires.
           </Alert>
         )}
-        <SlotTabs accountId={accountId} days={days} reserve={reserve} onReserved={setReservation} />
+        <SlotTabs days={days} reserve={reserve} onReserved={setReservation} />
         {!slots.isLoading && !slots.error && (slots.data?.items ?? []).length === 0 && (
           <Text c="dimmed">No slots loaded yet.</Text>
         )}

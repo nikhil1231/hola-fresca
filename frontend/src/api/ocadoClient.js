@@ -29,18 +29,19 @@ async function postJSON(path, body = {}) {
   return res.json()
 }
 
-export function fetchOcadoSlots({ accountId, ddid, region } = {}) {
+// Slots belong to whichever Ocado account the server resolves for the caller —
+// they are booked against that account's address and paid for with its card —
+// so, as with the cart calls, no account is named here.
+export function fetchOcadoSlots({ ddid, region } = {}) {
   const params = new URLSearchParams()
-  if (accountId) params.set('account_id', accountId)
   if (ddid) params.set('ddid', ddid)
   if (region) params.set('region', region)
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return getJSON(`/api/ocado/slots${suffix}`)
 }
 
-export function reserveOcadoSlot({ accountId, slotId, ddid, region }) {
+export function reserveOcadoSlot({ slotId, ddid, region }) {
   return postJSON('/api/ocado/slots/reserve', {
-    account_id: accountId,
     slot_id: slotId,
     ddid: ddid || null,
     region: region || null,

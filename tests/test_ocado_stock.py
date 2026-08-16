@@ -22,7 +22,7 @@ from app.db.models import Product, Recipe, RecipeIngredient, User
 from app.db.session import init_db, make_engine, make_session_factory
 from app.mapping import service
 from app import config
-from app.cart.adapters import AccountInfo, OcadoAdapter
+from app.cart.adapters import OcadoAdapter
 from app.mapping.candidates import gather_candidates
 from app.ocado import availability
 from app.ocado.availability import ProductStatus
@@ -90,19 +90,16 @@ class FakeOcadoAdapter(OcadoAdapter):
     def __init__(self, cart):
         self.cart_client = cart
 
-    def accounts(self):
-        # The configured default, not a made-up id: the ledger is keyed by it,
-        # so inventing one here would file the push's claims where nothing
-        # reads them and every assertion about the ledger would see nothing.
-        return [AccountInfo(id=config.DEFAULT_OCADO_ACCOUNT_ID, label="Ocado")]
-
-    def _runtime(self, account_id=None):
+    # No accounts() any more: the account is the row init_db seeds for the
+    # bootstrap user, and its key is the configured default — which is what the
+    # ledger is keyed by, so the push's claims land where the assertions look.
+    def _runtime(self, account_id):
         return SimpleNamespace(
             session=None,
-            account=SimpleNamespace(id=config.DEFAULT_OCADO_ACCOUNT_ID),
+            account=SimpleNamespace(id=account_id),
         )
 
-    def _client(self, account_id=None):
+    def _client(self, account_id):
         return self.cart_client
 
 
