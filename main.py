@@ -83,7 +83,55 @@ class _NoCacheFrontendMiddleware(BaseHTTPMiddleware):
         return response
 
 
+#: Methods that change something. A cross-site GET is a read the browser was
+#: always going to allow; these are the ones worth refusing.
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+#: Values of ``Sec-Fetch-Site`` that mean "this request came from us".
+#: ``none`` is a direct navigation — typed, bookmarked — which no page caused.
+_OWN_SITE = frozenset({"same-origin", "same-site", "none"})
+
+
+class _CrossSiteWriteMiddleware(BaseHTTPMiddleware):
+    """Refuse state-changing API calls that a different site caused.
+
+    Cloudflare Access assertions arrive in a cookie as well as a header (that is
+    how the page load carries one), and a cookie is attached by the browser to
+    requests *any* site can make. So a page on another origin could POST to this
+    API and have it arrive fully authenticated as whoever was signed in — push a
+    basket, disconnect a shop, or hand a retailer password to the login endpoint.
+
+    Refusing on positive evidence only, rather than requiring proof of same
+    origin: a request is rejected when a header says it is cross-site, not when
+    one is missing. Every browser capable of being the attacker here sends
+    ``Sec-Fetch-Site``, and a cross-origin ``fetch`` or form post sends
+    ``Origin`` regardless. What has neither is a script, curl, or the test
+    suite — none of which can be aimed at somebody else's session by a web page,
+    which is the whole threat.
+    """
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        if request.method in _WRITE_METHODS and path.startswith("/api/"):
+            site = request.headers.get("sec-fetch-site", "").strip().lower()
+            if site and site not in _OWN_SITE:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-site requests may not change anything"},
+                )
+            origin = request.headers.get("origin")
+            if not site and origin and urlparse(origin).netloc != request.headers.get(
+                "host", ""
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-site requests may not change anything"},
+                )
+        return await call_next(request)
+
+
+# Added last, so it runs first: a refused request should not reach a route.
 app.add_middleware(_NoCacheFrontendMiddleware)
+app.add_middleware(_CrossSiteWriteMiddleware)
 
 
 @app.get("/api/health")

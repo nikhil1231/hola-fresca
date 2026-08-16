@@ -65,6 +65,7 @@ class Pack:
     available: bool = True
     stock_checked_at: datetime | None = None
     is_nectar_price: bool = False
+    is_frozen: bool = False
     #: Customer rating and how many people gave it. Cheapest is not best when the
     #: cheap one is a two-star product, so this is a term in the pack choice.
     rating: float | None = None
@@ -501,6 +502,7 @@ def _build_pack(
         available=product.in_stock != 0,
         stock_checked_at=product.stock_checked_at,
         is_nectar_price=bool(product.is_nectar_price),
+        is_frozen=bool(product.is_frozen),
         rating=product.avg_rating,
         ratings_count=product.ratings_count,
         shelf_life_days=product.shelf_life_days,

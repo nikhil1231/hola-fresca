@@ -1,8 +1,9 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Box,
   Button,
+  Collapse,
   Group,
   Loader,
   Stack,
@@ -13,6 +14,8 @@ import {
 } from '@mantine/core'
 import {
   IconAlertCircle,
+  IconBasketCheck,
+  IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
   IconCloudUpload,
@@ -40,7 +43,7 @@ const ACTIONABLE_STATUSES = new Set(['not_synced', 'changed', 'deleted'])
 // for the beat before the active retailer has loaded.
 const STATUS = {
   unverified: {
-    label: (shop) => `Connect to verify`,
+    label: () => `Connect to verify`,
     color: 'grape',
     icon: IconPlugOff,
     description: (shop) => `Connect to ${shop} to verify whether this product is synced.`,
@@ -173,21 +176,32 @@ export default function CheckoutPanel({
 }) {
   const { id: retailer, label: retailerLabel } = useActiveRetailer()
   const connection = useCartConnection(retailer)
-  const { accountId, connected } = connection
-  const push = useCartPush(retailer, accountId)
+  const { connected } = connection
+  const push = useCartPush(retailer)
   const plan = useCartPushPlan(
-    { retailer, accountId, selections, ownedItemKeys, packOverrides, snapOverrides },
+    { retailer, selections, ownedItemKeys, packOverrides, snapOverrides },
     { enabled: connected },
   )
+  const [personalItemsOpen, setPersonalItemsOpen] = useState(false)
+  const resetPush = push.reset
   useEffect(() => {
-    push.reset()
-  }, [accountId, weekStart])
+    resetPush()
+    setPersonalItemsOpen(false)
+  }, [retailer, resetPush, weekStart])
 
   const fallbackItems = useMemo(
     () => plannedCheckoutItems(lines, ownedItemKeySet),
     [lines, ownedItemKeySet],
   )
   const items = connected && plan.data ? plan.data.checkout_items : fallbackItems
+  const personalItems = useMemo(
+    () => connected && plan.data
+      ? [...(plan.data.yours ?? [])].sort((a, b) =>
+          (a.name ?? a.sku).localeCompare(b.name ?? b.sku),
+        )
+      : [],
+    [connected, plan.data],
+  )
   const actionable = items.some((item) => ACTIONABLE_STATUSES.has(item.status))
   const total = items.reduce((sum, item) => sum + (item.cost ?? 0), 0)
   const hasUnknownCosts = items.some((item) => item.cost == null)
@@ -195,7 +209,7 @@ export default function CheckoutPanel({
 
   return (
     <Stack gap="md" className={classes.checkoutPanel}>
-      <Group justify="space-between" align="center" wrap="wrap">
+      <Group justify="space-between" align="center" wrap="wrap" className={classes.header}>
         <Group gap="sm">
           <Title order={3} className={classes.title}>Checkout</Title>
           <RetailerAccountStatus connection={connection} shop={shop} />
@@ -207,7 +221,6 @@ export default function CheckoutPanel({
           disabled={!connected || plan.isFetching || plan.isError || !actionable}
           onClick={() =>
             push.mutate({
-              accountId,
               selections,
               ownedItemKeys,
               packOverrides,
@@ -221,16 +234,18 @@ export default function CheckoutPanel({
       </Group>
 
       {!connected && (
-        <RetailerLoginPanel connection={connection} shop={shop} />
+        <Box className={classes.connectionWrap}>
+          <RetailerLoginPanel connection={connection} shop={shop} />
+        </Box>
       )}
 
       {plan.error && (
-        <Alert color="red" icon={<IconAlertCircle size={18} />}>
+        <Alert color="red" icon={<IconAlertCircle size={18} />} className={classes.notice}>
           Could not compare with {shop}: {plan.error.message}
         </Alert>
       )}
       {push.error && (
-        <Alert color="red" icon={<IconAlertCircle size={18} />}>
+        <Alert color="red" icon={<IconAlertCircle size={18} />} className={classes.notice}>
           {push.error.message}
         </Alert>
       )}
@@ -238,6 +253,7 @@ export default function CheckoutPanel({
         <Alert
           color={(push.data.dropped?.length ?? 0) > 0 ? 'yellow' : 'green'}
           icon={<IconCircleCheck size={18} />}
+          className={classes.notice}
         >
           Checkout synced to {shop}.
           {(push.data.dropped?.length ?? 0) > 0
@@ -249,73 +265,132 @@ export default function CheckoutPanel({
         </Alert>
       )}
       {(unmapped?.length ?? 0) > 0 && (
-        <Alert color="yellow" variant="light" icon={<IconAlertCircle size={18} />}>
+        <Alert
+          color="yellow"
+          variant="light"
+          icon={<IconAlertCircle size={18} />}
+          className={classes.notice}
+        >
           Not sent to {shop}: {unmapped.join(', ')}
         </Alert>
       )}
       {(soldOut?.length ?? 0) > 0 && (
-        <Alert color="yellow" variant="light" icon={<IconAlertCircle size={18} />}>
+        <Alert
+          color="yellow"
+          variant="light"
+          icon={<IconAlertCircle size={18} />}
+          className={classes.notice}
+        >
           Nothing in stock for: {soldOut.join(', ')}
         </Alert>
       )}
 
       {connected && plan.isLoading ? (
         <Group justify="center" py="xl"><Loader color="green" /></Group>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && personalItems.length === 0 ? (
         <Box className={classes.emptyState}>
           <Text fw={700}>No retailer products</Text>
           <Text size="sm" c="dimmed">Add recipes to build a checkout basket.</Text>
         </Box>
       ) : (
-        <Table.ScrollContainer minWidth={460} className={classes.tableScroll}>
-          <Table verticalSpacing="sm" className={classes.table}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th w={50}><span className={classes.visuallyHidden}>Status</span></Table.Th>
-                <Table.Th>Product</Table.Th>
-                <Table.Th w={120} ta="right">Cost</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {items.map((item) => (
-                <Table.Tr key={item.sku}>
-                  <Table.Td><StatusIcon item={item} shop={shop} /></Table.Td>
-                  <Table.Td>
-                    {item.url ? (
-                      <a href={item.url} target="_blank" rel="noreferrer" className={classes.productLink}>
-                        {item.name}
-                      </a>
-                    ) : (
-                      <Text fw={600} size="sm">{item.name}</Text>
-                    )}
-                    <Text size="xs" c="dimmed">{quantityDescription(item, shop)}</Text>
-                  </Table.Td>
-                  <Table.Td ta="right">
-                    <Tooltip
-                      label={item.cost == null
-                        ? 'Price unavailable'
-                        : item.cost_source === 'live'
-                          ? `Live ${shop} basket total`
-                          : 'Planned price until synced'}
-                      withArrow
-                    >
-                      <Text fw={700} size="sm" className={classes.cost}>
-                        {item.cost == null ? '—' : formatMoney(item.cost)}
-                      </Text>
-                    </Tooltip>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-            <Table.Tfoot>
-              <Table.Tr>
-                <Table.Th />
-                <Table.Th>{hasUnknownCosts ? 'Known total' : 'Total'}</Table.Th>
-                <Table.Th ta="right">{formatMoney(total)}</Table.Th>
-              </Table.Tr>
-            </Table.Tfoot>
-          </Table>
-        </Table.ScrollContainer>
+        <Box className={classes.itemList}>
+          {items.length > 0 ? (
+            <Table.ScrollContainer minWidth={460} type="native" className={classes.tableScroll}>
+              <Table verticalSpacing="sm" className={classes.table}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th w={50}><span className={classes.visuallyHidden}>Status</span></Table.Th>
+                    <Table.Th>Product</Table.Th>
+                    <Table.Th w={120} ta="right">Cost</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {items.map((item) => (
+                    <Table.Tr key={item.sku}>
+                      <Table.Td><StatusIcon item={item} shop={shop} /></Table.Td>
+                      <Table.Td>
+                        {item.url ? (
+                          <a href={item.url} target="_blank" rel="noreferrer" className={classes.productLink}>
+                            {item.name}
+                          </a>
+                        ) : (
+                          <Text className={classes.productName}>{item.name}</Text>
+                        )}
+                        <Text className={classes.productMeta}>{quantityDescription(item, shop)}</Text>
+                      </Table.Td>
+                      <Table.Td ta="right">
+                        <Tooltip
+                          label={item.cost == null
+                            ? 'Price unavailable'
+                            : item.cost_source === 'live'
+                              ? `Live ${shop} basket total`
+                              : 'Planned price until synced'}
+                          withArrow
+                        >
+                          <Text className={classes.cost}>
+                            {item.cost == null ? '—' : formatMoney(item.cost)}
+                          </Text>
+                        </Tooltip>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+                <Table.Tfoot>
+                  <Table.Tr>
+                    <Table.Th />
+                    <Table.Th>{hasUnknownCosts ? 'Known total' : 'Total'}</Table.Th>
+                    <Table.Th ta="right">{formatMoney(total)}</Table.Th>
+                  </Table.Tr>
+                </Table.Tfoot>
+              </Table>
+            </Table.ScrollContainer>
+          ) : (
+            <Box className={classes.emptyManaged}>
+              <Text fw={600}>Nothing from this week to sync</Text>
+            </Box>
+          )}
+
+          {personalItems.length > 0 && (
+            <Box className={classes.personalSection}>
+              <button
+                type="button"
+                className={classes.personalToggle}
+                aria-expanded={personalItemsOpen}
+                aria-controls="personal-basket-items"
+                onClick={() => setPersonalItemsOpen((open) => !open)}
+              >
+                <span className={classes.personalHeadingIcon} aria-hidden="true">
+                  <IconBasketCheck size={20} />
+                </span>
+                <span className={classes.personalHeadingText}>
+                  <span className={classes.personalTitle}>Already in your basket</span>
+                  <span className={classes.personalDescription}>
+                    {personalItems.length} {personalItems.length === 1 ? 'item' : 'items'} left out of the Hola Fresca shop
+                  </span>
+                </span>
+                <IconChevronDown
+                  size={18}
+                  className={`${classes.personalChevron} ${personalItemsOpen ? classes.personalChevronOpen : ''}`}
+                />
+              </button>
+              <Collapse expanded={personalItemsOpen} id="personal-basket-items">
+                <div className={classes.personalList}>
+                  {personalItems.map((item) => (
+                    <div key={item.sku} className={classes.personalRow}>
+                      <span className={classes.personalItemIcon} aria-label="Already in your basket">
+                        <IconBasketCheck size={20} />
+                      </span>
+                      <span className={classes.personalName}>{item.name ?? item.sku}</span>
+                      <span className={classes.personalQuantity}>
+                        {item.quantity} in {shop}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Collapse>
+            </Box>
+          )}
+        </Box>
       )}
 
       <StatusLegend shop={shop} />

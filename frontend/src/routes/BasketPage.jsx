@@ -34,6 +34,7 @@ import {
   IconInfoCircle,
   IconLock,
   IconPackages,
+  IconSnowflake,
   IconStarFilled,
   IconToolsKitchen2,
 } from '@tabler/icons-react'
@@ -183,6 +184,27 @@ function formatCapacity(value, unit) {
   return unit === 'unit' ? formatQuantity(value, unit) : formatGrams(value)
 }
 
+function FrozenIcon({ size = 16 }) {
+  return (
+    <span className={classes.frozenIcon} aria-label="Frozen" title="Frozen">
+      <IconSnowflake size={size} stroke={2} aria-hidden="true" />
+    </span>
+  )
+}
+
+function ProductName({ children, frozen, className = '' }) {
+  return (
+    <span className={`${classes.productNameWithIcon} ${className}`.trim()}>
+      {frozen && <FrozenIcon size={14} />}
+      <span>{children}</span>
+    </span>
+  )
+}
+
+function lineIsFrozen(line) {
+  return (line?.choices ?? []).some((choice) => choice.is_frozen)
+}
+
 // Deliberately coarse, and deliberately capped at "2+ years". The estimate comes
 // from how often the whole library cooks the ingredient, not from what you
 // actually make, and at one gram a recipe it will happily compute seventy years
@@ -263,9 +285,22 @@ function PackCard({ option, active, cheaper, onPick, disabled }) {
         ) : null}
       </Group>
 
-      <Text size="xs" c="dimmed" lineClamp={2} mb={6}>
-        {option.product_name}
-      </Text>
+      <ProductName frozen={option.is_frozen} className={classes.packProductName}>
+        {option.url ? (
+          <a
+            href={option.url}
+            target="_blank"
+            rel="noreferrer"
+            className={classes.modalProductLink}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            {option.product_name}
+          </a>
+        ) : (
+          option.product_name
+        )}
+      </ProductName>
 
       <Group gap={4} mb={6}>
         {option.form_differs && (
@@ -323,9 +358,12 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
   return (
     <Modal.Root opened={opened} onClose={onClose} size="lg" centered>
       <Modal.Overlay />
-      <Modal.Content>
+      <Modal.Content className={classes.packModalContent}>
         <Modal.Header>
-          <Modal.Title fw={700}>{line.name}</Modal.Title>
+          <Group gap={6} wrap="nowrap">
+            {lineIsFrozen(line) && <FrozenIcon />}
+            <Modal.Title fw={700}>{line.name}</Modal.Title>
+          </Group>
           <Group gap="sm" wrap="nowrap">
             <SegmentedControl
               size="xs"
@@ -409,46 +447,69 @@ function PackSizeModal({ line, opened, onClose, scope, setScope, onPick, onReset
               which is exactly how this list came to open onto an empty gap. */}
           {showAll && (
             <Stack gap={4} className={classes.otherSizes}>
+              <div className={classes.otherSizeHeader}>
+                <span>Product</span>
+                <span>Unit price</span>
+                <span>Rating</span>
+                <span>Total</span>
+                <span>Action</span>
+              </div>
               {rest.map((option) => (
-                <Group
+                <div
                   key={`${option.sku}:${option.count}:${option.shortfall}`}
-                  justify="space-between"
-                  wrap="nowrap"
                   className={classes.otherSize}
                 >
-                  <Group gap="sm" wrap="nowrap">
-                    <Stack gap={0} w={150}>
+                  <div className={classes.otherSizeIdentity}>
+                    <Group gap={6} wrap="wrap" className={classes.otherSizeHeading}>
                       <Text size="sm" fw={700}>
                         {option.pack_size_raw ||
                           formatCapacity(option.capacity / option.count, option.quantity_unit)}
                       </Text>
-                      <Text size="xs" c="dimmed" lineClamp={1}>{option.product_name}</Text>
-                    </Stack>
-                    {option.form_differs && (
-                      <Badge size="xs" variant="light" color="blue">different form</Badge>
-                    )}
-                    {option.shortfall > 0 && (
-                      <Badge size="xs" variant="light" color="orange">
-                        {formatQuantity(option.shortfall, option.quantity_unit)} short ·{' '}
-                        {option.shortfall_pct}%
-                        {option.cost_delta < 0 ? ` · save ${formatMoney(-option.cost_delta)}` : ''}
-                      </Badge>
-                    )}
-                    <Text size="sm" c="dimmed" w={88}>{formatUnitCost(option)}</Text>
-                    <Rating option={option} />
-                  </Group>
-                  <Group gap="sm" wrap="nowrap">
-                    <Text size="sm">{formatMoney(option.cost)}</Text>
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      disabled={pending || (alwaysBlocksShortfall && option.shortfall > 0)}
-                      onClick={() => onPick(option)}
+                      {option.form_differs && (
+                        <Badge size="xs" variant="light" color="blue">different form</Badge>
+                      )}
+                      {option.shortfall > 0 && (
+                        <Badge size="xs" variant="light" color="orange">
+                          {formatQuantity(option.shortfall, option.quantity_unit)} short ·{' '}
+                          {option.shortfall_pct}%
+                          {option.cost_delta < 0 ? ` · save ${formatMoney(-option.cost_delta)}` : ''}
+                        </Badge>
+                      )}
+                    </Group>
+                    <ProductName
+                      frozen={option.is_frozen}
+                      className={classes.otherSizeProductName}
                     >
-                      Pick
-                    </Button>
-                  </Group>
-                </Group>
+                      {option.url ? (
+                        <a
+                          href={option.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={classes.modalProductLink}
+                        >
+                          {option.product_name}
+                        </a>
+                      ) : (
+                        option.product_name
+                      )}
+                    </ProductName>
+                  </div>
+                  <Text size="sm" c="dimmed" className={classes.otherSizeUnitCost}>
+                    {formatUnitCost(option)}
+                  </Text>
+                  <div className={classes.otherSizeRating}>
+                    <Rating option={option} />
+                  </div>
+                  <Text size="sm" className={classes.otherSizeCost}>{formatMoney(option.cost)}</Text>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    disabled={pending || (alwaysBlocksShortfall && option.shortfall > 0)}
+                    onClick={() => onPick(option)}
+                  >
+                    Pick
+                  </Button>
+                </div>
               ))}
             </Stack>
           )}
@@ -583,6 +644,7 @@ function LineTable({
                         )}
                         <div>
                           <Group gap={6}>
+                            {lineIsFrozen(line) && <FrozenIcon />}
                             <Text fw={600} className={classes.lineName}>{line.name}</Text>
                             {line.trace && (
                               <Badge size="xs" color="yellow" variant="light">
@@ -715,19 +777,21 @@ function LineTable({
                               <div key={`${rowKey}:${choice.sku}`} className={classes.choiceItem}>
                                 <div />
                                 <div className={classes.choiceProduct}>
-                                  {choice.url ? (
-                                    <a
-                                      href={choice.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className={classes.productLink}
-                                      onClick={(event) => event.stopPropagation()}
-                                    >
-                                      {choice.product_name}
-                                    </a>
-                                  ) : (
-                                    <Text size="sm">{choice.product_name}</Text>
-                                  )}
+                                  <ProductName frozen={choice.is_frozen}>
+                                    {choice.url ? (
+                                      <a
+                                        href={choice.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className={classes.productLink}
+                                        onClick={(event) => event.stopPropagation()}
+                                      >
+                                        {choice.product_name}
+                                      </a>
+                                    ) : (
+                                      choice.product_name
+                                    )}
+                                  </ProductName>
                                 </div>
                                 <div />
                                 <div>
@@ -1004,6 +1068,7 @@ function MobileLineCard({
       />
       <div className={classes.mobileLineMain}>
         <Group gap={6} align="center">
+          {lineIsFrozen(line) && <FrozenIcon />}
           <Text className={classes.mobileLineName}>{line.name}</Text>
           {heldOption && (
             <span className={classes.packTag}>{heldOption.pack_size_raw || 'chosen'}</span>

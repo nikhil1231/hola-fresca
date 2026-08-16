@@ -152,6 +152,7 @@ def _option_out(option) -> BasketPackOptionOut:
         better_value=option.better_value,
         match_type=option.pack.match_type,
         form_differs=option.form_differs,
+        is_frozen=option.pack.is_frozen,
         shortfall=round(option.shortfall, 3 if option.quantity_unit == "unit" else 1),
         shortfall_pct=round(option.shortfall_pct, 1),
         recommended=option.recommended,
@@ -197,6 +198,7 @@ def _line_out(line: BasketLine) -> BasketLineOut:
                 retailer=choice.pack.retailer,
                 external=choice.pack.external,
                 is_nectar_price=choice.pack.is_nectar_price,
+                is_frozen=choice.pack.is_frozen,
             )
             for choice in cover.choices
         ]

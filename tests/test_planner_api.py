@@ -10,6 +10,8 @@ from app.db.models import Recipe, RecipeIngredient
 from app.db.session import init_db, make_engine, make_session_factory
 from app.mapping import service
 from app.mapping.candidates import gather_candidates
+from app.planner.basket import PackOption
+from app.planner.index import Pack
 from main import app
 from tests.conftest import seed_candidates
 from tests.test_planner_basket import write_freq_csv
@@ -40,6 +42,31 @@ def test_planner_index_loader_honours_recipe_subset(monkeypatch):
     monkeypatch.setattr(planner_api, "get_index", get_index)
     assert planner_api._load_planner_index(object(), [11, 22], None) is sentinel
     assert requested == [[11, 22]]
+
+
+def test_pack_option_serializes_frozen_state():
+    pack = Pack(
+        sku="frozen-rice",
+        product_name="Frozen Rice 500g",
+        capacity_g=500,
+        price=1.0,
+        salvage=0.9,
+        rank=1,
+        match_type="exact",
+        is_frozen=True,
+    )
+    option = PackOption(
+        pack=pack,
+        count=1,
+        cost=1.0,
+        capacity=500,
+        leftover=200,
+        unit_cost=0.002,
+        cost_delta=0,
+        leftover_delta=0,
+    )
+
+    assert planner_api._option_out(option).is_frozen is True
 
 
 def _recipe(name: str, ingredients: list[RecipeIngredient], *, curated: int = 1) -> Recipe:
@@ -83,7 +110,14 @@ def planner_client(tmp_path):
             s,
             KEY_RICE,
             "Rice",
-            [{"sku": "rice", "name": "Rice 500g", "price": 1.0, "pack_value": 500, "pack_unit": "g"}],
+            [{
+                "sku": "rice",
+                "name": "Rice 500g",
+                "price": 1.0,
+                "pack_value": 500,
+                "pack_unit": "g",
+                "is_frozen": True,
+            }],
         )
         seed_candidates(
             s,
@@ -243,6 +277,7 @@ def test_basket_serializes_totals_and_all_buckets(planner_client):
     assert rice["cost"] == 1.0
     assert rice["packs"] == 1
     assert rice["choices"][0]["sku"] == "rice"
+    assert rice["choices"][0]["is_frozen"] is True
     assert rice["contributions"][0]["recipe_id"] == ids["pinned"]
     assert rice["contributions"][0]["recipe_name"] == "Rice Bowl"
     assert rice["contributions"][0]["grams"] == 300

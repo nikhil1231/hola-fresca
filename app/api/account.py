@@ -19,13 +19,22 @@ def current_account(
     user: User = Depends(get_current_user),
 ) -> AccountOut:
     """Return a verified production identity or its local presentation mock."""
-    identity = access.full_identity(request)
+    # Only ask Cloudflare for the display name when we have not already learned
+    # it. The name lives in get-identity rather than in the compact application
+    # token, so enriching means an outbound request to the team endpoint — and
+    # this endpoint is hit on every page load. Once the name is on the row there
+    # is nothing left to learn, so the common case costs nothing.
+    identity = (
+        access.authenticated_identity(request)
+        if user.name
+        else access.full_identity(request)
+    )
     if identity is None:
         # Localhost/LAN traffic never crosses Cloudflare, so it has no assertion
         # or get-identity profile. Match the production response shape without
         # writing this mock into users or letting it influence authorization.
         local = access.local_identity()
-        return AccountOut(email=local.email, name=local.name)
+        return AccountOut(email=local.email, name=local.name, is_admin=bool(user.is_admin))
 
     if identity.name and identity.name != user.name:
         user.name = identity.name
@@ -36,4 +45,5 @@ def current_account(
         name=user.name,
         access_authenticated=True,
         logout_url="/cdn-cgi/access/logout",
+        is_admin=bool(user.is_admin),
     )

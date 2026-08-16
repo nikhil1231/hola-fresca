@@ -20,6 +20,11 @@ class AccountOut(BaseModel):
     name: str | None = None
     access_authenticated: bool = False
     logout_url: str | None = None
+    #: Whether this account may edit the shared catalogue. Presentation only —
+    #: the endpoints are gated by ``require_admin`` and do not consult this. It
+    #: is here so the app can stop offering a second user a Mapping tab whose
+    #: every action answers 403.
+    is_admin: bool = False
 
 
 class PersonalRatingIn(BaseModel):
