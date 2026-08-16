@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MantineProvider } from '@mantine/core'
 
@@ -9,6 +9,7 @@ import './index.css'
 
 import { theme } from './theme.js'
 import { installAccessSessionHandling } from './api/session.js'
+import AdminOnly from './components/AdminOnly.jsx'
 import App from './App.jsx'
 import BasketPage from './routes/BasketPage.jsx'
 import BrowsePage from './routes/BrowsePage.jsx'
@@ -43,10 +44,15 @@ createRoot(document.getElementById('root')).render(
               <Route path="basket" element={<BasketPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="recipes/:id" element={<RecipeDetailPage />} />
-              <Route path="mapping" element={<MappingPage />} />
-              <Route path="mapping/aliases" element={<MappingAliasesPage />} />
-              <Route path="mapping/manual" element={<MappingManualPage />} />
-              <Route path="mapping/:key" element={<MappingReviewPage />} />
+              {/* The catalogue is shared, so editing it is not a personal act:
+                  one person rejecting a mapping changes what every other user's
+                  basket buys. The endpoints behind these are admin-gated. */}
+              <Route element={<AdminOnly><Outlet /></AdminOnly>}>
+                <Route path="mapping" element={<MappingPage />} />
+                <Route path="mapping/aliases" element={<MappingAliasesPage />} />
+                <Route path="mapping/manual" element={<MappingManualPage />} />
+                <Route path="mapping/:key" element={<MappingReviewPage />} />
+              </Route>
             </Route>
           </Routes>
         </BrowserRouter>

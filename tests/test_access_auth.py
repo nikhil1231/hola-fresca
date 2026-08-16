@@ -119,6 +119,7 @@ def test_lan_account_uses_mock_identity_without_persisting_it(configured):
         "name": "Local Nikhil",
         "access_authenticated": False,
         "logout_url": None,
+        "is_admin": True,
     }
     with configured() as session:
         user = session.scalar(select(User).order_by(User.id).limit(1))
@@ -169,6 +170,7 @@ def test_account_returns_and_stores_name_from_access_claim(configured, signing_k
         "name": "Nikhil Kunde",
         "access_authenticated": True,
         "logout_url": "/cdn-cgi/access/logout",
+        "is_admin": True,
     }
     with configured() as session:
         assert session.scalar(select(User).where(User.email == OWNER)).name == "Nikhil Kunde"
@@ -204,6 +206,63 @@ def test_account_gets_name_from_full_cloudflare_identity(
         "cookies": {"CF_Authorization": token},
         "timeout": 5.0,
     }
+
+
+def test_a_known_name_is_not_re_fetched_from_cloudflare(
+    configured, signing_key, monkeypatch
+):
+    """The name lives in get-identity, and this endpoint runs on every page load.
+
+    Once it is on the row there is nothing left to learn, so the common case
+    must not spend an outbound request to the team endpoint re-learning it.
+    """
+    calls = []
+    monkeypatch.setattr(
+        access.httpx, "get", lambda *a, **k: calls.append(a) or _identity_response()
+    )
+    headers = {"Host": HOSTNAME, "Cf-Access-Jwt-Assertion": make_token(signing_key)}
+    client = TestClient(main.app)
+
+    assert client.get("/api/account", headers=headers).json()["name"] == "Nikhil Kunde"
+    assert len(calls) == 1, "the first call has to learn it"
+
+    assert client.get("/api/account", headers=headers).json()["name"] == "Nikhil Kunde"
+    assert len(calls) == 1, "the second already knew it"
+
+
+def _identity_response():
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"email": OWNER, "name": "Nikhil Kunde"}
+
+    return Response()
+
+
+def test_the_account_reports_whether_it_may_edit_the_catalogue(configured, signing_key):
+    """So the app can stop offering a Mapping tab that answers 403.
+
+    Presentation only — ``require_admin`` is what actually refuses the writes —
+    but a second household member seeing a tab they cannot use is a bug too.
+    """
+    client = TestClient(main.app)
+    owner = client.get(
+        "/api/account",
+        headers={"Host": HOSTNAME, "Cf-Access-Jwt-Assertion": make_token(signing_key)},
+    ).json()
+
+    guest = client.get(
+        "/api/account",
+        headers={
+            "Host": HOSTNAME,
+            "Cf-Access-Jwt-Assertion": make_token(signing_key, email="guest@example.com"),
+        },
+    ).json()
+
+    assert owner["is_admin"] is True
+    assert guest["is_admin"] is False, "a new account is never admin"
 
 
 def test_assertion_may_arrive_as_a_cookie(configured, signing_key):
@@ -311,6 +370,7 @@ def test_access_unconfigured_changes_nothing(monkeypatch, factory):
             "name": "Local Nikhil",
             "access_authenticated": False,
             "logout_url": None,
+            "is_admin": True,
         }
     finally:
         main.app.dependency_overrides.clear()

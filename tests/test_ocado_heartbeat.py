@@ -226,6 +226,77 @@ def test_accounts_are_staggered_across_the_interval(monkeypatch, beat):
     assert spread > timedelta(hours=4), "three accounts should not check together"
 
 
+def _runtimes(monkeypatch, *ids):
+    class _Runtime:
+        def __init__(self, id):
+            self.account = type("A", (), {"id": id})()
+
+    monkeypatch.setattr(
+        "app.ocado.heartbeat.list_account_runtimes",
+        lambda: [_Runtime(i) for i in ids],
+    )
+
+
+def test_an_account_connected_while_running_is_taken_up(monkeypatch, beat):
+    """Accounts are rows now, not environment config.
+
+    Somebody connecting a shop from Settings creates one while this thread is
+    already running. Planning only at start-up meant a heartbeat that booted on
+    a database with no accounts watched nothing for ever after.
+    """
+    now = datetime(2026, 8, 14, 10, 0)
+    _runtimes(monkeypatch)
+    beat._slots = beat._plan(now)
+    assert beat._slots == []
+
+    _runtimes(monkeypatch, "later")
+    beat.reconcile(now)
+
+    assert [slot.account_id for slot in beat._slots] == ["later"]
+    assert beat._slots[0].due_at >= now + STARTUP_DELAY
+
+
+def test_reconciling_does_not_reset_the_stagger(monkeypatch, beat):
+    """Otherwise anyone connecting anything realigns every other account."""
+    now = datetime(2026, 8, 14, 10, 0)
+    _runtimes(monkeypatch, "a", "b")
+    beat._slots = beat._plan(now)
+    before = {slot.account_id: slot.due_at for slot in beat._slots}
+
+    _runtimes(monkeypatch, "a", "b", "c")
+    beat.reconcile(now)
+
+    after = {slot.account_id: slot.due_at for slot in beat._slots}
+    assert {k: after[k] for k in before} == before
+    assert "c" in after
+
+
+def test_a_disconnected_account_stops_being_checked(monkeypatch, beat):
+    now = datetime(2026, 8, 14, 10, 0)
+    _runtimes(monkeypatch, "a", "b")
+    beat._slots = beat._plan(now)
+
+    _runtimes(monkeypatch, "a")
+    beat.reconcile(now)
+
+    assert [slot.account_id for slot in beat._slots] == ["a"]
+
+
+def test_a_database_problem_leaves_the_existing_schedule_alone(monkeypatch, beat):
+    """A momentary failure to list accounts is not a reason to stop checking."""
+    now = datetime(2026, 8, 14, 10, 0)
+    _runtimes(monkeypatch, "a")
+    beat._slots = beat._plan(now)
+
+    def boom():
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr("app.ocado.heartbeat.list_account_runtimes", boom)
+    beat.reconcile(now)
+
+    assert [slot.account_id for slot in beat._slots] == ["a"]
+
+
 def test_the_heartbeat_never_escalates_to_a_full_login(monkeypatch):
     """The one guarantee that matters: a timer must not email somebody a code."""
     calls = {}

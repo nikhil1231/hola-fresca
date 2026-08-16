@@ -206,12 +206,48 @@ class Heartbeat:
             return
         log.info("ocado heartbeat: %s -> %s", account_id, state)
 
-    def _run(self) -> None:
-        now = datetime.now()
-        self._slots = self._plan(now)
-        if not self._slots:
-            log.info("ocado heartbeat: no accounts configured, nothing to do")
+    def reconcile(self, now: datetime) -> None:
+        """Take up accounts that have appeared, and drop ones that have gone.
+
+        Accounts used to be environment config, fixed for the life of the
+        process, so planning once at start-up was the same as planning for good.
+        They are rows now: somebody connecting a shop from Settings creates one
+        while this thread is already running. Without this, a heartbeat that
+        started on a database with no accounts would log "nothing to do" and
+        return — never watching the account connected a minute later — and the
+        second person in a household would never be checked at all.
+
+        Existing slots keep their due time. Re-planning wholesale would reset the
+        stagger every time anyone connected anything, which is the one property
+        that keeps several accounts from firing together.
+        """
+        try:
+            wanted = [runtime.account.id for runtime in list_account_runtimes()]
+        except Exception:  # noqa: BLE001 - a momentary database problem is not fatal
+            log.warning("ocado heartbeat: could not list accounts", exc_info=True)
             return
+
+        known = {slot.account_id for slot in self._slots}
+        self._slots = [slot for slot in self._slots if slot.account_id in set(wanted)]
+        new = [account_id for account_id in wanted if account_id not in known]
+        if not new:
+            return
+
+        # Spread newcomers across the interval the same way a cold start does,
+        # so two accounts connected in the same minute are not checked together.
+        step = self.interval / max(len(wanted), 1)
+        floor = now + STARTUP_DELAY
+        for position, account_id in enumerate(new):
+            self._slots.append(
+                _Slot(
+                    account_id=account_id,
+                    due_at=self._schedule(now, spread=step * position, not_before=floor),
+                )
+            )
+        log.info("ocado heartbeat: now watching %d account(s)", len(self._slots))
+
+    def _run(self) -> None:
+        self._slots = self._plan(datetime.now())
         log.info(
             "ocado heartbeat: watching %d account(s), every ~%.0fh within %s-%s",
             len(self._slots),
@@ -221,6 +257,8 @@ class Heartbeat:
         )
         while not self._stop.is_set():
             now = datetime.now()
+            # Cheap: one indexed query per tick, against a local SQLite file.
+            self.reconcile(now)
             for slot in self._slots:
                 if self._stop.is_set():
                     return

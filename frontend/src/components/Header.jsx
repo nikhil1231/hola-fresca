@@ -45,9 +45,13 @@ export default function Header() {
               <NavLink to="/basket" className={navClass}>
                 Basket
               </NavLink>
-              <NavLink to="/mapping" className={navClass}>
-                Mapping
-              </NavLink>
+              {/* Catalogue editing is admin-only, so a second user is not
+                  offered a tab whose every action answers 403. */}
+              {account?.is_admin && (
+                <NavLink to="/mapping" className={navClass}>
+                  Mapping
+                </NavLink>
+              )}
             </Group>
           </Group>
           <Group gap="sm" wrap="nowrap">
@@ -117,9 +121,11 @@ export default function Header() {
           <NavLink to="/basket" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Basket
           </NavLink>
-          <NavLink to="/mapping" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
-            Mapping
-          </NavLink>
+          {account?.is_admin && (
+            <NavLink to="/mapping" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
+              Mapping
+            </NavLink>
+          )}
           <NavLink to="/settings" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Settings
           </NavLink>

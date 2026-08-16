@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 import logging
 import mimetypes
 import os
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -149,9 +151,19 @@ if _DIST.is_dir():
 
     class _SPAStaticFiles(StaticFiles):
         """Static files with SPA fallback: unknown paths return index.html so
-        client-side routes (e.g. /recipes/123) load the app instead of 404ing."""
+        client-side routes (e.g. /recipes/123) load the app instead of 404ing.
+
+        Except under ``/api/``. This mount is last, so only an API path that
+        matched no route reaches it, and answering that with the app's HTML and
+        a 200 is a lie that costs debugging time — a removed or misspelled
+        endpoint looks like it is working until somebody parses the response. An
+        API path that got this far is a 404 and says so in the shape every other
+        API error uses.
+        """
 
         async def get_response(self, path: str, scope):
+            if path == "api" or path.startswith("api/"):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
             try:
                 return await super().get_response(path, scope)
             except StarletteHTTPException as exc:
