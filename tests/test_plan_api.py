@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app import schedule as sched
 from app.api.deps import get_session
-from app.db.models import PlanSelection, PlanWeekItem, Recipe, User
+from app.db.models import PlanSelection, PlanWeekItem, PlanWeekPush, Recipe, User
 from app.db.session import init_db, make_engine, make_session_factory
 from main import app
 from tests.conftest import user_id
@@ -521,3 +521,103 @@ def test_a_plan_belongs_to_one_account(plan_client):
 
     (entry,) = client.get(f"/api/plan/weeks/{week}").json()["recipes"]
     assert entry["portions"] == 4, "the other account's row is not mine"
+
+
+# --- what actually got cooked ------------------------------------------------
+
+def _mark_shopped(factory, week: str) -> None:
+    """The evidence the optimistic default is gated on: a real push happened."""
+    with factory() as session:
+        session.add(
+            PlanWeekPush(user_id=user_id(session), retailer="ocado", week_start=week)
+        )
+        session.commit()
+
+
+def test_a_shopped_week_that_has_ended_reads_as_cooked(plan_client):
+    client, factory = plan_client
+    curry = _recipe_id(factory, "Chicken Curry")
+    week = _seed_past_week(factory, curry)
+    _mark_shopped(factory, week)
+
+    body = client.get("/api/plan/cooked", params={"week_start": week}).json()
+    assert body["weeks"][0]["shopped"] is True
+    assert body["weeks"][0]["recipes"] == [
+        {"recipe_id": curry, "cooked": True, "marked": False}
+    ]
+
+
+def test_a_week_never_pushed_to_a_cart_cooked_nothing(plan_client):
+    """Otherwise an idle fortnight quietly empties a cupboard nobody filled."""
+    client, factory = plan_client
+    curry = _recipe_id(factory, "Chicken Curry")
+    week = _seed_past_week(factory, curry)
+
+    body = client.get("/api/plan/cooked", params={"week_start": week}).json()
+    assert body["weeks"][0]["shopped"] is False
+    assert body["weeks"][0]["recipes"][0]["cooked"] is False
+
+
+def test_unticking_a_recipe_survives_and_is_marked_as_yours(plan_client):
+    """The assumption moves when a week ends, so the statement is stored
+    outright rather than only when it currently differs."""
+    client, factory = plan_client
+    curry = _recipe_id(factory, "Chicken Curry")
+    week = _seed_past_week(factory, curry)
+    _mark_shopped(factory, week)
+
+    response = client.put(f"/api/plan/weeks/{week}/cooked/{curry}", json={"cooked": False})
+    assert response.status_code == 200
+    assert response.json()["recipes"] == [
+        {"recipe_id": curry, "cooked": False, "marked": True}
+    ]
+
+    again = client.get("/api/plan/cooked", params={"week_start": week}).json()
+    assert again["weeks"][0]["recipes"][0]["cooked"] is False
+
+
+def test_a_recipe_can_be_ticked_back_on(plan_client):
+    client, factory = plan_client
+    curry = _recipe_id(factory, "Chicken Curry")
+    week = _seed_past_week(factory, curry)
+    _mark_shopped(factory, week)
+
+    client.put(f"/api/plan/weeks/{week}/cooked/{curry}", json={"cooked": False})
+    response = client.put(f"/api/plan/weeks/{week}/cooked/{curry}", json={"cooked": True})
+    assert response.json()["recipes"][0] == {
+        "recipe_id": curry, "cooked": True, "marked": True
+    }
+
+
+def test_a_week_that_has_not_started_cannot_have_cooked_anything(plan_client):
+    """Unlike the rest of the plan API, the past is writable here — the future
+    is what is refused."""
+    client, factory = plan_client
+    curry = _recipe_id(factory, "Chicken Curry")
+    week = _week(2)
+    client.post(f"/api/plan/weeks/{week}/recipes", json={"recipe_id": curry})
+
+    response = client.put(f"/api/plan/weeks/{week}/cooked/{curry}", json={"cooked": True})
+    assert response.status_code == 409
+
+
+def test_a_recipe_outside_the_week_cannot_be_marked(plan_client):
+    client, factory = plan_client
+    curry = _recipe_id(factory, "Chicken Curry")
+    noodles = _recipe_id(factory, "Pork Noodles")
+    week = _seed_past_week(factory, curry)
+
+    response = client.put(f"/api/plan/weeks/{week}/cooked/{noodles}", json={"cooked": False})
+    assert response.status_code == 404
+
+
+def test_cooked_asks_for_the_weeks_it_wants(plan_client):
+    client, factory = plan_client
+    curry = _recipe_id(factory, "Chicken Curry")
+    older = _seed_past_week(factory, curry, weeks_back=5)
+    newer = _seed_past_week(factory, curry, weeks_back=2)
+
+    body = client.get(
+        "/api/plan/cooked", params={"week_start": [older, newer]}
+    ).json()
+    assert [week["week_start"] for week in body["weeks"]] == [older, newer]

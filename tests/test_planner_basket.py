@@ -7,6 +7,7 @@ DB-backed index so the two cannot drift apart.
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
 
 import pytest
 
@@ -1078,3 +1079,136 @@ def test_score_basket_agrees_with_build_basket(factory, tmp_path):
         assert scored.cost == pytest.approx(built.cost)
         assert scored.consumed_cost == pytest.approx(built.consumed_cost)
         assert scored.gap_count == B.basket_gap_count(built)
+
+
+# --------------------------------------------------------------------------
+# Spending the cupboard
+# --------------------------------------------------------------------------
+
+def _pantry_index(*, unit_kind="mass", each_to_grams=None):
+    """One ingredient, one recipe needing 300 g (or 3 units) of it."""
+    packs = (pack(500, 1.50, sku="small"), pack(1000, 2.50, sku="big"))
+    if unit_kind == "count":
+        # Count covering reads capacity_qty, which the mass helper leaves unset.
+        packs = tuple(
+            replace(p, capacity_qty=p.capacity_g / each_to_grams) for p in packs
+        )
+    ing = Ingredient(
+        key=KEY_RICE,
+        name="Basmati Rice",
+        pantry_staple=False,
+        packs=packs,
+        unit_kind=unit_kind,
+        each_to_grams=each_to_grams,
+    )
+    need = Need(
+        key=KEY_RICE,
+        display_name="Basmati Rice",
+        grams=300.0,
+        units=3.0 if unit_kind == "count" else None,
+    )
+    recipe = PlanRecipe(id=1, name="Rice Bowl", base_yield=2, needs=(need,))
+    return PlanIndex(ingredients={KEY_RICE: ing}, recipes={1: recipe})
+
+
+def test_the_cupboard_is_spent_before_anything_is_bought():
+    """300 g wanted with 200 g on the shelf is a 100 g shop, and the smaller
+    pack is enough for it — the saving is a pack tier, which is the safest way
+    for the pantry to be wrong."""
+    index = _pantry_index()
+    plain = B.build_basket(index, [B.Selection(1, 2)])
+    with_pantry = B.build_basket(
+        index, [B.Selection(1, 2)], pantry={KEY_RICE: B.Demand(grams=200.0)}
+    )
+    line = with_pantry.lines[0]
+    assert plain.lines[0].need_g == 300.0
+    assert line.need_g == 100.0
+    assert line.pantry_g == 200.0
+    assert line.from_pantry
+
+
+def test_a_line_the_cupboard_covers_outright_buys_nothing():
+    index = _pantry_index()
+    built = B.build_basket(
+        index, [B.Selection(1, 2)], pantry={KEY_RICE: B.Demand(grams=400.0)}
+    )
+    line = built.lines[0]
+    assert line.cover is None
+    assert line.cost == 0.0
+    assert line.pantry_g == 300.0  # only what the week actually wanted
+    assert line.note == "in the cupboard"
+    assert built.cost == 0.0
+
+
+def test_a_covered_line_is_not_reported_as_unpriceable():
+    """A cupboard line has no cover, which must not read as "no pack covers
+    this demand" — that is the phrasing for a genuine gap."""
+    index = _pantry_index()
+    built = B.build_basket(
+        index, [B.Selection(1, 2)], pantry={KEY_RICE: B.Demand(grams=400.0)}
+    )
+    assert built.unmapped == []
+    assert built.unpriceable == []
+    assert B.basket_gap_count(built) == 0
+
+
+def test_the_cupboard_keeps_a_sold_out_ingredient_off_the_gap_list():
+    """Being sold out stops mattering once you already have the thing."""
+    ing = Ingredient(
+        key=KEY_RICE,
+        name="Basmati Rice",
+        pantry_staple=False,
+        packs=(pack(500, 1.50, sku="small", available=False),),
+    )
+    need = Need(key=KEY_RICE, display_name="Basmati Rice", grams=300.0)
+    index = PlanIndex(
+        ingredients={KEY_RICE: ing},
+        recipes={1: PlanRecipe(id=1, name="Rice Bowl", base_yield=2, needs=(need,))},
+    )
+    without = B.build_basket(index, [B.Selection(1, 2)])
+    with_pantry = B.build_basket(
+        index, [B.Selection(1, 2)], pantry={KEY_RICE: B.Demand(grams=400.0)}
+    )
+    assert without.sold_out == ["Basmati Rice"]
+    assert with_pantry.sold_out == []
+    assert with_pantry.lines[0].from_pantry
+
+
+def test_count_ingredients_are_drawn_in_whole_units():
+    """Half a lime in the cupboard does not stop a recipe needing a whole one:
+    the cover ceils units, so a fractional draw would buy the same pack anyway
+    while claiming a saving."""
+    index = _pantry_index(unit_kind="count", each_to_grams=100.0)
+    built = B.build_basket(
+        index, [B.Selection(1, 2)], pantry={KEY_RICE: B.Demand(grams=150.0, units=1.5)}
+    )
+    line = built.lines[0]
+    assert line.pantry_qty == 1.5
+    assert line.need_qty == pytest.approx(1.5)
+
+
+def test_an_empty_cupboard_changes_nothing():
+    index = _pantry_index()
+    plain = B.build_basket(index, [B.Selection(1, 2)])
+    with_empty = B.build_basket(index, [B.Selection(1, 2)], pantry={})
+    assert with_empty.cost == plain.cost
+    assert with_empty.lines[0].pantry_g == 0.0
+    assert not with_empty.lines[0].from_pantry
+
+
+def test_a_staple_is_never_drawn_from_the_cupboard():
+    """It is already assumed owned, so the basket never bought it and there is
+    nothing to have a remainder of."""
+    ing = Ingredient(
+        key=KEY_SALT, name="Salt", pantry_staple=True, packs=(pack(500, 0.60),)
+    )
+    need = Need(key=KEY_SALT, display_name="Salt", grams=5.0)
+    index = PlanIndex(
+        ingredients={KEY_SALT: ing},
+        recipes={1: PlanRecipe(id=1, name="Rice Bowl", base_yield=2, needs=(need,))},
+    )
+    built = B.build_basket(
+        index, [B.Selection(1, 2)], pantry={KEY_SALT: B.Demand(grams=400.0)}
+    )
+    assert built.staples == ["Salt"]
+    assert built.lines == []

@@ -45,7 +45,7 @@ from app.api.planner import (
     _stock_checked_at,
     candidate_skus,
 )
-from app.api.schedule import pack_shortfall_tolerance_pct
+from app.api.schedule import cadence_weeks, pack_shortfall_tolerance_pct
 from app.api.schemas import (
     BasketIn,
     CartBasketOut,
@@ -63,7 +63,10 @@ from app.cart.ledger import read_ledger, write_ledger
 from app.cart.merge import CartLedger, PushLine, basket_targets
 from app.db import retailer_accounts
 from app.db.models import Product, RetailerAccount, User
-from app.planner.basket import Basket, Selection, build_basket
+from app.pantry import store as pantry_store
+from app.pantry.harvest import lots_from_basket
+from app.pantry.model import Quantity
+from app.planner.basket import Basket, Demand, Selection, build_basket
 from app.planner.index import PlanIndex
 
 log = logging.getLogger(__name__)
@@ -267,6 +270,7 @@ def _rebuild(
     overrides: dict[str, str] | None = None,
     snap_overrides: dict[str, bool] | None = None,
     shortfall_tolerance_pct: float = 10.0,
+    pantry: dict[str, Demand] | None = None,
 ) -> tuple[PlanIndex, Basket]:
     """Price the week at the shop it is about to be pushed to.
 
@@ -281,7 +285,39 @@ def _rebuild(
         pack_overrides=overrides,
         snap_overrides=snap_overrides,
         pack_shortfall_tolerance_pct=shortfall_tolerance_pct,
+        pantry=pantry,
     )
+
+
+def _cupboard(
+    factory: sessionmaker[Session],
+    session: Session,
+    user: User,
+    retailer: str,
+    week_start: str | None,
+) -> tuple[dict[str, Quantity], dict[str, Demand]]:
+    """The cupboard read a basket build spends, in both shapes it is needed in.
+
+    Gated on the week label: a push with no week is not attributable to a shop,
+    so it neither spends the cupboard nor deposits into it — the two have to
+    move together or a draw would never be repaid.
+
+    Returns ``(held, pantry)`` — the raw quantities the harvest needs, and the
+    same figures as the demand type :func:`build_basket` subtracts.
+    """
+    if not week_start:
+        return {}, {}
+    held = pantry_store.read_pantry(
+        factory,
+        user_id=user.id,
+        retailer=retailer,
+        target_week=week_start,
+        cadence_weeks=cadence_weeks(session, user.id),
+    )
+    return held, {
+        key: Demand(grams=quantity.grams, units=quantity.units)
+        for key, quantity in held.items()
+    }
 
 
 def _refresh_basket_stock(
@@ -502,9 +538,10 @@ def plan(
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
     tolerance = pack_shortfall_tolerance_pct(session, user.id)
+    _, pantry = _cupboard(factory, session, user, adapter.retailer, body.week_start)
     _, basket = _rebuild(
         factory, adapter.retailer, recipe_ids, csv_path, selections,
-        body.pack_overrides, body.snap_overrides, tolerance,
+        body.pack_overrides, body.snap_overrides, tolerance, pantry,
     )
     ledger = read_ledger(factory, account_id=account_id, retailer=adapter.retailer)
     owned_item_keys = set(body.owned_item_keys)
@@ -557,11 +594,13 @@ def push(
     _require_curated(session, recipe_ids)
     selections = [_planner_selection(selection) for selection in body.selections]
     tolerance = pack_shortfall_tolerance_pct(session, user.id)
+    user_cadence = cadence_weeks(session, user.id)
+    held, pantry = _cupboard(factory, session, user, adapter.retailer, body.week_start)
 
     def rebuild() -> tuple[PlanIndex, Basket]:
         return _rebuild(
             factory, adapter.retailer, recipe_ids, csv_path, selections,
-            body.pack_overrides, body.snap_overrides, tolerance,
+            body.pack_overrides, body.snap_overrides, tolerance, pantry,
         )
 
     index, basket = rebuild()
@@ -605,6 +644,34 @@ def push(
         )
 
     pushed = result.basket or basket
+    if body.week_start:
+        # The push succeeded, so the shop is on record and the cupboard is
+        # re-measured from what was actually bought. After the lock: these are
+        # this user's rows, not the shared cart.
+        pantry_store.record_push(
+            factory,
+            user_id=user.id,
+            retailer=adapter.retailer,
+            week_start=body.week_start,
+        )
+        pantry_store.deposit(
+            factory,
+            lots_from_basket(
+                pushed,
+                held=held,
+                prior_salvage=pantry_store.live_salvages(
+                    factory,
+                    user_id=user.id,
+                    retailer=adapter.retailer,
+                    before_week=body.week_start,
+                ),
+                owned_item_keys=set(body.owned_item_keys),
+            ),
+            user_id=user.id,
+            retailer=adapter.retailer,
+            week_start=body.week_start,
+            cadence_weeks=user_cadence,
+        )
     return PushResultOut(
         applied=_out_lines(factory, adapter.retailer, result.applied),
         dropped=_out_lines(factory, adapter.retailer, result.dropped),

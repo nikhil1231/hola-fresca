@@ -1,10 +1,10 @@
 """SQLAlchemy models for the recipe library and scrape bookkeeping.
 
-Only the scraper's slice of the schema lives here for now: canonical recipes
-plus the tables that record the state of the scrape pipeline. The planner,
-pantry and basket domains will add their own tables later. Where a future
-phase will need a foreign key that does not exist yet (canonical ingredient
-resolution, in particular), the column is present but nullable.
+This started as the scraper's slice alone — canonical recipes plus the tables
+recording the state of the scrape pipeline — and the planner, basket and pantry
+domains have since added their own. Where a future phase will need a foreign key
+that does not exist yet (canonical ingredient resolution, in particular), the
+column is present but nullable.
 
 The schema is in two halves, and which half a table belongs to is the question
 worth asking of any new one. The **catalogue** — recipes, products, ingredient
@@ -1011,6 +1011,153 @@ class PlanWeekItem(Base):
     snapped: Mapped[bool] = mapped_column(Integer, default=0)
     owned: Mapped[bool] = mapped_column(Integer, default=0)
 
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PlanWeekPush(Base):
+    """A shop happened: this week's basket was pushed to this retailer's cart.
+
+    The nearest thing to evidence that the food was actually bought. Nothing in
+    the app watches a delivery arrive, so a push — a deliberate act that fills a
+    real trolley — is the last observable point in the chain, and it is what
+    decides whether a finished week's recipes are assumed cooked and whether its
+    leftovers are allowed into :class:`PantryLot`.
+
+    Deliberately not a column on :class:`PlanWeek`. That table is an override of
+    the cadence and is pruned once a week falls out of the displayed history;
+    this is a record of something that happened, it is per-retailer, and it has
+    to outlive the window the schedule page happens to show.
+    """
+
+    __tablename__ = "plan_week_pushes"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "retailer", "week_start", name="uq_plan_week_push_user_retailer_week"
+        ),
+        Index("ix_plan_week_push_user_week", "user_id", "week_start"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    retailer: Mapped[str] = mapped_column(String(64), default="ocado", index=True)
+    week_start: Mapped[str] = mapped_column(String(16), index=True)
+
+    pushed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PlanCookMark(Base):
+    """"I did not cook this one", or "I did after all".
+
+    Cooking is assumed rather than recorded: a recipe still in the plan when its
+    week ends counts as cooked, provided the week was shopped for. So a row here
+    exists only where the assumption is wrong, the same way an untouched
+    :class:`PlanWeek` stores nothing and means "as the cadence says".
+
+    No retailer. Which shop the ingredients came from has no bearing on whether
+    the dish got made.
+    """
+
+    __tablename__ = "plan_cook_marks"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "week_start", "recipe_id", name="uq_plan_cook_mark_user_week_recipe"
+        ),
+        Index("ix_plan_cook_mark_user_week", "user_id", "week_start"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    week_start: Mapped[str] = mapped_column(String(16), index=True)
+    recipe_id: Mapped[int] = mapped_column(
+        ForeignKey("recipes.id", ondelete="CASCADE"), index=True
+    )
+
+    cooked: Mapped[bool] = mapped_column(Integer, default=0)
+    marked_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PantryLot(Base):
+    """What one shop left in the cupboard, for one ingredient.
+
+    The planner buys packs, not quantities, so every week ends with remainders —
+    600 g of a kilo of rice, two tins out of four. Until now they were priced by
+    :mod:`app.planner.waste` and then forgotten, and the next shop bought the
+    rice again.
+
+    **Only the cupboard.** Nothing is admitted below
+    :data:`app.pantry.model.PANTRY_MIN_SALVAGE`, which is the same salvage figure
+    the waste model already scores on. That is not caution for its own sake: the
+    ingredients whose stock would drift fastest — the chiller, the bakery — are
+    exactly the ones the planner already values at nothing by the next shop, so
+    excluding them costs almost no money and removes almost all of the error.
+
+    **What is held is derived, not stored.** ``available`` is everything in the
+    cupboard after that shop (whatever was carried in, plus the capacity actually
+    bought), and ``contributions_json`` is what each of the week's recipes was
+    going to take out of it — ``{recipe_id: {"g": float, "qty": float|None}}``,
+    lifted from :attr:`app.planner.basket.BasketLine.contributions`. Remaining is
+    ``available`` minus the recipes marked cooked, so unticking one on the Past
+    recipes page puts its share back without a second write.
+
+    ``salvage`` is copied from the cover at push time rather than looked up when
+    read: the product's category and stated shelf life can change under a row
+    that is meant to describe a bag already sitting in the cupboard.
+    """
+
+    __tablename__ = "pantry_lots"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "retailer",
+            "ingredient_key",
+            "week_start",
+            name="uq_pantry_lot_user_retailer_key_week",
+        ),
+        Index("ix_pantry_lot_user_retailer", "user_id", "retailer"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    retailer: Mapped[str] = mapped_column(String(64), default="ocado", index=True)
+    ingredient_key: Mapped[str] = mapped_column(String(255), index=True)
+    #: The shop this lot came out of, and the point decay is measured from.
+    week_start: Mapped[str] = mapped_column(String(16), index=True)
+
+    ingredient_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    available_g: Mapped[float] = mapped_column(Float, default=0.0)
+    available_qty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_kind: Mapped[str] = mapped_column(String(16), default="mass")
+    salvage: Mapped[float] = mapped_column(Float, default=0.0)
+    contributions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: Retires a lot from every read. Ordinarily NULL: shadowing is positional —
+    #: a read takes the newest lot per ingredient from before the week it is
+    #: shopping for, so a fresh deposit hides older rows without writing to
+    #: them, and a re-push of the same week still reads the cupboard the first
+    #: push saw. Old rows stay for the record of what a past week bought and
+    #: left, and are pruned once they fall past the trust horizon.
+    #:
+    #: A consequence worth naming: unticking a recipe from a week whose lot has
+    #: since been shadowed credits nothing back. The correction arrives after
+    #: the shop it would have changed, and the next push re-bases the cupboard
+    #: from what was actually bought, so the error does not survive a second
+    #: shop.
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: "I have run out of this" — the one correction that is always believed.
+    emptied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: "Yes, this is still in the cupboard", which restarts the decay clock.
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: The week ``confirmed_at`` was said in, since decay counts shops rather
+    #: than days and a timestamp alone cannot be converted back into one.
+    confirmed_week_start: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 

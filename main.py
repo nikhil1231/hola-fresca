@@ -15,6 +15,7 @@ from app.api.account import router as account_router
 from app.api.cart import router as cart_router
 from app.api.mapping import router as mapping_router
 from app.api.ocado import router as ocado_router
+from app.api.pantry import router as pantry_router
 from app.api.plan import router as plan_router
 from app.api.planner import router as planner_router
 from app.api.recipes import router as recipes_router
@@ -68,6 +69,7 @@ app.include_router(cart_router)
 app.include_router(ocado_router)
 app.include_router(schedule_router)
 app.include_router(plan_router)
+app.include_router(pantry_router)
 app.include_router(retailers_router)
 
 # Windows can report Vite's module bundles as text/plain via the registry-backed

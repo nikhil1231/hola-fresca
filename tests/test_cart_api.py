@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 import main
+from app import schedule as sched
 from app.api import cart as cart_api
 from app.api.cart import get_cart_adapter
 from app.api.deps import get_current_user, get_session_factory
@@ -388,3 +389,93 @@ def test_rebuild_prices_the_week_at_the_shop_it_will_be_pushed_to(monkeypatch):
 
     assert cart_api._rebuild(object(), "sainsburys", [31, 32], None, []) == (index, basket)
     assert requested == [([31, 32], "sainsburys")]
+
+
+# --- what a push leaves in the cupboard ---------------------------------------
+
+def _pantry_basket():
+    """One ambient line and one chilled one, both bought with a remainder."""
+    from app.planner.basket import BasketContribution, BasketLine, Cover, PackChoice
+    from app.planner.index import Pack
+
+    def line(key, name, salvage):
+        chosen = Pack(
+            sku=f"sku-{key}", product_name=name, capacity_g=1000.0, price=2.0,
+            salvage=salvage, rank=1, match_type="exact", pack_size_raw="1kg",
+        )
+        return BasketLine(
+            key=key, name=name, need_g=300.0,
+            cover=Cover(
+                choices=(PackChoice(pack=chosen, count=1),), need_g=300.0,
+                capacity_g=1000.0, cost=2.0, leftover_g=700.0, waste_gbp=0.1,
+                salvage=salvage,
+            ),
+            contributions=(
+                BasketContribution(
+                    recipe_id=7, recipe_name="Rice Bowl", grams=300.0,
+                    quantity=None, quantity_unit="g",
+                ),
+            ),
+        )
+
+    return Basket(lines=[
+        line("name:rice", "Basmati Rice", 0.85),
+        line("name:chicken", "Chicken Thighs", 0.15),
+    ])
+
+
+def test_a_push_records_the_shop_and_stocks_the_cupboard(connected, monkeypatch):
+    """The push is the evidence: nothing here watches a delivery, so a basket
+    reaching a real trolley is the last observable point in the chain."""
+    from app.db.models import PantryLot, PlanWeekPush
+
+    basket = _pantry_basket()
+    monkeypatch.setattr(cart_api, "_load_planner_index", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(cart_api, "build_basket", lambda *a, **k: basket)
+    week = sched.format_date(sched.upcoming_week_start())
+
+    response = connected.post(
+        "/api/cart/ocado/basket/push", json={"selections": [], "week_start": week}
+    )
+    assert response.status_code == 200
+
+    with get_session_factory()() as session:
+        pushes = session.scalars(select(PlanWeekPush)).all()
+        lots = session.scalars(select(PantryLot)).all()
+
+    assert [(p.retailer, p.week_start) for p in pushes] == [("ocado", week)]
+    # Only the ambient line: the chiller would drift faster than it would save.
+    assert [(lot.ingredient_key, lot.available_g) for lot in lots] == [
+        ("name:rice", 1000.0)
+    ]
+
+
+def test_a_push_with_no_week_leaves_the_cupboard_alone(connected, monkeypatch):
+    """A draw and a deposit have to move together, and neither can be attributed
+    to a shop that has no week."""
+    from app.db.models import PantryLot
+
+    monkeypatch.setattr(cart_api, "_load_planner_index", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(cart_api, "build_basket", lambda *a, **k: _pantry_basket())
+
+    connected.post("/api/cart/ocado/basket/push", json={"selections": []})
+
+    with get_session_factory()() as session:
+        assert session.scalars(select(PantryLot)).all() == []
+
+
+def test_an_owned_line_is_not_stocked(connected, monkeypatch):
+    """"I already have it" says nothing about how much."""
+    from app.db.models import PantryLot
+
+    monkeypatch.setattr(cart_api, "_load_planner_index", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(cart_api, "build_basket", lambda *a, **k: _pantry_basket())
+    week = sched.format_date(sched.upcoming_week_start())
+
+    connected.post(
+        "/api/cart/ocado/basket/push",
+        json={"selections": [], "week_start": week, "owned_item_keys": ["name:rice"]},
+    )
+
+    with get_session_factory()() as session:
+        assert session.scalars(select(PantryLot)).all() == []

@@ -92,6 +92,10 @@ class Cover:
     capacity_qty: float | None = None
     leftover_qty: float | None = None
     substitution: Substitution | None = None
+    #: Capacity-weighted salvage of the packs chosen. Already priced into
+    #: ``waste_gbp``; carried separately because the pantry needs it raw — a lot
+    #: deposited from this cover decays on the salvage of what was bought.
+    salvage: float = 0.0
 
     @property
     def score(self) -> float:
@@ -139,6 +143,7 @@ def _score_multiset(
         need_qty=need_qty,
         capacity_qty=capacity_qty,
         leftover_qty=leftover_qty,
+        salvage=salvage,
     )
 
 
@@ -810,6 +815,17 @@ class BasketLine:
     options: tuple[PackOption, ...] = ()
     snap: SnapOption | None = None
     snapped: bool = False
+    #: What the cupboard supplied toward this line, already subtracted from
+    #: ``need_g``/``need_qty`` before the cover was chosen. The full recipe
+    #: demand is the sum of the two; kept apart so the page can say "300 g from
+    #: the cupboard" without re-deriving it.
+    pantry_g: float = 0.0
+    pantry_qty: float | None = None
+
+    @property
+    def from_pantry(self) -> bool:
+        """Some of this line's demand was met without buying anything."""
+        return self.pantry_g > 0 or bool(self.pantry_qty)
 
     @property
     def cost(self) -> float:
@@ -835,8 +851,17 @@ class BasketLine:
 
     @property
     def trace(self) -> bool:
-        """A whole pack bought to satisfy a trace demand - see ``TRACE_NEED_G``."""
-        return self.unit_kind != "count" and self.need_g <= TRACE_NEED_G
+        """A whole pack bought to satisfy a trace demand - see ``TRACE_NEED_G``.
+
+        A line with no cover bought no pack, so it cannot be one however small
+        its demand: a cupboard line sits at a need of zero, and reading that as
+        "a whole pack for a pinch" is exactly backwards.
+        """
+        return (
+            self.cover is not None
+            and self.unit_kind != "count"
+            and self.need_g <= TRACE_NEED_G
+        )
 
     @property
     def external(self) -> bool:
@@ -906,6 +931,11 @@ class Basket:
     def external_lines(self) -> list[BasketLine]:
         """Sourced by hand elsewhere - still costed, just not in the order."""
         return [line for line in self.lines if line.external]
+
+    @property
+    def pantry_lines(self) -> list[BasketLine]:
+        """Lines the cupboard made smaller or removed entirely."""
+        return [line for line in self.lines if line.from_pantry]
 
 
 def aggregate_needs(
@@ -1076,6 +1106,41 @@ def _snap_option(
     return max(candidates, key=lambda option: (option.snapped_need_g, option.saving_gbp), default=None)
 
 
+def _draw_from_pantry(
+    ingredient: Ingredient, demand: Demand, held: Demand
+) -> tuple[Demand, Demand | None]:
+    """Meet what demand the cupboard can, returning (remaining, drawn).
+
+    Count ingredients are drawn in units with grams scaled alongside for
+    display; mass ingredients in grams. The cupboard is a lower bound on what is
+    actually there, so drawing up to it never over-promises more than the pantry
+    model already does.
+    """
+    if ingredient.unit_kind == "count":
+        if not demand.units or not held.units:
+            return demand, None
+        take = min(demand.units, held.units)
+        if take <= 0:
+            return demand, None
+        fraction = take / demand.units
+        drawn = Demand(grams=demand.grams * fraction, units=take)
+        return (
+            Demand(grams=demand.grams - drawn.grams, units=demand.units - take),
+            drawn,
+        )
+    take_g = min(demand.grams, held.grams)
+    if take_g <= 0:
+        return demand, None
+    return Demand(grams=demand.grams - take_g, units=demand.units), Demand(grams=take_g)
+
+
+def _demand_met(ingredient: Ingredient, demand: Demand) -> bool:
+    """Nothing left to buy once the cupboard has taken its share."""
+    if ingredient.unit_kind == "count":
+        return (demand.units or 0.0) <= COUNT_CEIL_EPSILON
+    return demand.grams <= 0.0
+
+
 def build_basket(
     index: PlanIndex,
     selections: Iterable[Selection],
@@ -1085,6 +1150,7 @@ def build_basket(
     snap_overrides: dict[str, bool] | None = None,
     pack_preferences: dict[str, str] | None = None,
     pack_shortfall_tolerance_pct: float = DEFAULT_PACK_SHORTFALL_TOLERANCE_PCT,
+    pantry: dict[str, Demand] | None = None,
 ) -> Basket:
     """Price a week's recipes: one pack decision per canonical ingredient.
 
@@ -1099,6 +1165,12 @@ def build_basket(
     keeps them out of :attr:`PlanIndex.cover_cache`'s blind spot — the cache is
     keyed on the chosen sku, so two users with different standing packs get
     different entries rather than each other's.
+
+    ``pantry`` is what the cupboard already holds, ``{ingredient_key: Demand}``
+    from :func:`app.pantry.store.read_pantry`, and is spent before anything is
+    bought. Per-user like the preferences, and for the same reason — it must
+    never reach the shared index. Cover caching is unaffected: a draw only
+    changes the demand a cover is asked for, and demand is already in the key.
     """
     selections = list(selections)
     plan_size = len(selections)
@@ -1117,12 +1189,52 @@ def build_basket(
         if ingredient.pantry_staple and not include_staples:
             basket.staples.append(label)
             continue
+        line_contributions = tuple(
+            BasketContribution(
+                recipe_id=c.recipe_id,
+                recipe_name=c.recipe_name,
+                grams=round(c.grams, 1),
+                quantity=round(c.quantity, 3) if c.quantity is not None else None,
+                quantity_unit=c.quantity_unit,
+            )
+            for c in sorted(contributions.get(key, {}).values(), key=lambda c: c.recipe_id)
+        )
+
+        # Before the shoppable check, deliberately: an ingredient the cupboard
+        # already covers does not need the shop to have any, so being sold out
+        # or unpriceable stops being a gap in the week rather than staying one.
+        drawn = None
+        held = pantry.get(key) if pantry else None
+        if held is not None:
+            demand, drawn = _draw_from_pantry(ingredient, demand, held)
+        if drawn is not None and _demand_met(ingredient, demand):
+            # The whole line comes out of the cupboard: no cover, no cost, and
+            # the note is what the page shows in place of a pack.
+            basket.lines.append(
+                BasketLine(
+                    key=key,
+                    name=label,
+                    need_g=0.0,
+                    note="in the cupboard",
+                    unit_kind=ingredient.unit_kind,
+                    need_qty=0.0 if ingredient.unit_kind == "count" else None,
+                    quantity_unit="unit" if ingredient.unit_kind == "count" else "g",
+                    pantry_g=round(drawn.grams, 1),
+                    pantry_qty=(
+                        round(drawn.units, 3) if drawn.units is not None else None
+                    ),
+                    contributions=line_contributions,
+                )
+            )
+            continue
+
         if not ingredient.shoppable:
             if ingredient.sold_out:
                 basket.sold_out.append(label)
             else:
                 basket.unpriceable.append(label)
             continue
+
         week_choice = pack_overrides.get(key)
         standing = pack_preferences.get(key)
         override = chosen_sku(week_choice, standing)
@@ -1150,16 +1262,13 @@ def build_basket(
             quantity_unit="unit" if ingredient.unit_kind == "count" else "g",
             snap=snap,
             snapped=snapped,
-            contributions=tuple(
-                BasketContribution(
-                    recipe_id=c.recipe_id,
-                    recipe_name=c.recipe_name,
-                    grams=round(c.grams, 1),
-                    quantity=round(c.quantity, 3) if c.quantity is not None else None,
-                    quantity_unit=c.quantity_unit,
-                )
-                for c in sorted(contributions.get(key, {}).values(), key=lambda c: c.recipe_id)
+            pantry_g=round(drawn.grams, 1) if drawn is not None else 0.0,
+            pantry_qty=(
+                round(drawn.units, 3)
+                if drawn is not None and drawn.units is not None
+                else None
             ),
+            contributions=line_contributions,
         )
         if cover is None:
             line.note = "no pack covers this demand"

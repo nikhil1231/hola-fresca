@@ -41,7 +41,7 @@ from app.api.schemas import (
     StockRefreshOut,
     SuggestionsIn,
 )
-from app.api.schedule import pack_shortfall_tolerance_pct
+from app.api.schedule import cadence_weeks, pack_shortfall_tolerance_pct
 from app import catalogue
 from app.db.models import (
     IngredientMapping,
@@ -49,9 +49,11 @@ from app.db.models import (
     User,
     UserRetailerPriceRefresh,
 )
+from app.pantry import store as pantry_store
 from app.planner.basket import (
     Basket,
     BasketLine,
+    Demand,
     Selection,
     build_basket,
 )
@@ -224,6 +226,8 @@ def _line_out(line: BasketLine) -> BasketLineOut:
         substitution=_substitution_out(line),
         options=[_option_out(option) for option in line.options],
         choices=choices,
+        pantry_g=line.pantry_g,
+        pantry_qty=line.pantry_qty,
         contributions=[
             BasketContributionOut(
                 recipe_id=contribution.recipe_id,
@@ -274,6 +278,33 @@ def _load_planner_index(
     )
 
 
+def _pantry_demands(
+    factory: sessionmaker[Session],
+    session: Session,
+    user: User,
+    retailer: str,
+    week_start: str | None,
+) -> dict[str, Demand]:
+    """The cupboard as :func:`build_basket` spends it, or nothing without a week.
+
+    Gated on the week label for the same reason the push is: a basket priced for
+    no week in particular cannot say which shop's cupboard it would be spending.
+    """
+    if not week_start:
+        return {}
+    held = pantry_store.read_pantry(
+        factory,
+        user_id=user.id,
+        retailer=retailer,
+        target_week=week_start,
+        cadence_weeks=cadence_weeks(session, user.id),
+    )
+    return {
+        key: Demand(grams=quantity.grams, units=quantity.units)
+        for key, quantity in held.items()
+    }
+
+
 @router.post("/basket", response_model=BasketOut)
 def basket(
     body: BasketIn,
@@ -297,6 +328,7 @@ def basket(
         snap_overrides=body.snap_overrides,
         pack_preferences=pack_preferences(session, user.id, retailer=retailer),
         pack_shortfall_tolerance_pct=pack_shortfall_tolerance_pct(session, user.id),
+        pantry=_pantry_demands(factory, session, user, retailer, body.week_start),
     ))
 
 

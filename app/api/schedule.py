@@ -66,6 +66,15 @@ def pack_shortfall_tolerance_pct(session: Session, user_id: int) -> float:
     return float(_settings_row(session, user_id).pack_shortfall_tolerance_pct)
 
 
+def cadence_weeks(session: Session, user_id: int) -> int:
+    """This user's shop rhythm, creating the defaults if necessary.
+
+    The pantry counts decay in shops rather than days, so anything reading it
+    needs the cadence to convert a pair of week labels into elapsed cycles.
+    """
+    return int(_settings_row(session, user_id).cadence_weeks)
+
+
 def _week_out(week: sched.ScheduleWeek) -> ScheduleWeekOut:
     return ScheduleWeekOut(
         week_start=sched.format_date(week.week_start),

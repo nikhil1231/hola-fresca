@@ -90,6 +90,15 @@ function formatQuantity(value, unit = 'g') {
   return formatGrams(value)
 }
 
+// What the cupboard took off this line. A line with nothing left to buy shows
+// this in place of a pack, so a missing price reads as "already have it" rather
+// than as something the planner failed to cover.
+function pantryLabel(line) {
+  const held = line.quantity_unit === 'unit' ? line.pantry_qty : line.pantry_g
+  if (!held) return null
+  return `${formatQuantity(held, line.quantity_unit)} in the cupboard`
+}
+
 function formatDelta(value) {
   const rounded = Math.round((value ?? 0) * 100) / 100
   if (rounded === 0) return 'same price'
@@ -673,6 +682,17 @@ function LineTable({
                                 {heldOption.pack_size_raw || 'chosen size'}
                               </Badge>
                             )}
+                            {pantryLabel(line) && (
+                              <Tooltip
+                                multiline
+                                w={240}
+                                label={`${pantryLabel(line)} from an earlier shop. Correct it on the Past recipes page.`}
+                              >
+                                <Badge size="xs" color="teal" variant="light">
+                                  {pantryLabel(line)}
+                                </Badge>
+                              </Tooltip>
+                            )}
                           </Group>
                           {line.contributions?.length > 0 && (
                             <Text size="xs" c="dimmed">
@@ -1046,9 +1066,12 @@ function MobileLineCard({
   const packRecommendation = (line.options ?? []).find((option) => option.recommended && !option.chosen)
   const heldOption = (line.options ?? []).find((option) => option.pinned || option.this_week)
   const canSwap = (line.options?.length ?? 0) > 1
-  const summary = `${formatQuantity(line.need_qty ?? line.need_g, line.quantity_unit)} · ${packsText(
-    line,
-  )} → ${formatQuantity(line.leftover_qty ?? line.leftover_g, line.quantity_unit)} left`
+  const heldLabel = pantryLabel(line)
+  const summary = line.choices?.length
+    ? `${formatQuantity(line.need_qty ?? line.need_g, line.quantity_unit)} · ${packsText(
+        line,
+      )} → ${formatQuantity(line.leftover_qty ?? line.leftover_g, line.quantity_unit)} left`
+    : (heldLabel ?? packsText(line))
 
   return (
     <div
@@ -1072,6 +1095,9 @@ function MobileLineCard({
           <Text className={classes.mobileLineName}>{line.name}</Text>
           {heldOption && (
             <span className={classes.packTag}>{heldOption.pack_size_raw || 'chosen'}</span>
+          )}
+          {heldLabel && line.choices?.length > 0 && (
+            <span className={classes.packTag}>{heldLabel}</span>
           )}
           {line.trace && <span className={classes.traceTag}>trace</span>}
         </Group>
@@ -1287,6 +1313,7 @@ export default function BasketPage() {
     selections,
     packOverrides,
     snapOverrides,
+    weekStart,
   )
   const onlineLines = useMemo(
     () => data?.lines?.filter((line) => !line.external) ?? [],

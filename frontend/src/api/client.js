@@ -75,8 +75,15 @@ export function fetchRecipes(filters, page, pageSize = 24, { offset, excludeIds 
   return getJSON(`/api/recipes?${params.toString()}`)
 }
 
-export function fetchPlannerBasket(selections, packOverrides = {}, snapOverrides = {}) {
-  return postJSON('/api/planner/basket', { selections, pack_overrides: packOverrides, snap_overrides: snapOverrides })
+// week_start is what lets the backend spend the pantry: without a week there is
+// no "before this shop" to read the cupboard at, so it prices from scratch.
+export function fetchPlannerBasket(selections, packOverrides = {}, snapOverrides = {}, weekStart = null) {
+  return postJSON('/api/planner/basket', {
+    selections,
+    pack_overrides: packOverrides,
+    snap_overrides: snapOverrides,
+    week_start: weekStart ?? undefined,
+  })
 }
 
 // Re-reads stock and price at the active shop for every product this basket

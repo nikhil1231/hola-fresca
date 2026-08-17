@@ -48,6 +48,9 @@ export default function Header() {
               <NavLink to="/basket" className={navClass}>
                 Basket
               </NavLink>
+              <NavLink to="/past" className={navClass}>
+                Past
+              </NavLink>
               {/* Catalogue editing is admin-only, so a second user is not
                   offered a tab whose every action answers 403. */}
               {canEditCatalogue && (
@@ -123,6 +126,9 @@ export default function Header() {
           </NavLink>
           <NavLink to="/basket" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Basket
+          </NavLink>
+          <NavLink to="/past" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
+            Past recipes
           </NavLink>
           {canEditCatalogue && (
             <NavLink to="/mapping" className={mobileNavClass} onClick={() => setMenuOpen(false)}>

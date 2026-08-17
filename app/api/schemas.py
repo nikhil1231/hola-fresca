@@ -448,6 +448,61 @@ class PlanOut(BaseModel):
     weeks: list[PlanWeekOut] = Field(default_factory=list)
 
 
+# --- What actually happened: cooked recipes and the cupboard -----------------
+
+class CookedRecipeOut(BaseModel):
+    recipe_id: int
+    cooked: bool
+    #: True when the answer is the user's own statement rather than the
+    #: assumption — the Past recipes page renders the two differently.
+    marked: bool = False
+
+
+class CookedWeekOut(BaseModel):
+    week_start: str
+    #: Whether this week's basket ever reached a cart. Unshopped weeks assume
+    #: nothing was cooked, and the page says why.
+    shopped: bool
+    recipes: list[CookedRecipeOut] = Field(default_factory=list)
+
+
+class CookedOut(BaseModel):
+    weeks: list[CookedWeekOut] = Field(default_factory=list)
+
+
+class CookMarkIn(BaseModel):
+    cooked: bool
+
+
+class PantryItemOut(BaseModel):
+    ingredient_key: str
+    name: str
+    #: The shop this lot came out of — provenance is what makes a claim about a
+    #: cupboard checkable.
+    week_start: str
+    unit_kind: str = "mass"
+    held_g: float
+    held_qty: float | None = None
+    bought_g: float
+    bought_qty: float | None = None
+    salvage: float
+    cycles_held: int
+    confirmed_week_start: str | None = None
+
+
+class PantryOut(BaseModel):
+    items: list[PantryItemOut] = Field(default_factory=list)
+    #: The week the holdings were decayed towards — the next shop.
+    target_week: str
+
+
+class PantryItemIn(BaseModel):
+    ingredient_key: str
+    #: ``False`` is "I have run out", ``True`` is "yes, still there" — the two
+    #: corrections the cupboard accepts, both believed outright.
+    present: bool
+
+
 class PlanEntryIn(BaseModel):
     recipe_id: int
     portions: int | None = Field(default=None, ge=1, le=20)
@@ -619,6 +674,10 @@ class BasketLineOut(BaseModel):
     contributions: list[BasketContributionOut] = Field(default_factory=list)
     snap: BasketSnapOut | None = None
     snapped: bool = False
+    #: What the cupboard supplied, already off ``need_g``/``need_qty``. A line
+    #: with a positive figure here and no packs was met without buying anything.
+    pantry_g: float = 0.0
+    pantry_qty: float | None = None
 
 
 class BasketOut(BaseModel):

@@ -30,13 +30,17 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, get_session
 from app.api.recipes import _library_condition, _personal_rating_map, _to_card, _wishlist_map
 from app.api.schemas import (
+    CookedOut,
+    CookedRecipeOut,
+    CookedWeekOut,
+    CookMarkIn,
     PlanEntryIn,
     PlanEntryOut,
     PlanEntryPatchIn,
@@ -48,7 +52,8 @@ from app.api.schemas import (
     ProteinModifierIn,
 )
 from app import schedule as sched
-from app.db.models import PlanSelection, PlanWeekItem, Recipe, User
+from app.db.models import PlanCookMark, PlanSelection, PlanWeekItem, Recipe, User
+from app.pantry import cooks
 from app.planner.cache import preserve_after_personal_write
 
 log = logging.getLogger(__name__)
@@ -269,6 +274,104 @@ def get_week(
     week_start = _require_week_start(week_start)
     plan = _plan_out(session, user.id, [week_start])
     return plan.weeks[0] if plan.weeks else PlanWeekOut(week_start=week_start)
+
+
+def _cooked_week_out(
+    session: Session, user_id: int, week_start: str
+) -> CookedWeekOut:
+    """One week's cooked answers, assumption and corrections resolved together."""
+    selected = session.scalars(
+        select(PlanSelection)
+        .where(
+            PlanSelection.user_id == user_id, PlanSelection.week_start == week_start
+        )
+        .order_by(PlanSelection.position, PlanSelection.id)
+    ).all()
+    shopped = cooks.was_shopped(session, user_id, week_start)
+    default = cooks.cooked_by_default(week_start, shopped=shopped)
+    overrides = cooks.marks(session, user_id, week_start)
+    return CookedWeekOut(
+        week_start=week_start,
+        shopped=shopped,
+        recipes=[
+            CookedRecipeOut(
+                recipe_id=row.recipe_id,
+                cooked=overrides.get(row.recipe_id, default),
+                marked=row.recipe_id in overrides,
+            )
+            for row in selected
+        ],
+    )
+
+
+@router.get("/cooked", response_model=CookedOut)
+def get_cooked(
+    week_start: list[str] = Query(default_factory=list),
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> CookedOut:
+    """Which of the asked-for weeks' recipes were cooked.
+
+    Assumed, mostly: a recipe still in the plan when its shopped-for week ended
+    counts as cooked, and rows in ``plan_cook_marks`` carry the corrections. The
+    ``marked`` flag says which answers are statements rather than assumptions,
+    so the page can show the difference.
+    """
+    weeks = [_require_week_start(value) for value in week_start]
+    return CookedOut(
+        weeks=[_cooked_week_out(session, user.id, week) for week in weeks]
+    )
+
+
+@router.put("/weeks/{week_start}/cooked/{recipe_id}", response_model=CookedWeekOut)
+def set_cooked(
+    week_start: str,
+    recipe_id: int,
+    body: CookMarkIn,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> CookedWeekOut:
+    """Say whether a recipe actually got made.
+
+    Deliberately not guarded by :func:`_require_editable_week`: the whole point
+    is correcting weeks that have been and gone. The mark is stored outright
+    rather than only when it differs from the assumption, because the assumption
+    moves — a week in progress defaults to "not cooked" and flips when it ends,
+    and a statement made before the flip must not evaporate in it.
+
+    What is refused is a week that has not started: nothing can have been cooked
+    from a shop that has not happened.
+    """
+    week_start = _require_week_start(week_start)
+    if sched.parse_date(week_start) > datetime.now().date():
+        raise HTTPException(
+            status_code=409,
+            detail=f"The week of {week_start} has not started, so nothing was cooked",
+        )
+    selected = session.scalar(
+        select(PlanSelection).where(
+            PlanSelection.user_id == user.id,
+            PlanSelection.week_start == week_start,
+            PlanSelection.recipe_id == recipe_id,
+        )
+    )
+    if selected is None:
+        raise HTTPException(
+            status_code=404, detail=f"Recipe {recipe_id} is not in the week of {week_start}"
+        )
+    row = session.scalar(
+        select(PlanCookMark).where(
+            PlanCookMark.user_id == user.id,
+            PlanCookMark.week_start == week_start,
+            PlanCookMark.recipe_id == recipe_id,
+        )
+    )
+    if row is None:
+        row = PlanCookMark(user_id=user.id, week_start=week_start, recipe_id=recipe_id)
+        session.add(row)
+    row.cooked = bool(body.cooked)
+    session.commit()
+    return _cooked_week_out(session, user.id, week_start)
 
 
 # --------------------------------------------------------------------------

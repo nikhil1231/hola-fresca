@@ -21,6 +21,7 @@ import MappingAliasesPage from './routes/MappingAliasesPage.jsx'
 import MappingManualPage from './routes/MappingManualPage.jsx'
 import MappingPage from './routes/MappingPage.jsx'
 import MappingReviewPage from './routes/MappingReviewPage.jsx'
+import PastRecipesPage from './routes/PastRecipesPage.jsx'
 
 // Before anything can issue a request, so no API call escapes unwrapped.
 installAccessSessionHandling()
@@ -42,6 +43,7 @@ createRoot(document.getElementById('root')).render(
               <Route index element={<HomePage />} />
               <Route path="browse" element={<BrowsePage />} />
               <Route path="basket" element={<BasketPage />} />
+              <Route path="past" element={<PastRecipesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="recipes/:id" element={<RecipeDetailPage />} />
               {/* The catalogue is shared, so editing it is not a personal act:

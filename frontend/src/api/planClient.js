@@ -72,3 +72,18 @@ export function setPlanWeekItem({ weekStart, ingredientKey, packSku, snapped, ow
 export function importPlan(weeks) {
   return request('/api/plan/import', { method: 'POST', body: { weeks } })
 }
+
+// Which of these weeks' recipes were cooked. Assumed by the backend from the
+// week having been shopped for and ended; `marked` flags the user's own answers.
+export function fetchCooked(weekStarts) {
+  const params = new URLSearchParams()
+  for (const weekStart of weekStarts) params.append('week_start', weekStart)
+  return request(`/api/plan/cooked?${params.toString()}`)
+}
+
+export function setCookedMark({ weekStart, recipeId, cooked }) {
+  return request(`${weekPath(weekStart)}/cooked/${recipeId}`, {
+    method: 'PUT',
+    body: { cooked },
+  })
+}
