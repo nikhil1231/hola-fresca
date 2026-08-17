@@ -96,7 +96,7 @@ function formatQuantity(value, unit = 'g') {
 function pantryLabel(line) {
   const held = line.quantity_unit === 'unit' ? line.pantry_qty : line.pantry_g
   if (!held) return null
-  return `${formatQuantity(held, line.quantity_unit)} in the cupboard`
+  return `${formatQuantity(held, line.quantity_unit)} in the pantry`
 }
 
 function formatDelta(value) {
@@ -686,7 +686,7 @@ function LineTable({
                               <Tooltip
                                 multiline
                                 w={240}
-                                label={`${pantryLabel(line)} from an earlier shop. Correct it on the Past recipes page.`}
+                                label={`${pantryLabel(line)} from an earlier shop. Correct it on the Pantry page.`}
                               >
                                 <Badge size="xs" color="teal" variant="light">
                                   {pantryLabel(line)}

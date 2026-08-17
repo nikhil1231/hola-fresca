@@ -13,6 +13,7 @@ other's plan.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 from sqlalchemy import select
@@ -65,7 +66,13 @@ def _live_rows(
         .order_by(PantryLot.week_start.desc())
     )
     if before_week is not None:
-        query = query.where(PantryLot.week_start < before_week)
+        # A row someone has spoken for is exempt. The restriction guards against
+        # a shop's own deposit being spent again inside the week that bought it;
+        # a stated figure describes the shelf as it is now, was not derived from
+        # any shop, and would otherwise be invisible on the page that set it.
+        query = query.where(
+            (PantryLot.week_start < before_week) | PantryLot.confirmed_at.is_not(None)
+        )
     newest: dict[str, PantryLot] = {}
     for row in session.scalars(query):
         newest.setdefault(row.ingredient_key, row)
@@ -376,8 +383,18 @@ def confirm(
     retailer: str | None = None,
     ingredient_key: str,
     week_start: str | None = None,
+    cadence_weeks: int = 1,
+    today: date | None = None,
 ) -> bool:
-    """"Yes, that is still in the cupboard." Restarts the decay clock."""
+    """"Yes, that is still in the cupboard." Restarts the decay clock.
+
+    Confirming is stating a quantity — the one on the page being confirmed. A
+    person clicking "still there" beside "595 g" is vouching for the 595 g, not
+    merely for the existence of some rice, so the figure is snapshotted and the
+    row becomes an ordinary statement. That keeps one kind of user-touched lot
+    rather than two, and means a confirmation cannot later be re-derived into a
+    different number than the one that was agreed to.
+    """
     retailer = retailer or DEFAULT_RETAILER
     week_start = week_start or sched.format_date(sched.week_start_for(date.today()))
     with factory() as session:
@@ -386,8 +403,114 @@ def confirm(
         )
         if row is None:
             return False
+        # Read as though it had never been emptied: "no, it is still there" is
+        # a retraction of the running-out, so the figure to vouch for is the one
+        # that stood before it.
+        quantity = model.held(
+            replace(_as_lot(row), emptied=False),
+            cooked_recipe_ids=cooks.cooked_recipe_ids(
+                session, user_id, row.week_start, today=today
+            ),
+            target_week=week_start,
+            cadence_weeks=cadence_weeks,
+        )
+        name = row.ingredient_name or ingredient_key
+        unit_kind = row.unit_kind or "mass"
+        salvage = row.salvage or 0.0
+    set_quantity(
+        factory,
+        user_id=user_id,
+        retailer=retailer,
+        ingredient_key=ingredient_key,
+        ingredient_name=name,
+        quantity=quantity,
+        salvage=salvage,
+        unit_kind=unit_kind,
+        week_start=week_start,
+    )
+    return True
+
+
+def set_quantity(
+    factory: sessionmaker[Session],
+    *,
+    user_id: int,
+    retailer: str | None = None,
+    ingredient_key: str,
+    ingredient_name: str,
+    quantity: Quantity,
+    salvage: float,
+    unit_kind: str = "mass",
+    week_start: str | None = None,
+) -> None:
+    """"There is exactly this much of it." Adds the row, or replaces the guess.
+
+    A stated quantity is the strongest evidence the cupboard ever gets, so it
+    supersedes the whole derivation rather than adjusting it: the contributions
+    are dropped, because what each of some past week's recipes was going to take
+    out of this lot has no bearing on a figure someone has just read off the
+    shelf. Confirming it in the current week restarts the decay clock, so the
+    amount stated is the amount the next shop sees.
+
+    The same call adds and edits. There is no meaningful difference between
+    stating a quantity for something the model had never heard of and stating
+    one for something it had guessed at — both are a person overruling it.
+    """
+    retailer = retailer or DEFAULT_RETAILER
+    week_start = week_start or sched.format_date(sched.week_start_for(date.today()))
+    now = _utcnow()
+    with factory() as session:
+        row = _live_row(
+            session, user_id=user_id, retailer=retailer, ingredient_key=ingredient_key
+        )
+        if row is None:
+            row = PantryLot(
+                user_id=user_id,
+                retailer=retailer,
+                ingredient_key=ingredient_key,
+                week_start=week_start,
+            )
+            session.add(row)
+        row.ingredient_name = ingredient_name
+        row.available_g = quantity.grams
+        row.available_qty = quantity.units
+        row.unit_kind = unit_kind
+        row.salvage = salvage
+        row.contributions_json = None
+        row.superseded_at = None
         row.emptied_at = None
-        row.confirmed_at = _utcnow()
+        row.confirmed_at = now
         row.confirmed_week_start = week_start
+        session.commit()
+
+
+def remove(
+    factory: sessionmaker[Session],
+    *,
+    user_id: int,
+    retailer: str | None = None,
+    ingredient_key: str,
+) -> bool:
+    """Take an ingredient out of the cupboard entirely.
+
+    Deletes rather than emptying, unlike :func:`empty`. The two say different
+    things: "I ran out" is a fact about the food that the record of the shop
+    should survive, while removing an entry says the row should not have been
+    there at all. Every lot for the key goes, including shadowed ones, so a
+    removed ingredient cannot be resurrected by an older shop's row.
+    """
+    retailer = retailer or DEFAULT_RETAILER
+    with factory() as session:
+        rows = session.scalars(
+            select(PantryLot).where(
+                PantryLot.user_id == user_id,
+                PantryLot.retailer == retailer,
+                PantryLot.ingredient_key == ingredient_key,
+            )
+        ).all()
+        if not rows:
+            return False
+        for row in rows:
+            session.delete(row)
         session.commit()
     return True

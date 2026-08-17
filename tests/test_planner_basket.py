@@ -1136,7 +1136,7 @@ def test_a_line_the_cupboard_covers_outright_buys_nothing():
     assert line.cover is None
     assert line.cost == 0.0
     assert line.pantry_g == 300.0  # only what the week actually wanted
-    assert line.note == "in the cupboard"
+    assert line.note == "in the pantry"
     assert built.cost == 0.0
 
 

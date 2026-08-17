@@ -7,11 +7,12 @@ week nobody shopped for consumes nothing.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import select
 
+from app import schedule as sched
 from app.db.models import (
     PantryLot,
     PlanCookMark,
@@ -422,8 +423,11 @@ def test_running_out_is_believed_and_confirming_restores_the_clock(factory, uid)
         factory, user_id=uid, retailer="ocado", target_week="2026-01-12",
         today=date(2026, 1, 13),
     )
-    # Confirmed in the target week itself, so nothing has decayed off it.
-    assert restored[KEY].grams == pytest.approx(1000.0)
+    # The figure vouched for is the one the page was showing — 1000 g decayed
+    # by the shop between the lot and the confirmation — not the amount that
+    # was originally bought. Confirming restarts the clock; it cannot wind it
+    # back and hand over grams that have already gone.
+    assert restored[KEY].grams == pytest.approx(850.0)
 
 
 def test_correcting_an_ingredient_with_nothing_held_reports_no_change(factory, uid):
@@ -474,3 +478,242 @@ def test_one_shops_cupboard_is_not_anothers(factory, uid):
         today=date(2026, 1, 6),
     )
     assert read == {}
+
+
+# --------------------------------------------------------------------------
+# Stating a quantity: adding, editing, and removing by hand
+# --------------------------------------------------------------------------
+
+def test_a_stated_quantity_replaces_the_guess_outright(factory, uid):
+    """A figure read off a shelf beats a derivation, so the contributions go:
+    what some past week's recipes were going to take out of this lot has no
+    bearing on a number someone has just looked at."""
+    with factory() as session:
+        rid = _recipe(session, "r1", "Rice Bowl")
+        session.add(PlanSelection(user_id=uid, week_start="2026-01-05", recipe_id=rid))
+        session.add(PlanWeekPush(user_id=uid, retailer="ocado", week_start="2026-01-05"))
+        session.commit()
+    _deposit(factory, uid, "2026-01-05", 1000.0, contributions={rid: Quantity(grams=300.0)})
+
+    store.set_quantity(
+        factory,
+        user_id=uid,
+        retailer="ocado",
+        ingredient_key=KEY,
+        ingredient_name="Basmati Rice",
+        quantity=Quantity(grams=420.0),
+        salvage=0.85,
+        week_start="2026-01-12",
+    )
+    read = store.read_pantry(
+        factory, user_id=uid, retailer="ocado", target_week="2026-01-12",
+        today=date(2026, 1, 13),
+    )
+    # Exactly what was said: no cooked share taken off, no decay yet.
+    assert read[KEY].grams == pytest.approx(420.0)
+
+
+def test_a_stated_quantity_still_decays_from_when_it_was_said(factory, uid):
+    _deposit(factory, uid, "2026-01-05", 1000.0)
+    store.set_quantity(
+        factory, user_id=uid, retailer="ocado", ingredient_key=KEY,
+        ingredient_name="Basmati Rice", quantity=Quantity(grams=400.0),
+        salvage=0.85, week_start="2026-01-12",
+    )
+    read = store.read_pantry(
+        factory, user_id=uid, retailer="ocado", target_week="2026-01-19",
+        today=date(2026, 1, 20),
+    )
+    assert read[KEY].grams == pytest.approx(340.0)  # 400 * 0.85
+
+
+def test_stating_a_quantity_for_something_new_adds_it(factory, uid):
+    """Adding and editing are the same act — a person overruling the model."""
+    store.set_quantity(
+        factory, user_id=uid, retailer="ocado", ingredient_key="name:gochujang",
+        ingredient_name="Gochujang", quantity=Quantity(grams=300.0),
+        salvage=0.85, week_start="2026-01-12",
+    )
+    read = store.read_pantry(
+        factory, user_id=uid, retailer="ocado", target_week="2026-01-12",
+        today=date(2026, 1, 13),
+    )
+    assert read["name:gochujang"].grams == pytest.approx(300.0)
+
+
+def test_a_stated_quantity_clears_a_previous_ran_out(factory, uid):
+    _deposit(factory, uid, "2026-01-05", 1000.0)
+    store.empty(factory, user_id=uid, retailer="ocado", ingredient_key=KEY)
+    store.set_quantity(
+        factory, user_id=uid, retailer="ocado", ingredient_key=KEY,
+        ingredient_name="Basmati Rice", quantity=Quantity(grams=250.0),
+        salvage=0.85, week_start="2026-01-12",
+    )
+    read = store.read_pantry(
+        factory, user_id=uid, retailer="ocado", target_week="2026-01-12",
+        today=date(2026, 1, 13),
+    )
+    assert read[KEY].grams == pytest.approx(250.0)
+
+
+def test_removing_takes_every_lot_so_an_older_shop_cannot_resurrect_it(factory, uid):
+    _deposit(factory, uid, "2026-01-05", 1000.0)
+    _deposit(factory, uid, "2026-01-12", 800.0)
+    assert store.remove(factory, user_id=uid, retailer="ocado", ingredient_key=KEY)
+    with factory() as session:
+        assert session.scalars(select(PantryLot)).all() == []
+    assert store.read_pantry(
+        factory, user_id=uid, retailer="ocado", target_week="2026-01-19",
+        today=date(2026, 1, 13),
+    ) == {}
+
+
+def test_removing_something_absent_reports_no_change(factory, uid):
+    assert not store.remove(
+        factory, user_id=uid, retailer="ocado", ingredient_key="name:nothing"
+    )
+
+
+def test_confirming_vouches_for_the_figure_on_the_page_not_the_original_pack(factory, uid):
+    """The distinction that keeps confirming honest: it restarts the decay clock
+    on what is left, rather than winding it back to what was bought."""
+    _deposit(factory, uid, "2026-01-05", 1000.0)
+    store.confirm(
+        factory, user_id=uid, retailer="ocado", ingredient_key=KEY,
+        week_start="2026-02-02",
+    )
+    with factory() as session:
+        row = session.scalar(select(PantryLot))
+    # Four shops' decay is past the horizon, so nothing survived to vouch for.
+    assert row.available_g == pytest.approx(0.0)
+    assert row.contributions_json is None
+
+
+def test_a_stated_quantity_shows_up_in_the_week_it_was_stated_in(factory, uid):
+    """A shop's own deposit is held back from the week that bought it, so it is
+    not spent twice. A statement is not a shop and must not be held back, or the
+    cupboard page would not show what it had just been told."""
+    week = "2026-01-12"
+    store.set_quantity(
+        factory, user_id=uid, retailer="ocado", ingredient_key=KEY,
+        ingredient_name="Basmati Rice", quantity=Quantity(grams=600.0),
+        salvage=0.85, week_start=week,
+    )
+    read = store.read_pantry(
+        factory, user_id=uid, retailer="ocado", target_week=week,
+        today=date(2026, 1, 13),
+    )
+    assert read[KEY].grams == pytest.approx(600.0)
+
+
+# --------------------------------------------------------------------------
+# The cupboard page's own endpoints
+# --------------------------------------------------------------------------
+
+@pytest.fixture
+def pantry_client(tmp_path):
+    """A client whose session and cupboard live in this test's own database."""
+    from fastapi.testclient import TestClient
+    from app.api.deps import get_session, get_session_factory
+    from main import app
+
+    engine = make_engine(tmp_path / "pantry_api.db")
+    init_db(engine)
+    made = make_session_factory(engine)
+
+    def override_session():
+        with made() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_session_factory] = lambda: made
+    with TestClient(app) as client:
+        yield client, made
+    app.dependency_overrides.clear()
+
+
+def _seed_lot(made, key, name, grams, week):
+    with made() as session:
+        uid = user_id(session)
+        session.add(
+            PantryLot(
+                user_id=uid, retailer="ocado", ingredient_key=key, week_start=week,
+                ingredient_name=name, available_g=grams, unit_kind="mass", salvage=0.85,
+            )
+        )
+        session.commit()
+
+
+def test_the_cupboard_comes_back_alphabetical(pantry_client):
+    """Neither alternative means anything to a reader: the quantities are in
+    different units and so do not compare, and the shop a lot came from says
+    when it was measured rather than how useful it is."""
+    client, made = pantry_client
+    week = sched.format_date(sched.upcoming_week_start() - timedelta(weeks=1))
+    for key, name in [
+        ("name:tomato puree", "Tomato Puree"),
+        ("name:basmati rice", "Basmati Rice"),
+        ("name:chickpeas", "chickpeas"),
+    ]:
+        _seed_lot(made, key, name, 1000.0, week)
+
+    body = client.get("/api/pantry").json()
+    # Case-insensitively, so a lower-cased name does not sort to the end.
+    assert [item["name"] for item in body["items"]] == [
+        "Basmati Rice", "chickpeas", "Tomato Puree"
+    ]
+
+
+def test_removing_an_item_takes_it_out_and_returns_the_rest(pantry_client):
+    client, made = pantry_client
+    week = sched.format_date(sched.upcoming_week_start() - timedelta(weeks=1))
+    _seed_lot(made, "name:basmati rice", "Basmati Rice", 1000.0, week)
+    _seed_lot(made, "name:chickpeas", "Chickpeas", 800.0, week)
+
+    response = client.delete(
+        "/api/pantry/item", params={"ingredient_key": "name:basmati rice"}
+    )
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["items"]] == ["Chickpeas"]
+
+
+def test_removing_something_absent_is_a_404(pantry_client):
+    client, _ = pantry_client
+    response = client.delete("/api/pantry/item", params={"ingredient_key": "name:nope"})
+    assert response.status_code == 404
+
+
+def test_a_correction_needs_to_say_something(pantry_client):
+    client, _ = pantry_client
+    response = client.put("/api/pantry/item", json={"ingredient_key": "name:rice"})
+    assert response.status_code == 400
+
+
+def test_running_out_of_something_absent_is_a_404(pantry_client):
+    client, _ = pantry_client
+    response = client.put(
+        "/api/pantry/item", json={"ingredient_key": "name:nope", "present": False}
+    )
+    assert response.status_code == 404
+
+
+def test_stating_a_quantity_for_an_unknown_ingredient_is_a_404(pantry_client):
+    """The cupboard holds ingredients the planner can price, not free text."""
+    client, _ = pantry_client
+    response = client.put(
+        "/api/pantry/item", json={"ingredient_key": "name:unicorn", "grams": 500}
+    )
+    assert response.status_code == 404
+
+
+def test_running_out_empties_the_shelf_through_the_api(pantry_client):
+    client, made = pantry_client
+    week = sched.format_date(sched.upcoming_week_start() - timedelta(weeks=1))
+    _seed_lot(made, "name:basmati rice", "Basmati Rice", 1000.0, week)
+
+    response = client.put(
+        "/api/pantry/item",
+        json={"ingredient_key": "name:basmati rice", "present": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["items"] == []

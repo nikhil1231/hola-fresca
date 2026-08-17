@@ -497,10 +497,37 @@ class PantryOut(BaseModel):
 
 
 class PantryItemIn(BaseModel):
+    """One statement about one shelf. Only the fields sent are acted on.
+
+    ``present`` alone is the quick correction the basket and history pages
+    offer: ``False`` is "I have run out", ``True`` is "yes, still there".
+    A quantity is the fuller statement the cupboard page makes, and it both adds
+    an ingredient the model had never heard of and replaces one it had guessed.
+    """
+
     ingredient_key: str
-    #: ``False`` is "I have run out", ``True`` is "yes, still there" — the two
-    #: corrections the cupboard accepts, both believed outright.
-    present: bool
+    present: bool | None = None
+    #: How much there is. ``grams`` for anything measured by weight, ``qty`` for
+    #: ingredients the shop sells by count. Sending either states the amount.
+    grams: float | None = Field(default=None, ge=0)
+    qty: float | None = Field(default=None, ge=0)
+
+
+class PantryIngredientOut(BaseModel):
+    """A candidate for the cupboard's add box."""
+
+    ingredient_key: str
+    name: str
+    unit_kind: str = "mass"
+    #: How well it keeps, so the picker can warn that a fresh thing will decay
+    #: away before the next shop rather than silently accepting it.
+    salvage: float
+    #: Already in the cupboard, so the box can offer "edit" instead of "add".
+    held: bool = False
+
+
+class PantryIngredientsOut(BaseModel):
+    items: list[PantryIngredientOut] = Field(default_factory=list)
 
 
 class PlanEntryIn(BaseModel):

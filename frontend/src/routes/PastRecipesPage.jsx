@@ -6,7 +6,6 @@ import {
   Box,
   Button,
   Checkbox,
-  Divider,
   Group,
   Loader,
   Stack,
@@ -18,13 +17,7 @@ import { IconAlertCircle, IconChevronUp, IconHistory } from '@tabler/icons-react
 import { RECIPE_PLACEHOLDER_IMAGE } from '../constants/images.js'
 import { formatWeekStart, MAX_PAST_WEEKS, useSchedule } from '../hooks/useSchedule.js'
 import { formatProteinModifier, useWeeklyPlan } from '../hooks/useWeeklyPlan.js'
-import {
-  formatHeld,
-  useCooked,
-  usePantry,
-  useSetCooked,
-  useSetPantryItem,
-} from '../hooks/usePastRecipes.js'
+import { useCooked, useSetCooked } from '../hooks/usePastRecipes.js'
 import PageHeader from '../components/PageHeader.jsx'
 import classes from './PastRecipesPage.module.css'
 
@@ -116,48 +109,11 @@ function WeekSection({ week, entries, cookedWeek, onToggle, pendingKey }) {
   )
 }
 
-function CupboardItem({ item, onSet, pending }) {
-  return (
-    <Group className={classes.cupboardRow} gap="sm" wrap="nowrap">
-      <div className={classes.cupboardMain}>
-        <Text size="sm" fw={600}>
-          {item.name}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {formatHeld(item)} · from the shop of {formatWeekStart(item.week_start)}
-        </Text>
-      </div>
-      <Group gap={6} wrap="nowrap">
-        <Button
-          size="compact-xs"
-          variant="subtle"
-          color="fresh"
-          disabled={pending}
-          onClick={() => onSet(item.ingredient_key, true)}
-        >
-          Still there
-        </Button>
-        <Button
-          size="compact-xs"
-          variant="subtle"
-          color="red"
-          disabled={pending}
-          onClick={() => onSet(item.ingredient_key, false)}
-        >
-          Ran out
-        </Button>
-      </Group>
-    </Group>
-  )
-}
-
 export default function PastRecipesPage() {
   const [pastWeeks, setPastWeeks] = useState(PAST_WEEKS_STEP)
   const { data: schedule, isError, error, isFetching, isPaused } = useSchedule(pastWeeks)
   const { getWeekRecipes } = useWeeklyPlan()
   const setCooked = useSetCooked()
-  const setPantryItem = useSetPantryItem()
-  const pantry = usePantry()
 
   const pastList = schedule?.past_weeks ?? []
   const weekStarts = useMemo(
@@ -178,8 +134,6 @@ export default function PastRecipesPage() {
 
   const onToggle = (weekStart, recipeId, value) =>
     setCooked.mutate({ weekStart, recipeId, cooked: value })
-  const onSetItem = (ingredientKey, present) =>
-    setPantryItem.mutate({ ingredientKey, present })
 
   const weeksWithRecipes = pastList
     .slice()
@@ -190,13 +144,13 @@ export default function PastRecipesPage() {
     <Stack gap={{ base: 'lg', sm: 'xl' }}>
       <PageHeader
         title="Past recipes"
-        description="A recipe counts as cooked once its shopped-for week ends. Untick anything that didn't get made and its ingredients go back in the cupboard."
+        description="A recipe counts as cooked once its shopped-for week ends. Untick anything that didn't get made and its ingredients go back in the pantry."
         icon={<IconHistory size={22} />}
       />
 
-      {(setCooked.error || setPantryItem.error) && (
+      {setCooked.error && (
         <Alert color="red" icon={<IconAlertCircle size={18} />}>
-          {(setCooked.error ?? setPantryItem.error).message}
+          {setCooked.error.message}
         </Alert>
       )}
 
@@ -251,32 +205,10 @@ export default function PastRecipesPage() {
             </Group>
           )}
 
-          <Divider labelPosition="center" label="In the cupboard" />
-
-          {pantry.isError ? (
-            <Alert color="red" icon={<IconAlertCircle size={18} />}>
-              Couldn&apos;t load the cupboard: {pantry.error?.message}
-            </Alert>
-          ) : (pantry.data?.items ?? []).length === 0 ? (
-            <Box className={classes.emptyState}>
-              <Text fw={800}>Nothing carried over</Text>
-              <Text size="sm" c="dimmed">
-                Leftovers that keep — rice, tins, spices, frozen — land here after
-                a basket is pushed, and come off the next shop.
-              </Text>
-            </Box>
-          ) : (
-            <Stack gap={4}>
-              {pantry.data.items.map((item) => (
-                <CupboardItem
-                  key={item.ingredient_key}
-                  item={item}
-                  pending={setPantryItem.isPending}
-                  onSet={onSetItem}
-                />
-              ))}
-            </Stack>
-          )}
+          <Text size="xs" c="dimmed">
+            What these recipes did not use is in the{' '}
+            <Link to="/pantry">pantry</Link>, and comes off the next shop.
+          </Text>
         </Stack>
       )}
     </Stack>

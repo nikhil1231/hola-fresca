@@ -1,0 +1,31 @@
+.addBox {
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+}
+
+.addSearch {
+  flex: 1;
+  min-width: 220px;
+}
+
+.row {
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.row:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.rowMain {
+  min-width: 0;
+}
+
+.emptyState {
+  text-align: center;
+  padding: var(--mantine-spacing-xl) 0;
+}

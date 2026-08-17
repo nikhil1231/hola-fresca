@@ -48,6 +48,9 @@ export default function Header() {
               <NavLink to="/basket" className={navClass}>
                 Basket
               </NavLink>
+              <NavLink to="/pantry" className={navClass}>
+                Pantry
+              </NavLink>
               <NavLink to="/past" className={navClass}>
                 Past
               </NavLink>
@@ -126,6 +129,9 @@ export default function Header() {
           </NavLink>
           <NavLink to="/basket" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Basket
+          </NavLink>
+          <NavLink to="/pantry" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
+            Pantry
           </NavLink>
           <NavLink to="/past" className={mobileNavClass} onClick={() => setMenuOpen(false)}>
             Past recipes

@@ -1215,7 +1215,7 @@ def build_basket(
                     key=key,
                     name=label,
                     need_g=0.0,
-                    note="in the cupboard",
+                    note="in the pantry",
                     unit_kind=ingredient.unit_kind,
                     need_qty=0.0 if ingredient.unit_kind == "count" else None,
                     quantity_unit="unit" if ingredient.unit_kind == "count" else "g",
