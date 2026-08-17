@@ -30,8 +30,44 @@ recipe library, the product cache, ingredient mappings — does not.
 `app.api.deps.get_current_user` answers *whose* data a request is about: the
 address Cloudflare Access signed for, or — over the LAN, where there is no
 assertion — the account the app bootstrapped. Every personal read and write goes
-through it. Catalogue writes (mapping review, manual products, the recipe audit)
-are marked `require_admin`, because they change what everyone else sees.
+through it. Catalogue writes (mapping review, manual products, the recipe audit,
+admitting a recipe to the library) are marked `require_admin`, because they
+change what everyone else sees.
+
+## The library, and what sits outside it
+
+`app.db.models.in_library` is the one definition of what the app holds: a recipe
+the curation rules admitted, **or** one admitted by hand, and not one ruled out.
+It lives on the model because `app/api/recipes.py` and `app/planner/index.py`
+both apply it, and a recipe browse will show but the planner will not price is a
+dead end.
+
+Curation is strict on purpose — it wants a rating count a new or niche dish may
+never earn — so roughly two thirds of a complete scrape sits outside. That is a
+lot of perfectly cookable food to be unable to *find*, so search can be widened
+past the library with `show_uncurated`, and one recipe at a time can be brought
+in for good with `POST /api/recipes/{id}/library`, which sets
+`manually_included`. It survives the next re-curation for the same reason
+`manually_excluded` does: it records a decision rather than a derivation.
+
+Three things about the widened mode are load-bearing:
+
+* **It is a strict superset.** `is_triageable` counts library membership on its
+  own rather than demanding `is_complete`, which the scrape derives — otherwise a
+  library recipe with a stale flag would *vanish* when the reader asked to see
+  more.
+* **It is a reading mode.** The detail page opens so there is something to judge,
+  and nothing else follows: planning, rating, wishlisting and cooking all still
+  go through `_require_library_recipe` and refuse until the recipe is admitted.
+* **Uncurated recipes are exempt from the unmapped filter.** Mappings are
+  proposed from library lines, so having none is the *normal* state out there;
+  holding the triage set to that filter would hide almost everything the mode
+  exists to show. Mapping is work that follows admitting a recipe.
+
+Best fit is the exception that proves the second point: it ranks the library
+against the week's basket, which is a question an uncurated recipe has no answer
+to, so `/api/planner/suggestions` never widens. It only *counts*, and browse
+turns that count into an offer to run a plain search instead.
 
 ### Connecting a shop
 

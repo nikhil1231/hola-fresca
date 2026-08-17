@@ -1,10 +1,21 @@
 """Acceptance checks: how much of the recipe library the mapping can price.
 
-``coverage`` reports the share of curated-recipe ingredient lines that resolve to
-a mapped product. ``basket`` is the first end-to-end proof: given a few recipes,
-sum the grams per ingredient, cover each from its mapped products, and print an
-itemised, priced shopping list with leftovers. Both accept ``--include-proposed``
-so the pipeline can be exercised before human review.
+``coverage`` reports two things about the library. **Recipes priceable** is the
+headline: a recipe counts only when *every* one of its ingredient lines resolves,
+because one unmapped line is a hole in the basket and the recipe cannot be
+shopped. **Lines resolved** is the work measure underneath it — it moves with
+every mapping decision, where the recipe count only moves when a recipe's last
+gap closes.
+
+The two answer different questions and diverge sharply once the common
+ingredients are done: the line share is dominated by the head of the frequency
+distribution (a few dozen keys are half of all lines), so it saturates near 100%
+while whole recipes are still held up by one rare ingredient each.
+
+``basket`` is the end-to-end proof: given a few recipes, sum the grams per
+ingredient, cover each from its mapped products, and print an itemised, priced
+shopping list with leftovers. All of them accept ``--include-proposed`` so the
+pipeline can be exercised before human review.
 """
 from __future__ import annotations
 
@@ -22,6 +33,7 @@ from app.db.models import (
     Product,
     Recipe,
     RecipeIngredient,
+    in_library,
 )
 from app.mapping import service
 from app.mapping.candidates import load_source_id_index
@@ -67,11 +79,20 @@ class CoverageReport:
     lines_resolved: int = 0
     distinct_keys: int = 0
     resolved_keys: int = 0
+    #: Library recipes, and those with no unresolved ingredient line at all.
+    recipes_total: int = 0
+    recipes_priceable: int = 0
     top_unresolved: list[tuple[str, int]] = field(default_factory=list)
 
     @property
     def pct(self) -> float:
         return 100 * self.lines_resolved / self.lines_total if self.lines_total else 0.0
+
+    @property
+    def recipes_pct(self) -> float:
+        return (
+            100 * self.recipes_priceable / self.recipes_total if self.recipes_total else 0.0
+        )
 
 
 def coverage_report(
@@ -87,15 +108,19 @@ def coverage_report(
 
     with session_factory() as session:
         mapped = _mapped_keys(session, statuses, retailer)
+        # The library, not ``curated`` — the planner prices exactly these rows,
+        # so a recipe admitted by hand has to count here too.
         rows = session.execute(
-            select(RecipeIngredient.source_ingredient_id)
+            select(RecipeIngredient.recipe_id, RecipeIngredient.source_ingredient_id)
             .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
-            .where(Recipe.curated == 1)
+            .where(*in_library())
         ).all()
 
     seen_keys: set[str] = set()
-    for (sid,) in rows:
+    gaps_by_recipe: defaultdict[int, int] = defaultdict(int)
+    for recipe_id, sid in rows:
         report.lines_total += 1
+        gaps_by_recipe.setdefault(recipe_id, 0)
         key = sid_index.get(sid or "")
         if key:
             seen_keys.add(key)
@@ -103,7 +128,10 @@ def coverage_report(
             report.lines_resolved += 1
         else:
             unresolved[key or "(untracked)"] += 1
+            gaps_by_recipe[recipe_id] += 1
 
+    report.recipes_total = len(gaps_by_recipe)
+    report.recipes_priceable = sum(1 for gaps in gaps_by_recipe.values() if gaps == 0)
     report.distinct_keys = len(seen_keys)
     report.resolved_keys = len(seen_keys & mapped)
     report.top_unresolved = sorted(unresolved.items(), key=lambda kv: kv[1], reverse=True)[:15]

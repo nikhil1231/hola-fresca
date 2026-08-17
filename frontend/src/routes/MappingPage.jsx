@@ -211,20 +211,24 @@ export default function MappingPage() {
         <Group align="flex-end" gap="xl" wrap="wrap">
           <div style={{ minWidth: 220, flex: 1 }}>
             <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-              Recipe coverage
+              Recipes you can shop
             </Text>
             <Group align="baseline" gap="xs">
               <Text fw={700} style={{ fontSize: 30, lineHeight: 1.1 }}>
-                {stats ? `${stats.lines_pct}%` : '-'}
+                {stats ? `${stats.recipes_priceable.toLocaleString('en-GB')}` : '-'}
               </Text>
               <Text size="sm" c="dimmed">
-                of ingredient uses
+                {stats
+                  ? `of ${stats.recipes_total.toLocaleString('en-GB')} in the library`
+                  : 'recipes'}
               </Text>
             </Group>
-            <Progress value={stats?.lines_pct ?? 0} color="teal" mt={6} />
+            {/* A recipe counts only with every ingredient mapped, so the bar
+                tracks what can actually be cooked from the library. */}
+            <Progress value={stats?.recipes_pct ?? 0} color="teal" mt={6} />
             <Text size="xs" c="dimmed" mt={4}>
               {stats
-                ? `${stats.lines_resolved.toLocaleString('en-GB')} of ${stats.lines_total.toLocaleString('en-GB')} ingredient lines across the curated library`
+                ? `${stats.recipes_pct}% priceable end to end - ${stats.lines_pct}% of ingredient uses mapped (${stats.lines_resolved.toLocaleString('en-GB')} of ${stats.lines_total.toLocaleString('en-GB')} lines)`
                 : 'loading...'}
             </Text>
           </div>

@@ -156,8 +156,13 @@ def client(tmp_path):
         ]
 
         uncurated = _make_recipe(source_id="c", name="Hidden", curated=0)
+        # Complete enough to be triaged, but ruled out for everybody: the case
+        # that has to stay invisible even once uncurated rows become reachable.
+        excluded = _make_recipe(
+            source_id="e", name="Broken Row", curated=0, manually_excluded=1
+        )
 
-        s.add_all([italian, mexican, speedy, uncurated])
+        s.add_all([italian, mexican, speedy, uncurated, excluded])
         s.commit()
 
     def _override():
@@ -176,6 +181,83 @@ def test_list_returns_only_curated(client):
     assert data["total"] == 3
     names = {i["name"] for i in data["items"]}
     assert "Hidden" not in names
+
+
+def test_show_uncurated_widens_the_search_without_admitting_anything(client):
+    data = client.get("/api/recipes", params={"show_uncurated": "true"}).json()
+    names = {i["name"] for i in data["items"]}
+    assert "Hidden" in names
+    # Still ruled out for everybody, however wide the search gets.
+    assert "Broken Row" not in names
+    # Widening is a reading mode: the recipe is shown, and shown as not yet ours.
+    assert next(i for i in data["items"] if i["name"] == "Hidden")["in_library"] is False
+    assert client.get("/api/recipes").json()["total"] == 3
+
+
+def test_widening_never_drops_a_result(client):
+    """The property the toggle lives or dies on.
+
+    ``is_complete`` is derived by the scrape, so a library recipe carrying a
+    stale flag must not vanish when the reader asks to see *more* — a filter
+    labelled "show me extra" that shows less is worse than no filter.
+    """
+    narrow = {i["id"] for i in client.get("/api/recipes").json()["items"]}
+    wide = {
+        i["id"]
+        for i in client.get("/api/recipes", params={"show_uncurated": "true"}).json()["items"]
+    }
+    assert narrow <= wide
+
+
+def test_an_empty_search_reports_what_lies_outside_the_library(client):
+    empty = client.get("/api/recipes", params={"q": "hidden"}).json()
+    assert empty["total"] == 0
+    # The whole point of the count: "nothing matches" and "nothing of yours
+    # matches, but one uncurated recipe does" are different answers.
+    assert empty["uncurated_total"] == 1
+    # Not paid for when the search already found something.
+    assert client.get("/api/recipes").json()["uncurated_total"] is None
+
+
+def test_adding_to_the_library_makes_a_recipe_searchable_and_plannable(client):
+    assert client.post("/api/recipes/4/library").json()["in_library"] is True
+
+    data = client.get("/api/recipes").json()
+    assert data["total"] == 4
+    card = next(i for i in data["items"] if i["name"] == "Hidden")
+    assert card["in_library"] is True
+
+    # Reversible, and only the manual half is undone.
+    assert client.delete("/api/recipes/4/library").json()["in_library"] is False
+    assert client.get("/api/recipes").json()["total"] == 3
+
+
+def test_removing_from_the_library_does_not_evict_a_curated_recipe(client):
+    """``manually_included`` is the only flag this endpoint owns.
+
+    Taking out a recipe the rules chose is ``manually_excluded`` — a different
+    judgement, about a broken row — and this must not quietly become that.
+    """
+    curated_id = client.get("/api/recipes").json()["items"][0]["id"]
+    assert client.delete(f"/api/recipes/{curated_id}/library").json()["in_library"] is True
+    assert client.get("/api/recipes").json()["total"] == 3
+
+
+def test_an_uncurated_recipe_cannot_be_planned_or_rated_until_it_is_admitted(client):
+    """Reading one is allowed; committing to one is not.
+
+    The detail page opens so the recipe can be judged, but every action that
+    would put it in a week or in someone's ratings has to refuse until it is in
+    the library — otherwise the planner is asked to price something its shared
+    index does not contain.
+    """
+    assert client.get("/api/recipes/4").status_code == 200
+    assert client.put("/api/recipes/4/personal-rating", json={"rating": 5}).status_code == 404
+    assert client.put("/api/recipes/4/wishlist", json={"wishlisted": True}).status_code == 404
+
+    client.post("/api/recipes/4/library")
+    assert client.put("/api/recipes/4/personal-rating", json={"rating": 5}).status_code == 200
+    assert client.put("/api/recipes/4/wishlist", json={"wishlisted": True}).status_code == 200
 
 
 def test_cook_map_start_poll_and_retry(client, monkeypatch):
@@ -417,10 +499,19 @@ def test_detail_shape_and_image(client):
     assert "w_1200" in detail["image_url"]
 
 
-def test_detail_404_for_uncurated(client):
-    hidden = client.get("/api/recipes/4", params={})
-    # id 4 is the uncurated recipe; must be hidden.
-    assert hidden.status_code == 404
+def test_detail_serves_an_uncurated_recipe_but_marks_it_out_of_the_library(client):
+    # id 4 is the uncurated recipe. The detail page is the one read that serves
+    # it, because deciding whether to admit it means looking at it first.
+    detail = client.get("/api/recipes/4", params={})
+    assert detail.status_code == 200
+    assert detail.json()["in_library"] is False
+    assert detail.json()["curated"] is False
+
+
+def test_detail_404_for_an_excluded_recipe(client):
+    # Exclusion is the verdict that really does take a recipe out of existence,
+    # and it has to outrank the completeness that makes one merely triageable.
+    assert client.get("/api/recipes/5").status_code == 404
 
 
 def test_detail_flags_unmapped_ingredients(client):

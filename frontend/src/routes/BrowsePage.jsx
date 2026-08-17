@@ -144,23 +144,41 @@ function NothingToBrowse({
   narrowed,
   hiddenAsUnmapped,
   unmappedCount,
+  uncuratedCount,
   retailerLabel,
   onClearFilters,
   onShowUnmapped,
+  onShowUncurated,
 }) {
   const at = retailerLabel ? ` at ${retailerLabel}` : ''
   // Only blame coverage when nothing else could be to blame: a search term or a
   // filter the user chose is the likelier reason for an empty page, and being
   // told the shop is unmapped when you typed a typo would be a wrong answer.
   const coverage = hiddenAsUnmapped && !narrowed
+  // The library is a third of what has been scraped, so a search finding nothing
+  // usually means it was never curated rather than that it does not exist. That
+  // is a better answer than "no matches", and it is only worth giving when the
+  // backend has actually counted some.
+  const outsideLibrary = uncuratedCount > 0
   return (
     <Center mih={280}>
       <Stack align="center" gap="xs" maw={440}>
         <IconMoodEmpty size={40} stroke={1.5} />
         <Text fw={600} ta="center">
-          {coverage ? `Nothing can be priced${at} yet` : 'No recipes match these filters'}
+          {coverage
+            ? `Nothing can be priced${at} yet`
+            : outsideLibrary
+              ? 'Nothing in your library matches'
+              : 'No recipes match these filters'}
         </Text>
-        {hiddenAsUnmapped && (
+        {outsideLibrary && (
+          <Text size="sm" c="dimmed" ta="center">
+            {uncuratedCount.toLocaleString()}{' '}
+            {uncuratedCount === 1 ? 'recipe matches' : 'recipes match'} outside it — scraped,
+            but never curated in.
+          </Text>
+        )}
+        {hiddenAsUnmapped && !outsideLibrary && (
           <Text size="sm" c="dimmed" ta="center">
             {coverage
               ? `All ${unmappedCount.toLocaleString()} recipes carry an ingredient with no approved product${at}, and browse hides what it cannot price.`
@@ -168,12 +186,21 @@ function NothingToBrowse({
           </Text>
         )}
         <Group gap="xs" justify="center">
+          {outsideLibrary && (
+            <Button variant="light" color="fresh" onClick={onShowUncurated}>
+              Search uncurated ({uncuratedCount.toLocaleString()})
+            </Button>
+          )}
           {narrowed && (
-            <Button variant="light" color="fresh" onClick={onClearFilters}>
+            <Button
+              variant={outsideLibrary ? 'subtle' : 'light'}
+              color="fresh"
+              onClick={onClearFilters}
+            >
               Clear filters
             </Button>
           )}
-          {hiddenAsUnmapped && (
+          {hiddenAsUnmapped && !outsideLibrary && (
             <>
               <Button
                 variant={narrowed ? 'subtle' : 'light'}
@@ -233,7 +260,7 @@ function EditingWeekBar({ week, skipped, onPlanAnyway, planPending }) {
 }
 
 export default function BrowsePage() {
-  const { filters, setScalar, setArray, toggleArrayValue, clearAll } = useFilters()
+  const { filters, setScalar, setScalars, setArray, toggleArrayValue, clearAll } = useFilters()
   const { label: retailerLabel } = useActiveRetailer()
   const [searchParams] = useSearchParams()
   const rowSize = useBrowseRowSize()
@@ -332,6 +359,10 @@ export default function BrowsePage() {
   const unmappedCount =
     filterFacets.excludes?.find((facet) => facet.value === 'unmapped')?.count ?? 0
   const hiddenAsUnmapped = hidingUnmapped && unmappedCount > 0
+  // Both browse endpoints answer this: it is "what would widening find", and it
+  // is absent once widened, so it cannot survive as a stale offer to do what has
+  // already been done.
+  const uncuratedCount = data?.pages[0]?.uncurated_total ?? 0
   const sortOptions = filterFacets.sorts.map((s) => ({ value: s.value, label: s.label }))
   const sortValue = bestFitRequested ? 'popular' : requestedSort
   const loadingTiles = Array.from({ length: firstPageSize })
@@ -529,9 +560,21 @@ export default function BrowsePage() {
               narrowed={activeCount > 0 || Boolean(filters.q)}
               hiddenAsUnmapped={hiddenAsUnmapped}
               unmappedCount={unmappedCount}
+              uncuratedCount={uncuratedCount}
               retailerLabel={retailerLabel}
               onClearFilters={clearAll}
               onShowUnmapped={() => toggleArrayValue('exclude', 'unmapped')}
+              onShowUncurated={() =>
+                setScalars({
+                  show_uncurated: 'true',
+                  // Best fit ranks the library against the week's basket, which
+                  // is a question an uncurated recipe has no answer to — it is
+                  // not priced into anything until it is added. So taking this
+                  // offer drops out of the ranking into a plain search, rather
+                  // than switching on a filter that would return nothing.
+                  ...(bestFitActive ? { sort: 'popular' } : {}),
+                })
+              }
             />
           </>
         ) : (

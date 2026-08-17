@@ -434,6 +434,37 @@ def test_suggestions_apply_filters_and_pagination(planner_client):
     assert data["items"][0]["name"] == "Bean Stew"
 
 
+def test_suggestions_count_what_lies_outside_the_library(planner_client):
+    """Best fit ranks the library, so it has to say when that is the whole answer.
+
+    Suggestions are the endpoint browse reads while a week is being planned —
+    the screen people search on most — and it can never return an uncurated
+    recipe, because a recipe the planner cannot price into a week has no
+    marginal cost to rank by. Counting them is what lets the client offer a
+    plain search instead of leaving "no matches" as the last word.
+    """
+    client, ids = planner_client
+    data = client.post(
+        "/api/planner/suggestions",
+        json={
+            "selections": [{"recipe_id": ids["pinned"], "portions": 2}],
+            "filters": {"q": "hidden"},
+        },
+    ).json()
+
+    assert data["total"] == 0
+    assert data["uncurated_total"] == 1
+    # Not paid for when the ranking already had something to show.
+    ranked = client.post(
+        "/api/planner/suggestions",
+        json={
+            "selections": [{"recipe_id": ids["pinned"], "portions": 2}],
+            "filters": {"q": "bean"},
+        },
+    ).json()
+    assert ranked["uncurated_total"] is None
+
+
 def test_suggestions_apply_fuzzy_search(planner_client):
     client, ids = planner_client
     data = client.post(

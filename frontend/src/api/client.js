@@ -39,6 +39,12 @@ async function putJSON(path, body) {
   return res.json()
 }
 
+async function deleteJSON(path) {
+  const res = await fetch(path, { method: 'DELETE' })
+  if (!res.ok) throw await responseError(res)
+  return res.json()
+}
+
 // Filter params that are arrays (repeatable query params) vs scalars. Anything
 // missing here is stringified instead, which for an array means "main,side" —
 // one value the API has never heard of, so the filter silently does nothing.
@@ -146,6 +152,15 @@ export function setPackPreference({ ingredientKey, sku }) {
 
 export function hideRecipe(id) {
   return postJSON(`/api/recipes/${id}/hide`, {})
+}
+
+// Admits a recipe the curation rules cut into the shared library, or withdraws
+// one previously admitted. Admin-only, and not the same act as a wishlist: this
+// changes what everybody can search, price and plan.
+export function setRecipeLibrary(id, inLibrary) {
+  return inLibrary
+    ? postJSON(`/api/recipes/${id}/library`, {})
+    : deleteJSON(`/api/recipes/${id}/library`)
 }
 
 // Flags the macros as suspicious and starts a background audit; poll the

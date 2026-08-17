@@ -17,6 +17,15 @@ Three outcomes per ingredient:
 
 Work is persisted per ingredient as it goes, so an interrupted run simply resumes
 where it left off the next time the button is pressed.
+
+The two halves run at different widths, because they are limited by different
+things. **Searching is serial** — every retailer call goes through the one
+:class:`~app.mapping.live_search.LiveSearchRunner` thread behind a shared
+backoff, so a shop is asked one thing at a time and a rate-limit signal still
+means something. **Proposing is not**: the LLM calls are independent of each
+other, so they run on a small pool while the search thread moves on to the next
+ingredient. The run is therefore roughly as long as its LLM leg rather than the
+sum of the two, and the retailer sees exactly the traffic it saw before.
 """
 from __future__ import annotations
 
@@ -24,6 +33,7 @@ import logging
 import re
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -46,6 +56,11 @@ log = logging.getLogger("holafresca.mapping")
 
 #: Default shop; every public entry point takes ``retailer`` and falls back to it.
 RETAILER = DEFAULT_RETAILER
+
+#: Proposals in flight behind the serial search. Deliberately small: the ceiling
+#: here is SQLite taking one writer at a time, not the model's rate limit, and
+#: the writes this pool makes interleave with the search thread's own.
+DEFAULT_LLM_WORKERS = 4
 
 # HelloFresh names its assumed-owned lines "<thing> for the <component>" ("Water
 # for the Sauce", "Sugar for the Pickle"), plus a few bare cupboard staples.
@@ -73,21 +88,38 @@ class GenerateJob:
     errors: int = 0
     status: str = "running"  # running | done | failed
     error: str | None = None
+    #: The ingredient being *searched*. The proposal pool trails behind it, so
+    #: this is the head of the pipeline rather than the last thing finished, and
+    #: it clears while the final proposals drain.
     current: str | None = None
+    #: The tallies are written by the search thread and the proposal pool, and
+    #: read by whichever request thread is polling the job.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    def tally(self, *, added: int = 0, staples: int = 0, no_match: int = 0, errors: int = 0) -> int:
+        """Record one finished ingredient; returns how many are done."""
+        with self._lock:
+            self.added += added
+            self.staples += staples
+            self.no_match += no_match
+            self.errors += errors
+            self.processed += 1
+            return self.processed
 
     def as_dict(self) -> dict:
-        return {
-            "job_id": self.job_id,
-            "status": self.status,
-            "processed": self.processed,
-            "total": self.total,
-            "added": self.added,
-            "staples": self.staples,
-            "no_match": self.no_match,
-            "errors": self.errors,
-            "error": self.error,
-            "current": self.current,
-        }
+        with self._lock:
+            return {
+                "job_id": self.job_id,
+                "status": self.status,
+                "processed": self.processed,
+                "total": self.total,
+                "added": self.added,
+                "staples": self.staples,
+                "no_match": self.no_match,
+                "errors": self.errors,
+                "error": self.error,
+                "current": self.current,
+            }
 
 
 class _JobRegistry:
@@ -213,12 +245,18 @@ def generate(
     csv_path: Path | None = None,
     model: str | None = None,
     retailer: str = RETAILER,
+    llm_workers: int = DEFAULT_LLM_WORKERS,
 ) -> GenerateJob:
     """Bring ``count`` more ingredients into ``retailer``'s review queue.
 
     Mappings are per-retailer rows, so this is run once per shop: the same
     ingredient needs its own proposal against each catalogue, and an approval at
     one shop says nothing about the other.
+
+    Searching stays on this thread, one ingredient at a time; each proposal is
+    handed to a pool of ``llm_workers``. Note that ``llm_workers=1`` narrows the
+    pool to one proposal at a time but does not restore the old fully serial
+    run: the search loop still moves on without waiting for it.
     """
     job = job or GenerateJob(job_id=uuid.uuid4().hex[:12])
 
@@ -232,15 +270,20 @@ def generate(
     # no LLM at all, and a missing API key should cost only the ingredients that
     # genuinely need a proposal rather than aborting the whole run.
     state: dict = {"client": complete, "model": model or "test"}
+    # Held while the client is built so a pool that starts several proposals at
+    # once builds one client, not one each — and so every worker reads the model
+    # name the client settled on.
+    client_lock = threading.Lock()
 
     def completer() -> Completer:
-        if state["client"] is None:
-            from app.mapping.openai_client import OpenAIJSONClient
+        with client_lock:
+            if state["client"] is None:
+                from app.mapping.openai_client import OpenAIJSONClient
 
-            client = OpenAIJSONClient(model=model)
-            state["client"] = client
-            state["model"] = client.model
-        return state["client"]
+                client = OpenAIJSONClient(model=model)
+                state["client"] = client
+                state["model"] = client.model
+            return state["client"]
 
     usage_by_key = load_usage_stats(csv_path)
 
@@ -251,15 +294,54 @@ def generate(
     job.total = len(work)
     log.info("generate: %d ingredients to add for %s", job.total, retailer)
 
-    for rank, key, name, line_count in work:
-        job.current = name
+    def propose_and_write(key: str, name: str, line_count: int, found: int) -> None:
+        """The LLM leg of one ingredient, run on the pool.
+
+        Reports its own outcome rather than raising: a future nobody waits on
+        would swallow the exception, and one bad ingredient must not stop the
+        rest of the run.
+        """
         try:
-            if is_pantry_line(name):
-                with session_factory() as session:
-                    _file_pantry_staple(session, key, name, line_count, retailer)
-                job.staples += 1
-                log.info("[%d/%d] %s -> pantry staple", job.processed + 1, job.total, name)
-            else:
+            with session_factory() as session:
+                ic = gather_candidates(
+                    session, key, name=name, usage=usage_by_key.get(key), retailer=retailer,
+                )
+                try:
+                    proposed = propose_one(ic, completer())
+                    service.write_proposal(
+                        session, ic, proposed, model=state["model"], retailer=retailer,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    # The search already cached candidates, so this key now looks
+                    # "covered" and would never be revisited. Record it as needing
+                    # review rather than orphaning cached candidates behind no
+                    # mapping row at all.
+                    _file_needs_review(session, key, name, line_count, str(exc), retailer)
+                    raise
+        except Exception as exc:  # noqa: BLE001
+            done = job.tally(errors=1)
+            log.warning("[%d/%d] %s -> ERROR: %s", done, job.total, name, exc)
+        else:
+            done = job.tally(added=1)
+            log.info(
+                "[%d/%d] %s -> %d candidates, %d accepted",
+                done, job.total, name, found, len(proposed.accepted),
+            )
+
+    # The search thread is this one; the proposals run behind it. Progress is
+    # logged in completion order, which is no longer worklist order.
+    with ThreadPoolExecutor(
+        max_workers=max(1, llm_workers), thread_name_prefix="propose"
+    ) as pool:
+        for rank, key, name, line_count in work:
+            job.current = name
+            try:
+                if is_pantry_line(name):
+                    with session_factory() as session:
+                        _file_pantry_staple(session, key, name, line_count, retailer)
+                    done = job.tally(staples=1)
+                    log.info("[%d/%d] %s -> pantry staple", done, job.total, name)
+                    continue
                 with session_factory() as session:
                     found = live_search.search_and_store(
                         session, key, name, runner=runner,
@@ -268,41 +350,20 @@ def generate(
                 if not found:
                     with session_factory() as session:
                         _file_no_match(session, key, name, line_count, retailer)
-                    job.no_match += 1
-                    log.info("[%d/%d] %s -> no candidates", job.processed + 1, job.total, name)
-                else:
-                    with session_factory() as session:
-                        ic = gather_candidates(
-                            session, key, name=name, usage=usage_by_key.get(key),
-                            retailer=retailer,
-                        )
-                        try:
-                            proposed = propose_one(ic, completer())
-                            service.write_proposal(
-                                session, ic, proposed, model=state["model"],
-                                retailer=retailer,
-                            )
-                        except Exception as exc:  # noqa: BLE001
-                            # The search already cached candidates, so this key
-                            # now looks "covered" and would never be revisited.
-                            # Record it as needing review rather than orphaning
-                            # cached candidates behind no mapping row at all.
-                            _file_needs_review(
-                                session, key, name, line_count, str(exc), retailer
-                            )
-                            raise
-                    job.added += 1
-                    log.info(
-                        "[%d/%d] %s -> %d candidates, %d accepted",
-                        job.processed + 1, job.total, name, found, len(proposed.accepted),
-                    )
-        except Exception as exc:  # noqa: BLE001 - one bad ingredient must not abort the run
-            job.errors += 1
-            log.warning("[%d/%d] %s -> ERROR: %s", job.processed + 1, job.total, name, exc)
-        finally:
-            job.processed += 1
+                    done = job.tally(no_match=1)
+                    log.info("[%d/%d] %s -> no candidates", done, job.total, name)
+                    continue
+            except Exception as exc:  # noqa: BLE001 - one bad search must not abort the run
+                done = job.tally(errors=1)
+                log.warning("[%d/%d] %s -> ERROR: %s", done, job.total, name, exc)
+                continue
+            # Hand the LLM leg over and go back to searching. ``job.processed``
+            # is incremented by the worker, so the count still means finished.
+            pool.submit(propose_and_write, key, name, line_count, found)
+        # Nothing is left to search, but proposals are still in flight; leaving
+        # the block waits for them.
+        job.current = None
 
-    job.current = None
     # New mapping rows arrive with no unit classification, and only the recipe
     # library can supply one. The planner reads that classification rather than
     # deriving it per request, so the batch that created the rows has to leave
@@ -324,13 +385,17 @@ def start_background(
     *,
     count: int = 10,
     retailer: str = RETAILER,
+    llm_workers: int = DEFAULT_LLM_WORKERS,
 ) -> GenerateJob:
     """Kick off :func:`generate` on a worker thread and return the job handle."""
     job = REGISTRY.start()
 
     def run() -> None:
         try:
-            generate(session_factory, count=count, job=job, retailer=retailer)
+            generate(
+                session_factory, count=count, job=job, retailer=retailer,
+                llm_workers=llm_workers,
+            )
         except Exception as exc:  # noqa: BLE001
             job.status = "failed"
             job.error = str(exc)

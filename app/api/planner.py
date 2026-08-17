@@ -21,6 +21,7 @@ from app.api.recipes import (
     _personal_rating_map,
     _recipe_ids_with_pricing_gaps,
     _library_condition,
+    _uncurated_match_count,
     _wishlist_map,
     _to_card,
 )
@@ -623,4 +624,14 @@ def suggestions(
         page_size=body.page_size,
         has_more=has_more,
         next_offset=next_offset if has_more else None,
+        # Best fit ranks the library and nothing else — an uncurated recipe has
+        # no marginal cost against a week it cannot be priced into, so widening
+        # this endpoint is meaningless. Counting is not: when a search finds
+        # nothing here, the honest answer is still "not in your library", and the
+        # client turns that into an offer to run a plain search instead.
+        uncurated_total=(
+            _uncurated_match_count(session, body.filters.model_dump(), user.id)
+            if total == 0
+            else None
+        ),
     )

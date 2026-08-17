@@ -1,12 +1,18 @@
 """Recipe browse API: list (filter/sort/paginate), detail, and facets.
 
-Every endpoint is scoped to the curated active library (``Recipe.curated == 1``).
+Every endpoint is scoped to the shared library — see
+:func:`app.db.models.in_library` — with two deliberate exceptions, both in aid
+of admitting a recipe the curation rules cut: ``show_uncurated`` widens the
+*search* to everything complete, and the *detail* endpoint serves an uncurated
+recipe so there is something to judge before admitting it. Nothing else does:
+planning, rating, wishlisting and cooking all refuse a recipe that is not in.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 import re
+from typing import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from rapidfuzz import fuzz, utils
@@ -56,6 +62,8 @@ from app.db.models import (
     RecipeTag,
     User,
     UserRecipeHide,
+    in_library,
+    is_triageable,
 )
 from app import classify, cook_map as cook_map_mod, measures
 from app import protein as protein_mod
@@ -90,24 +98,20 @@ def _main_protein_match(keywords: list[str]):
 
 
 def _library_condition():
-    """The shared library: curated by rules, and not a broken source row.
+    """The shared library: admitted by the rules or by hand, and not a broken row.
 
     This is what exists for everybody. It deliberately ignores personal hides —
     a recipe you have hidden is still in the library, still priced, and still
     valid in a plan you already made.
+
+    The predicate itself lives on the model, because the planner index applies
+    the same one and the two must not drift apart.
     """
-    return Recipe.curated == 1, Recipe.manually_excluded == 0
+    return in_library()
 
 
-def _visible_recipe_condition(user_id: int):
-    """The library as one user sees it: shared, minus what they have hidden.
-
-    Applied here rather than in the planner index because the index is built once
-    and shared by every user; a hide is the sort of thing that has to be a
-    condition on the query, not a property of the snapshot.
-    """
+def _hidden_by(user_id: int):
     return (
-        *_library_condition(),
         ~select(UserRecipeHide.recipe_id)
         .where(
             UserRecipeHide.user_id == user_id,
@@ -115,6 +119,24 @@ def _visible_recipe_condition(user_id: int):
         )
         .exists(),
     )
+
+
+def _visible_recipe_condition(user_id: int, *, uncurated: bool = False):
+    """The library as one user sees it: shared, minus what they have hidden.
+
+    Applied here rather than in the planner index because the index is built once
+    and shared by every user; a hide is the sort of thing that has to be a
+    condition on the query, not a property of the snapshot.
+
+    ``uncurated`` swaps the library for the wider triage set — everything
+    complete the scrape holds, whether the rules admitted it or not. It is the
+    one place the two differ, and it is a *reading* mode: nothing outside the
+    library is priced into a week or ranked as a suggestion until somebody
+    admits it.
+    """
+    shared = is_triageable() if uncurated else _library_condition()
+    return (*shared, *_hidden_by(user_id))
+
 
 def _require_library_recipe(session: Session, recipe_id: int) -> Recipe:
     """Load a recipe that is in the shared library, or 404.
@@ -124,7 +146,33 @@ def _require_library_recipe(session: Session, recipe_id: int) -> Recipe:
     it has to keep working.
     """
     recipe = session.get(Recipe, recipe_id)
-    if recipe is None or not recipe.curated or recipe.manually_excluded:
+    if recipe is None or not _in_library(recipe):
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return recipe
+
+
+def _in_library(recipe: Recipe) -> bool:
+    """The row-level reading of :func:`_library_condition`."""
+    return bool(recipe.curated or recipe.manually_included) and not recipe.manually_excluded
+
+
+def _require_readable_recipe(session: Session, recipe_id: int) -> Recipe:
+    """Load a recipe that may be read, which is wider than one that may be used.
+
+    Triage needs the recipe page: deciding whether to admit something means
+    looking at its ingredients, its steps and what it would cost, and a list of
+    names is not enough to decide on. So the detail endpoint serves anything
+    complete, and the payload says whether it is in the library — while every
+    action that would commit to it (planning, rating, wishlisting, cooking)
+    still goes through :func:`_require_library_recipe` and refuses.
+
+    Being in the library is sufficient on its own. ``is_complete`` is derived by
+    the scrape, and a library recipe carrying a stale flag must still open.
+    """
+    recipe = session.get(Recipe, recipe_id)
+    if recipe is None or recipe.manually_excluded:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    if not (recipe.is_complete or _in_library(recipe)):
         raise HTTPException(status_code=404, detail="Recipe not found")
     return recipe
 
@@ -267,6 +315,30 @@ def _filtered_recipe_ids(session: Session, filters: dict, user_id: int) -> list[
     return _ranked_recipe_ids(session, filters, user_id)
 
 
+def _library_recipe_ids(session: Session, recipe_ids: Sequence[int]) -> list[int]:
+    """The subset of ``recipe_ids`` the library actually contains."""
+    if not recipe_ids:
+        return []
+    found = set(
+        session.scalars(
+            select(Recipe.id).where(Recipe.id.in_(recipe_ids), *in_library())
+        ).all()
+    )
+    return [recipe_id for recipe_id in recipe_ids if recipe_id in found]
+
+
+def _uncurated_match_count(session: Session, filters: dict, user_id: int) -> int:
+    """How many recipes the same search would find outside the library.
+
+    Only asked when the library search came back empty, because that is the one
+    moment it changes what the page should say — "nothing matches" and "nothing
+    in your library matches, but 47 uncurated recipes do" are different answers,
+    and the second is the one this whole feature exists to give.
+    """
+    widened = {**filters, "show_uncurated": True}
+    return len(_filtered_recipe_ids(session, widened, user_id))
+
+
 def _rows_in_id_order(session: Session, page_ids: list[int]) -> list[Recipe]:
     """Load a page of recipes, preserving the order the ids were given in.
 
@@ -330,9 +402,10 @@ def _apply_filters(
     rated: bool = False,
     wishlisted: bool = False,
     course: list[str] | None = None,
+    show_uncurated: bool = False,
     user_id: int,
 ) -> Select:
-    stmt = stmt.where(*_visible_recipe_condition(user_id))
+    stmt = stmt.where(*_visible_recipe_condition(user_id, uncurated=show_uncurated))
     stmt = _apply_course(stmt, course)
     if cuisine:
         stmt = stmt.where(Recipe.cuisines.any(RecipeCuisine.name.in_(cuisine)))
@@ -451,6 +524,7 @@ def _to_card(
         intrinsic_score=intrinsic_score,
         intrinsic_cost=intrinsic_cost,
         intrinsic_gap_count=intrinsic_gap_count,
+        in_library=_in_library(r),
     )
 
 
@@ -611,6 +685,7 @@ def list_recipes(
     wishlisted: bool = False,
     exclude_id: list[int] = Query(default_factory=list),
     course: list[str] = Query(default_factory=list),
+    show_uncurated: bool = False,
     sort: str = facet_cfg.DEFAULT_SORT,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=24, ge=1, le=MAX_PAGE_SIZE),
@@ -625,7 +700,7 @@ def list_recipes(
         q=q, cuisine=cuisine, diet=diet, tag=tag, protein=protein, max_time=max_time,
         min_protein=min_protein, min_protein_ratio=min_protein_ratio, max_kcal=max_kcal,
         difficulty=difficulty, exclude=exclude, rated=rated, wishlisted=wishlisted,
-        course=course,
+        course=course, show_uncurated=show_uncurated,
     )
     exclude_unmapped = "unmapped" in exclude
     excluded_recipe_ids = set(exclude_id)
@@ -633,10 +708,19 @@ def list_recipes(
     if q or exclude_unmapped:
         filtered_candidate_ids = _filtered_recipe_ids(session, filters, user.id)
         if exclude_unmapped:
+            # Only library recipes are held to it. Mappings are proposed from
+            # library lines, so having unmapped ingredients is the *normal* state
+            # of a recipe outside it — applying the filter to the triage set
+            # would hide nearly everything the toggle exists to show, and the
+            # mapping is work that follows admitting a recipe rather than
+            # preceding it.
+            priced = (
+                _library_recipe_ids(session, filtered_candidate_ids)
+                if show_uncurated
+                else filtered_candidate_ids
+            )
             excluded_recipe_ids.update(
-                _recipe_ids_with_pricing_gaps(
-                    filtered_candidate_ids, factory, csv_path, retailer
-                )
+                _recipe_ids_with_pricing_gaps(priced, factory, csv_path, retailer)
             )
         candidate_ids = [
             recipe_id
@@ -730,6 +814,11 @@ def list_recipes(
         page_size=page_size,
         has_more=has_more,
         next_offset=next_offset if has_more else None,
+        uncurated_total=(
+            _uncurated_match_count(session, filters, user.id)
+            if total == 0 and not show_uncurated
+            else None
+        ),
     )
 
 
@@ -840,7 +929,10 @@ def get_recipe(
     user: User = Depends(get_current_user),
     retailer: str = Depends(get_active_retailer),
 ) -> RecipeDetail:
-    recipe = _require_library_recipe(session, recipe_id)
+    # Wider than the rest of the API on purpose: this is the page you judge an
+    # uncurated recipe on before admitting it. ``in_library`` below is what tells
+    # the client which it is looking at.
+    recipe = _require_readable_recipe(session, recipe_id)
 
     steps = sorted(recipe.steps, key=lambda s: s.index)
     ingredients = [
@@ -912,6 +1004,8 @@ def get_recipe(
             for n in recipe.nutrition
         ],
         macros_suspect=bool(recipe.macros_suspect),
+        in_library=_in_library(recipe),
+        curated=bool(recipe.curated),
         flagged_suspicious=bool(recipe.flagged_suspicious),
         audited_at=recipe.audited_at,
         edits=[
@@ -1258,6 +1352,57 @@ def unhide_recipe(
         session.delete(existing)
         session.commit()
     return {"id": recipe_id, "hidden": False}
+
+
+# --------------------------------------------------------------------------
+# Library membership
+# --------------------------------------------------------------------------
+
+def _set_membership(session: Session, recipe_id: int, included: bool) -> dict[str, int | bool]:
+    """Admit or withdraw one recipe, and say what the library now holds.
+
+    The planner cache needs no nudging: every write to ``recipes`` bumps
+    ``recipe_revision`` through a trigger, so the shared index rebuilds and the
+    recipe becomes priceable on the next request. This is why the write must not
+    be wrapped in ``preserve_after_personal_write`` — the whole point is that
+    everybody's index changes.
+    """
+    recipe = _require_readable_recipe(session, recipe_id)
+    if bool(recipe.manually_included) != included:
+        recipe.manually_included = included
+        session.commit()
+    return {"id": recipe_id, "in_library": _in_library(recipe), "curated": bool(recipe.curated)}
+
+
+@router.post("/recipes/{recipe_id}/library")
+def add_to_library(
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+) -> dict[str, int | bool]:
+    """Admit a recipe the curation rules cut.
+
+    Admin-gated because the library is shared: this is not "show me this", which
+    is what a wishlist is for, but "this is now one of the recipes everybody can
+    search, price and plan". It is the same class of act as approving a mapping.
+    """
+    return _set_membership(session, recipe_id, True)
+
+
+@router.delete("/recipes/{recipe_id}/library")
+def remove_from_library(
+    recipe_id: int,
+    session: Session = Depends(get_session),
+    _admin: User = Depends(require_admin),
+) -> dict[str, int | bool]:
+    """Undo an admission.
+
+    Clears the manual flag only. A recipe the rules curated in stays in — taking
+    one of those out is ``manually_excluded``, a different judgement about a
+    broken row, and this endpoint must not quietly become that.
+    """
+    return _set_membership(session, recipe_id, False)
+
 
 # --------------------------------------------------------------------------
 # Macro audit

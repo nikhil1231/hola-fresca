@@ -358,8 +358,18 @@ export default function RecipeCard({
             )}
             {(recipe.course && recipe.course !== 'main') ||
             recipe.tags?.length > 0 ||
-            proteinLabel ? (
+            proteinLabel ||
+            recipe.in_library === false ? (
               <Group gap={6} mt={4}>
+                {/* Only a widened search returns these, and the difference
+                    matters: it is not priced, not planned and not vetted until
+                    somebody adds it, so the card must not pass for a library
+                    one. */}
+                {recipe.in_library === false && (
+                  <Badge variant="light" color="orange" size="sm" radius="sm">
+                    Uncurated
+                  </Badge>
+                )}
                 {/* Say what this is when it is not dinner: a side, a dessert or
                     something you just buy. Mains are the norm and go unlabelled. */}
                 {recipe.course && recipe.course !== 'main' && (

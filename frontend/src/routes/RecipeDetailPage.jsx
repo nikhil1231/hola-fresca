@@ -60,12 +60,15 @@ import {
   usePersonalRecipeRating,
   useProteinPreview,
   useRecipe,
+  useRecipeLibrary,
   useRecipeWishlist,
   useRevertRecipeEdits,
 } from '../hooks/useRecipeQueries.js'
+import { useCanEditCatalogue } from '../hooks/useAccount.js'
 import { usePreloadStepImages } from '../hooks/usePreloadStepImages.js'
 import {
   formatWeekRange,
+  formatWeekStart,
   isPastWeekStart,
   resolveTargetWeek,
   useScheduleWithHistory,
@@ -108,6 +111,19 @@ const money = new Intl.NumberFormat('en-GB', {
   currency: 'GBP',
 })
 
+// Whether this recipe is one of ours, from a payload that might not say.
+//
+// Only an explicit `false` means it is not. Absence has to read as *yes*, and it
+// is worth being blunt about why: everything the page can do — cook, plan, rate,
+// wishlist — hangs off this, so reading a missing field as "no" empties the page
+// of every action for every recipe. That is exactly what a backend serving the
+// schema from before `in_library` existed produces, and the honest behaviour
+// against one is the old behaviour, not a dead page. It also matches the field's
+// own default on `RecipeDetail`.
+function inLibrary(recipe) {
+  return recipe?.in_library !== false
+}
+
 function formatMoney(value) {
   return money.format(value ?? 0)
 }
@@ -148,6 +164,12 @@ function sumCosts(costs) {
   return total
 }
 
+// `compact` is the desktop hero's variant: a plain Mantine button that inherits
+// the same default radius, height and weight as the "Let's cook!" beside it.
+// The two used to disagree on all three, because this reused `.secondaryCta` —
+// a class built for the mobile CTA grid, where the button is a big two-line
+// block. Dressing that down with overrides is what left a heavy pill next to a
+// light rounded rectangle; not wearing it at all is simpler and matches.
 function PlannerControls({
   disabled,
   entry,
@@ -156,6 +178,7 @@ function PlannerControls({
   onPortionsChange,
   onRemove,
   marginalPerPortion,
+  compact = false,
 }) {
   if (readOnly) {
     if (!entry) return null
@@ -166,6 +189,18 @@ function PlannerControls({
     )
   }
   if (!entry) {
+    if (compact) {
+      return (
+        <Button
+          variant="outline"
+          color="fresh"
+          disabled={disabled}
+          onClick={() => !disabled && onAdd?.()}
+        >
+          Add to this week
+        </Button>
+      )
+    }
     return (
       <Button
         variant="outline"
@@ -185,7 +220,11 @@ function PlannerControls({
 
   const portions = entry.portions
   return (
-    <Group gap="xs" wrap="nowrap" className={classes.plannedControls}>
+    <Group
+      gap="xs"
+      wrap="nowrap"
+      className={compact ? classes.plannedControlsCompact : classes.plannedControls}
+    >
       <Group gap={4} wrap="nowrap" className={classes.portionStepper}>
         <Tooltip label="Decrease portions" withArrow>
           <ActionIcon
@@ -297,8 +336,22 @@ function WishlistButton({ wishlisted, pending, onToggle }) {
   )
 }
 
-function RecipeOptionsMenu({ hidePending, onHide, audit, revert, hasEdits }) {
-  const pending = hidePending || audit.running || revert.isPending
+function RecipeOptionsMenu({
+  hidePending,
+  onHide,
+  audit,
+  revert,
+  hasEdits,
+  inLibrary = true,
+  curated = true,
+  library,
+  isAdmin = false,
+}) {
+  const pending = hidePending || audit.running || revert.isPending || library?.isPending
+  // Only offered for a recipe somebody added by hand. Withdrawing one the rules
+  // curated in is a different judgement — that the source row is broken — and it
+  // has its own flag; the menu must not blur the two into one item.
+  const canWithdraw = isAdmin && inLibrary && !curated
 
   return (
     <Menu shadow="md" position="bottom-end" withinPortal>
@@ -327,6 +380,15 @@ function RecipeOptionsMenu({ hidePending, onHide, audit, revert, hasEdits }) {
         )}
         <Menu.Divider />
         <Menu.Label>Recipe</Menu.Label>
+        {canWithdraw && (
+          <Menu.Item
+            leftSection={<IconMinus size={14} />}
+            onClick={() => library.mutate(false)}
+            disabled={library.isPending}
+          >
+            Remove from library
+          </Menu.Item>
+        )}
         <Menu.Item color="red" leftSection={<IconEyeOff size={14} />} onClick={onHide} disabled={hidePending}>
           Hide from library
         </Menu.Item>
@@ -844,44 +906,133 @@ function ProteinControls({ profile, modifier, preview, baseYield, onChange, read
   )
 }
 
+// Source rating and your own, on one line.
+//
+// This was a bordered panel of three labelled columns, one of which held the
+// wishlist button — a control filed under a heading as though it were a reading.
+// The button belongs with the other controls, and what is left is two facts that
+// fit on a line and no longer need a box drawn round them.
 function DesktopRecipeRatings({ recipe, personalRating, wishlist }) {
   return (
-    <Paper withBorder radius="md" p="sm" className={classes.desktopRatingsPanel}>
-      <Group gap="xl" align="center" wrap="wrap">
-        <Stack gap={3} className={classes.desktopRatingItem}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Source</Text>
-          {recipe.avg_rating != null ? (
-            <Group gap={6} wrap="nowrap" className={classes.desktopRatingValue}>
-              <IconStarFilled size={17} className={classes.star} />
-              <Text fw={700}>{recipe.avg_rating.toFixed(1)}</Text>
-              {recipe.ratings_count != null && (
-                <Text c="dimmed" size="sm">({recipe.ratings_count.toLocaleString()})</Text>
-              )}
-            </Group>
-          ) : (
-            <Text size="sm" c="dimmed">Not rated</Text>
+    <Group gap="lg" align="center" wrap="wrap" className={classes.desktopRatingsRow}>
+      {recipe.avg_rating != null ? (
+        <Group gap={6} wrap="nowrap">
+          <IconStarFilled size={16} className={classes.star} />
+          <Text fw={700} size="sm">{recipe.avg_rating.toFixed(1)}</Text>
+          {recipe.ratings_count != null && (
+            <Text c="dimmed" size="sm">({recipe.ratings_count.toLocaleString()})</Text>
           )}
-        </Stack>
+        </Group>
+      ) : (
+        <Text size="sm" c="dimmed">Not rated</Text>
+      )}
 
-        <Stack gap={3} className={classes.desktopRatingItem}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Yours</Text>
-          <PersonalRatingControl
-            value={recipe.personal_rating}
-            pending={personalRating.isPending}
-            onSet={(rating) => personalRating.mutate(rating)}
-          />
-        </Stack>
+      {/* The label is gone because the control already says it: filled stars are
+          the source's, hollow ones are waiting for yours, and they sit next to
+          each other. The wishlist joins them — all three are what *you* think of
+          the recipe, as against the facts about it on the line above. */}
+      <PersonalRatingControl
+        value={recipe.personal_rating}
+        pending={personalRating.isPending}
+        onSet={(rating) => personalRating.mutate(rating)}
+      />
 
-        <Stack gap={3} className={classes.desktopRatingItem}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={700}>Wishlist</Text>
-          <WishlistButton
-            wishlisted={recipe.wishlisted}
-            pending={wishlist.isPending}
-            onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
-          />
-        </Stack>
+      <WishlistButton
+        wishlisted={recipe.wishlisted}
+        pending={wishlist.isPending}
+        onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
+      />
+    </Group>
+  )
+}
+
+// The facts about the recipe, as one dimmed line.
+//
+// Time, difficulty and servings were already here; the week and the marginal
+// cost arrived as `Badge`s in the row of buttons above, where they read as
+// controls that did not respond to being clicked. They say something rather than
+// do something, so they say it here.
+function DesktopHeroMeta({ recipe, weekStart, weekReadOnly, marginalPerPortion }) {
+  const facts = []
+  if (recipe.total_time_min != null) {
+    facts.push({ key: 'time', icon: <IconClock size={16} />, label: `${recipe.total_time_min} min` })
+  }
+  if (recipe.base_yield != null) {
+    facts.push({ key: 'yield', icon: <IconUsers size={16} />, label: `Serves ${recipe.base_yield}` })
+  }
+  facts.push({
+    key: 'week',
+    icon: weekReadOnly ? <IconLock size={15} /> : <IconCalendarWeek size={15} />,
+    // The start date names the week on its own — every week is seven days from
+    // a Monday, so spelling out the end was six words to say nothing.
+    label: formatWeekStart(weekStart),
+    hint: weekReadOnly ? 'Shown as it was cooked this week' : 'The week this adds to',
+  })
+  if (marginalPerPortion != null) {
+    facts.push({
+      key: 'cost',
+      label: `${formatSignedMoney(marginalPerPortion)} pp`,
+      hint: "What this recipe adds to the week's shop per portion.",
+      strong: true,
+    })
+  }
+
+  return (
+    <Group gap="md" align="center" wrap="wrap" className={classes.desktopHeroMeta}>
+      {facts.map((fact) => {
+        const body = (
+          <Group gap={6} wrap="nowrap">
+            {fact.icon}
+            <Text size="sm" c={fact.strong ? 'fresh.4' : undefined} fw={fact.strong ? 700 : undefined}>
+              {fact.label}
+            </Text>
+          </Group>
+        )
+        return fact.hint ? (
+          <Tooltip key={fact.key} label={fact.hint} withArrow>
+            {body}
+          </Tooltip>
+        ) : (
+          <span key={fact.key}>{body}</span>
+        )
+      })}
+    </Group>
+  )
+}
+
+// What to do about a recipe the curation rules cut.
+//
+// It stands where the cook and plan buttons stand for a library recipe, because
+// it is the same slot in the same decision — there is simply one thing to settle
+// first. Admitting it is a shared act, so a non-admin is told what the state is
+// rather than given a button that would be refused.
+function LibraryNotice({ recipe, library, isAdmin }) {
+  if (inLibrary(recipe)) return null
+  return (
+    <Alert
+      color="orange"
+      variant="light"
+      radius="md"
+      icon={<IconAlertTriangle size={18} />}
+      className={classes.libraryNotice}
+    >
+      <Group justify="space-between" align="center" wrap="wrap" gap="sm">
+        <Text size="sm">
+          Not in your library, so it can't be planned, priced or rated yet.
+        </Text>
+        {isAdmin && (
+          <Button
+            size="xs"
+            color="fresh"
+            leftSection={<IconPlus size={15} />}
+            loading={library.isPending}
+            onClick={() => library.mutate(true)}
+          >
+            Add to library
+          </Button>
+        )}
       </Group>
-    </Paper>
+    </Alert>
   )
 }
 
@@ -906,6 +1057,8 @@ function DesktopRecipeDetail({
   personalRating,
   wishlist,
   hideRecipe,
+  library,
+  isAdmin,
   audit,
   revert,
   servings,
@@ -951,7 +1104,7 @@ function DesktopRecipeDetail({
           Back
         </Button>
 
-        <Grid gutter="xl" align="stretch">
+        <Grid gutter={48} align="stretch">
           <Grid.Col span={6}>
             <Image
               src={heroUrl}
@@ -966,7 +1119,7 @@ function DesktopRecipeDetail({
             />
           </Grid.Col>
           <Grid.Col span={6}>
-            <Stack gap="sm" h="100%" justify="center">
+            <Stack gap="md" h="100%" justify="center" pl={32}>
               <Group gap="xs">
                 {recipe.cuisines.map((cuisine) => (
                   <Badge key={cuisine} color="fresh" variant="light" radius="sm">{cuisine}</Badge>
@@ -976,89 +1129,71 @@ function DesktopRecipeDetail({
                 ))}
               </Group>
 
-              <Title order={1} className={classes.desktopTitle}>{recipe.name}</Title>
-              {recipe.headline && <Text c="dimmed" fz="lg">{recipe.headline}</Text>}
-
-              <Group gap="sm" mt="xs" className={classes.desktopHeroActions}>
-                {recipe.steps.length > 0 && (
-                  <Button
-                    component={Link}
-                    to={`/recipes/${recipe.id}/cook${weekStart ? `?week=${weekStart}` : ''}`}
-                    replace
-                    color="fresh"
-                    leftSection={<IconChefHat size={17} />}
-                  >
-                    Let's cook!
-                  </Button>
-                )}
-                <PlannerControls
-                  entry={plannerEntry}
-                  readOnly={weekReadOnly}
-                  disabled={!plannerEntry && upcomingWeekFull}
-                  marginalPerPortion={marginalPerPortion}
-                  onAdd={() => addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })}
-                  onRemove={() => removeRecipeFromWeek(weekStart, recipe.id)}
-                  onPortionsChange={(portions) => setRecipePortions(weekStart, recipe.id, portions)}
-                />
-                <Tooltip
-                  label={weekReadOnly ? 'Shown as it was cooked this week' : 'The week this adds to'}
-                  withArrow
-                >
-                  <Badge
-                    color="gray"
-                    variant="light"
-                    radius="sm"
-                    size="lg"
-                    leftSection={weekReadOnly ? <IconLock size={13} /> : <IconCalendarWeek size={13} />}
-                  >
-                    {formatWeekRange(weekStart)}
-                  </Badge>
-                </Tooltip>
+              {/* The menu rides the title's first line. It acts on the whole
+                  recipe, so it belongs where the recipe is named rather than
+                  queued behind the buttons, where it read as a third action. */}
+              <Group gap="sm" align="flex-start" wrap="nowrap" className={classes.desktopTitleRow}>
+                <Title order={1} className={classes.desktopTitle}>{recipe.name}</Title>
                 <RecipeOptionsMenu
                   hidePending={hideRecipe.isPending}
                   onHide={hide}
                   audit={audit}
                   revert={revert}
                   hasEdits={(recipe.edits ?? []).length > 0}
+                  inLibrary={inLibrary(recipe)}
+                  curated={recipe.curated}
+                  library={library}
+                  isAdmin={isAdmin}
                 />
-                {marginalPerPortion != null && (
-                  <Tooltip
-                    label="What this recipe adds to the week's shop per portion."
-                    withArrow
-                  >
-                    <Badge color="fresh" variant="light" radius="sm" size="lg">
-                      {formatSignedMoney(marginalPerPortion)} pp to shop
-                    </Badge>
-                  </Tooltip>
-                )}
               </Group>
+              {recipe.headline && <Text c="dimmed" fz="lg">{recipe.headline}</Text>}
 
-              <DesktopRecipeRatings
+              <LibraryNotice recipe={recipe} library={library} isAdmin={isAdmin} />
+
+              {/* The two things worth doing, and nothing else. The week and the
+                  marginal cost used to sit here as badges that looked like
+                  buttons and did nothing; they are facts, so they are on the
+                  meta line below. */}
+              {inLibrary(recipe) && (
+                <Group gap="md" mt="md" wrap="nowrap" className={classes.desktopHeroActions}>
+                  {recipe.steps.length > 0 && (
+                    <Button
+                      component={Link}
+                      to={`/recipes/${recipe.id}/cook${weekStart ? `?week=${weekStart}` : ''}`}
+                      replace
+                      color="fresh"
+                      leftSection={<IconChefHat size={17} />}
+                    >
+                      Let's cook!
+                    </Button>
+                  )}
+                  <PlannerControls
+                    compact
+                    entry={plannerEntry}
+                    readOnly={weekReadOnly}
+                    disabled={!plannerEntry && upcomingWeekFull}
+                    marginalPerPortion={marginalPerPortion}
+                    onAdd={() => addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })}
+                    onRemove={() => removeRecipeFromWeek(weekStart, recipe.id)}
+                    onPortionsChange={(portions) => setRecipePortions(weekStart, recipe.id, portions)}
+                  />
+                </Group>
+              )}
+
+              <DesktopHeroMeta
                 recipe={recipe}
-                personalRating={personalRating}
-                wishlist={wishlist}
+                weekStart={weekStart}
+                weekReadOnly={weekReadOnly}
+                marginalPerPortion={marginalPerPortion}
               />
 
-              <Group gap="lg" mt="xs" align="flex-start">
-                {recipe.total_time_min != null && (
-                  <Group gap={6} wrap="nowrap">
-                    <IconClock size={18} />
-                    <Text>{recipe.total_time_min} min</Text>
-                  </Group>
-                )}
-                {recipe.difficulty != null && (
-                  <Group gap={6} wrap="nowrap">
-                    <IconChefHat size={18} />
-                    <Text>{DIFFICULTY[recipe.difficulty] ?? 'Unknown difficulty'}</Text>
-                  </Group>
-                )}
-                {recipe.base_yield != null && (
-                  <Group gap={6} wrap="nowrap">
-                    <IconUsers size={18} />
-                    <Text>Serves {recipe.base_yield}</Text>
-                  </Group>
-                )}
-              </Group>
+              {inLibrary(recipe) && (
+                <DesktopRecipeRatings
+                  recipe={recipe}
+                  personalRating={personalRating}
+                  wishlist={wishlist}
+                />
+              )}
             </Stack>
           </Grid.Col>
         </Grid>
@@ -1318,6 +1453,11 @@ export default function RecipeDetailPage() {
   const personalRating = usePersonalRecipeRating(id)
   const wishlist = useRecipeWishlist(id)
   const hideRecipe = useHideRecipe(id)
+  const library = useRecipeLibrary(id)
+  // Admitting a recipe is a catalogue write, so it is offered on the same terms
+  // as the mapping tools: presentation only, with `require_admin` doing the
+  // actual refusing.
+  const { allowed: isAdmin } = useCanEditCatalogue()
   const heroUrl = recipe?.image_url || RECIPE_PLACEHOLDER_IMAGE
   usePreloadStepImages(recipe?.steps, { enabled: settledHeroUrl === heroUrl })
 
@@ -1419,6 +1559,8 @@ export default function RecipeDetailPage() {
         personalRating={personalRating}
         wishlist={wishlist}
         hideRecipe={hideRecipe}
+        library={library}
+        isAdmin={isAdmin}
         audit={audit}
         revert={revert}
         servings={servings}
@@ -1462,16 +1604,22 @@ export default function RecipeDetailPage() {
             <IconArrowLeft size={26} />
           </ActionIcon>
           <Group gap="md" wrap="nowrap">
-            <WishlistButton
-              wishlisted={recipe.wishlisted}
-              pending={wishlist.isPending}
-              onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
-            />
+            {inLibrary(recipe) && (
+              <WishlistButton
+                wishlisted={recipe.wishlisted}
+                pending={wishlist.isPending}
+                onToggle={(wishlisted) => wishlist.mutate(wishlisted)}
+              />
+            )}
             <RecipeOptionsMenu
               hidePending={hideRecipe.isPending}
               audit={audit}
               revert={revert}
               hasEdits={(recipe.edits ?? []).length > 0}
+              inLibrary={inLibrary(recipe)}
+              curated={recipe.curated}
+              library={library}
+              isAdmin={isAdmin}
               onHide={() => {
                 if (!window.confirm('Hide this recipe from the library?')) return
                 // Hiding takes it out of the week you are planning, not out of
@@ -1511,32 +1659,36 @@ export default function RecipeDetailPage() {
               <RatingSummary recipe={recipe} />
             </Group>
 
-            <div className={classes.ctaGrid}>
-              {recipe.steps.length > 0 && (
-                <Button
-                  component={Link}
-                  to={`/recipes/${recipe.id}/cook${weekStart ? `?week=${weekStart}` : ''}`}
-                  replace
-                  color="fresh"
-                  radius="md"
-                  className={classes.primaryCta}
-                >
-                  <span>
-                    Let's cook
-                    <small>{recipe.total_time_min ?? 25} min · step by step</small>
-                  </span>
-                </Button>
-              )}
-              <PlannerControls
-                entry={plannerEntry}
-                readOnly={weekReadOnly}
-                disabled={!plannerEntry && upcomingWeekFull}
-                marginalPerPortion={marginalPerPortion}
-                onAdd={() => addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })}
-                onRemove={() => removeRecipeFromWeek(weekStart, recipe.id)}
-                onPortionsChange={(portions) => setRecipePortions(weekStart, recipe.id, portions)}
-              />
-            </div>
+            <LibraryNotice recipe={recipe} library={library} isAdmin={isAdmin} />
+
+            {inLibrary(recipe) && (
+              <div className={classes.ctaGrid}>
+                {recipe.steps.length > 0 && (
+                  <Button
+                    component={Link}
+                    to={`/recipes/${recipe.id}/cook${weekStart ? `?week=${weekStart}` : ''}`}
+                    replace
+                    color="fresh"
+                    radius="md"
+                    className={classes.primaryCta}
+                  >
+                    <span>
+                      Let's cook
+                      <small>{recipe.total_time_min ?? 25} min · step by step</small>
+                    </span>
+                  </Button>
+                )}
+                <PlannerControls
+                  entry={plannerEntry}
+                  readOnly={weekReadOnly}
+                  disabled={!plannerEntry && upcomingWeekFull}
+                  marginalPerPortion={marginalPerPortion}
+                  onAdd={() => addRecipeToWeek(recipe, weekStart, { protein, limit: recipesPerWeek })}
+                  onRemove={() => removeRecipeFromWeek(weekStart, recipe.id)}
+                  onPortionsChange={(portions) => setRecipePortions(weekStart, recipe.id, portions)}
+                />
+              </div>
+            )}
           </div>
 
           <MacroPanel
@@ -1547,7 +1699,9 @@ export default function RecipeDetailPage() {
           />
 
           <aside className={classes.sideStack}>
-            <RateRecipePanel recipe={recipe} personalRating={personalRating} />
+            {inLibrary(recipe) && (
+              <RateRecipePanel recipe={recipe} personalRating={personalRating} />
+            )}
             <div className={classes.desktopAdjustments}>
               <DetailControls
                 servings={servings}

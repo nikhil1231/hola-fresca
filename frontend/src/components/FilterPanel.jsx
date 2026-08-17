@@ -149,6 +149,19 @@ export default function FilterPanel({
         </Stack>
       </Section>
 
+      <Section label="Library">
+        <Switch
+          size="xs"
+          color="fresh"
+          label="Include uncurated"
+          description="Everything scraped, not just the vetted library. Not priced until added."
+          checked={Boolean(filters.show_uncurated)}
+          onChange={(event) =>
+            setScalar('show_uncurated', event.currentTarget.checked ? 'true' : null)
+          }
+        />
+      </Section>
+
       <Section label="Difficulty">
         <SegmentedControl
           fullWidth

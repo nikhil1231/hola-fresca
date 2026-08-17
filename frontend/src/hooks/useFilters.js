@@ -5,7 +5,12 @@ import { useSearchParams } from 'react-router-dom'
 const ARRAY_KEYS = ['cuisine', 'diet', 'tag', 'protein', 'exclude', 'course']
 // Keys stored as single numeric params.
 const NUMBER_KEYS = ['max_time', 'min_protein', 'min_protein_ratio', 'max_kcal', 'difficulty']
-const BOOLEAN_KEYS = ['rated', 'wishlisted']
+// `show_uncurated` is a filter like the others as far as the URL is concerned,
+// but it widens rather than narrows: it takes the search past the curated
+// library into everything the scrape holds. It counts towards the active-filter
+// badge deliberately — a search returning recipes nobody vetted should never be
+// something you forgot you switched on.
+const BOOLEAN_KEYS = ['rated', 'wishlisted', 'show_uncurated']
 
 export const DEFAULT_SORT = 'best_fit'
 const DEFAULT_EXCLUDES = ['unmapped']
@@ -80,6 +85,25 @@ export function useFilters() {
     [setSearchParams],
   )
 
+  // Several scalars in one write. Two `setScalar` calls in one handler do *not*
+  // compose: react-router hands each updater the committed params rather than
+  // the pending ones, so the second is built from the state before the first and
+  // silently drops it. Anything that changes two filters at once has to come
+  // through here.
+  const setScalars = useCallback(
+    (values) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        for (const [key, value] of Object.entries(values)) {
+          if (value == null || value === '' || value === DEFAULT_SORT) next.delete(key)
+          else next.set(key, String(value))
+        }
+        return next
+      })
+    },
+    [setSearchParams],
+  )
+
   const toggleArrayValue = useCallback(
     (key, value) => {
       setSearchParams((prev) => {
@@ -137,5 +161,5 @@ export function useFilters() {
     })
   }, [setSearchParams])
 
-  return { filters, setScalar, setArray, toggleArrayValue, clearAll }
+  return { filters, setScalar, setScalars, setArray, toggleArrayValue, clearAll }
 }

@@ -51,6 +51,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gen = sub.add_parser("generate", help="add the next N ingredients to the review queue")
     p_gen.add_argument("--count", type=int, default=10)
     p_gen.add_argument("--model", default=None)
+    p_gen.add_argument(
+        "--llm-workers",
+        type=int,
+        default=None,
+        help="proposals in flight behind the serial search (default 4)",
+    )
 
     sub.add_parser(
         "reorder",
@@ -116,7 +122,11 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             job = generate_mod.generate(
-                session_factory, count=args.count, model=args.model, retailer=retailer
+                session_factory,
+                count=args.count,
+                model=args.model,
+                retailer=retailer,
+                llm_workers=args.llm_workers or generate_mod.DEFAULT_LLM_WORKERS,
             )
         except Exception as exc:  # noqa: BLE001 - config/auth errors should print cleanly
             print(f"generate failed: {exc}", file=sys.stderr)
@@ -149,8 +159,12 @@ def main(argv: list[str] | None = None) -> int:
             session_factory, statuses=_statuses(args.include_proposed), retailer=retailer
         )
         print(
-            f"coverage: {rep.lines_resolved}/{rep.lines_total} curated ingredient lines "
-            f"resolved ({rep.pct:.1f}%)"
+            f"coverage: {rep.recipes_priceable}/{rep.recipes_total} library recipes fully "
+            f"priceable ({rep.recipes_pct:.1f}%)"
+        )
+        print(
+            f"  ingredient lines resolved: {rep.lines_resolved}/{rep.lines_total} "
+            f"({rep.pct:.1f}%)"
         )
         print(f"  ingredient groups resolved: {rep.resolved_keys}/{rep.distinct_keys}")
         print("  top unresolved (by line frequency):")

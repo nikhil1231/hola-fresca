@@ -17,6 +17,7 @@ import {
   retryCookMap,
   setPackPreference,
   setPersonalRecipeRating,
+  setRecipeLibrary,
   setRecipeWishlist,
   startCookMap,
 } from '../api/client.js'
@@ -277,6 +278,24 @@ export function useHideRecipe(id) {
       qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
       qc.invalidateQueries({ queryKey: ['facets'] })
       qc.invalidateQueries({ queryKey: ['planner-basket'] })
+    },
+  })
+}
+
+// Admitting a recipe changes the shared library, so it invalidates far more than
+// a personal write does: the browse lists, the facet counts and the planner's
+// suggestions all describe a library this just changed the membership of. The
+// detail query is refetched rather than removed — the page stays open, and it is
+// the payload's `in_library` that has to catch up.
+export function useRecipeLibrary(id) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (inLibrary) => setRecipeLibrary(id, inLibrary),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recipe', id] })
+      qc.invalidateQueries({ queryKey: ['recipes'] })
+      qc.invalidateQueries({ queryKey: ['planner-suggestions'] })
+      qc.invalidateQueries({ queryKey: ['facets'] })
     },
   })
 }

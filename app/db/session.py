@@ -87,6 +87,7 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "source_published": "INTEGER DEFAULT 0",
         "course": "VARCHAR(16) DEFAULT 'main'",
         "manually_excluded": "INTEGER DEFAULT 0",
+        "manually_included": "INTEGER DEFAULT 0",
     },
 }
 

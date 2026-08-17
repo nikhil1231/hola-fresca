@@ -74,6 +74,57 @@ def _seed(factory):
         return recipe.id
 
 
+def test_one_unmapped_line_holds_the_whole_recipe_back(factory, tmp_path):
+    """Why the headline is per recipe: a recipe is shoppable or it is not.
+
+    Half the lines mapped is half a basket, which cooks nothing.
+    """
+    with factory() as s:
+        seed_candidates(s, CANON, "Basil Pesto", PESTO, line_count=200)
+        seed_candidates(s, ALIAS, "Fresh Pesto", PESTO, line_count=90)
+        service.save_decision(  # only one of the two ingredients gets mapped
+            s,
+            gather_candidates(s, CANON),
+            service.DecisionInput(
+                status="approved", accepted=[service.AcceptedInput(sku="pesto1", rank=1)]
+            ),
+        )
+        s.add(Recipe(
+            source="hellofresh", source_id="r1", url="", name="Pesto Pasta", curated=1,
+            ingredients=[
+                RecipeIngredient(name="Basil Pesto", source_ingredient_id=SID_CANON,
+                                 amount=100, unit="grams", amount_g=100),
+                RecipeIngredient(name="Fresh Pesto", source_ingredient_id=SID_ALIAS,
+                                 amount=100, unit="grams", amount_g=100),
+            ],
+        ))
+        s.commit()
+
+    rep = coverage.coverage_report(factory, csv_path=_csv(tmp_path))
+    assert rep.lines_resolved == 1 and rep.lines_total == 2  # 50% of the work done
+    assert rep.recipes_total == 1 and rep.recipes_priceable == 0  # nothing shoppable
+    assert rep.recipes_pct == 0.0
+
+
+def test_coverage_counts_a_hand_admitted_recipe(factory, tmp_path):
+    """The library is what the planner prices, so ``curated`` alone is too narrow."""
+    _seed(factory)
+    with factory() as s:
+        s.add(Recipe(
+            source="hellofresh", source_id="r2", url="", name="Admitted By Hand",
+            curated=0, manually_included=1,
+            ingredients=[
+                RecipeIngredient(name="Basil Pesto", source_ingredient_id=SID_CANON,
+                                 amount=100, unit="grams", amount_g=100),
+            ],
+        ))
+        s.commit()
+
+    rep = coverage.coverage_report(factory, csv_path=_csv(tmp_path))
+    assert rep.recipes_total == 2
+    assert rep.recipes_priceable == 2
+
+
 def test_unaliased_duplicates_are_bought_twice(factory, tmp_path):
     rid = _seed(factory)
     basket = coverage.build_basket(factory, [rid], csv_path=_csv(tmp_path))
@@ -108,6 +159,8 @@ def test_pantry_staples_count_as_covered(factory, tmp_path):
         )
     rep = coverage.coverage_report(factory, csv_path=_csv(tmp_path))
     assert rep.lines_resolved == rep.lines_total == 2
+    # ...and the recipe those two lines belong to is now shoppable end to end.
+    assert rep.recipes_priceable == rep.recipes_total == 1
 
 
 def test_count_sold_pack_uses_each_to_grams_for_capacity(factory, tmp_path):

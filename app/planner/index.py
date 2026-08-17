@@ -20,6 +20,7 @@ from app.db.models import (
     Product,
     Recipe,
     RecipeIngredient,
+    in_library,
 )
 from app.mapping.candidates import load_recipe_pct_index, load_source_id_index
 from app.planner import waste as waste_mod
@@ -337,7 +338,7 @@ def _derive_count_metadata(
 ) -> int:
     """Set ``each_to_grams`` and ``unit_kind`` from how the library states amounts.
 
-    Only curated recipes are consulted: they are the only ones the planner will
+    Only library recipes are consulted: they are the only ones the planner will
     ever put in a basket, and a classification driven by lines from abandoned 2013
     stubs is not evidence about anything that can be cooked.
 
@@ -351,7 +352,7 @@ def _derive_count_metadata(
     stmt = (
         select(RecipeIngredient)
         .join(Recipe, RecipeIngredient.recipe_id == Recipe.id)
-        .where(Recipe.curated == 1, Recipe.manually_excluded == 0)
+        .where(*in_library())
     )
     for line in session.scalars(stmt):
         raw_key = sid_index.get(line.source_ingredient_id or "")
@@ -594,7 +595,7 @@ def _load_recipes(
     if recipe_ids is not None:
         stmt = stmt.where(Recipe.id.in_(recipe_ids))
     elif curated_only:
-        stmt = stmt.where(Recipe.curated == 1, Recipe.manually_excluded == 0)
+        stmt = stmt.where(*in_library())
 
     recipes: dict[int, PlanRecipe] = {}
     for recipe in session.scalars(stmt).unique():

@@ -31,6 +31,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     event,
+    or_,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -239,6 +240,14 @@ class Recipe(Base):
     # data, while this records a local human decision.
     manually_excluded: Mapped[bool] = mapped_column(Integer, default=0, index=True)
 
+    # The other manual override: a recipe the rules cut that we want anyway.
+    # Curation is deliberately strict — it demands ratings a new or niche dish may
+    # never earn — so roughly two thirds of a complete, cookable scrape sits
+    # outside the library. This admits one of them without loosening the rules for
+    # everything else, and survives a re-curation for the same reason
+    # ``manually_excluded`` does: it is a decision, not a derivation.
+    manually_included: Mapped[bool] = mapped_column(Integer, default=0, index=True)
+
     # Raised by hand from the recipe page ("these macros look wrong"), distinct
     # from the computed ``macros_suspect`` heuristic: this one records that a
     # person asked for a second look, and survives the audit that answers it.
@@ -280,6 +289,48 @@ class Recipe(Base):
     )
     cook_map: Mapped["RecipeCookMap | None"] = relationship(
         back_populates="recipe", cascade="all, delete-orphan", uselist=False
+    )
+
+
+def _admitted():
+    """Admitted to the library, by the curation rules or by a person."""
+    return or_(Recipe.curated == 1, Recipe.manually_included == 1)
+
+
+def in_library():
+    """The rows that count as the shared library, as SQL conditions.
+
+    Lives here rather than in either caller because the API and the planner index
+    have to agree on it exactly: a recipe the browse page will show and the
+    planner will not price is a dead end, and when this was two copies of
+    ``Recipe.curated == 1`` that is precisely what admitting a recipe by hand
+    would have produced.
+
+    Membership is *earned or granted*: the curation rules admit a recipe, or a
+    person does. Exclusion overrides both — a broken source row stays out however
+    it got in.
+    """
+    return (_admitted(), Recipe.manually_excluded == 0)
+
+
+def is_triageable():
+    """Rows worth *offering* to a person deciding what to admit.
+
+    Wider than :func:`in_library` and deliberately not as wide as the table. The
+    library rules cut recipes for being unpopular, which is a judgement worth
+    overriding by hand; they also cut rows with no ingredients, no steps or no
+    nutrition, which is not a judgement but an incomplete scrape. Showing those
+    would fill the list with things that cannot be cooked, priced or planned.
+
+    Membership in the library counts on its own, so this is a strict superset of
+    it. That matters more than it looks: ``is_complete`` is derived by the
+    scrape, so requiring it outright would let a library recipe with a stale flag
+    *disappear* when the reader widened their search — a toggle labelled "show me
+    more" that shows less.
+    """
+    return (
+        or_(Recipe.is_complete == 1, _admitted()),
+        Recipe.manually_excluded == 0,
     )
 
 

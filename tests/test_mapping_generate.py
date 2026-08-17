@@ -5,6 +5,7 @@ Both the browser and the LLM are faked, so these stay offline.
 from __future__ import annotations
 
 import csv
+import threading
 
 from sqlalchemy import select
 
@@ -64,6 +65,45 @@ class FakeRunner:
             "price": {"amount": "1.50", "currency": "GBP"},
             "packSizeDescription": "300g",
         }]}
+
+
+class WatchfulRunner(FakeRunner):
+    """A runner that notices if it is ever asked two things at once."""
+
+    def __init__(self, empty_for=()):
+        super().__init__(empty_for=empty_for)
+        self._guard = threading.Lock()
+        self.in_flight = 0
+        self.peak_in_flight = 0
+        self.threads: set[str] = set()
+
+    def search(self, term, timeout=None):
+        with self._guard:
+            self.in_flight += 1
+            self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+            self.threads.add(threading.current_thread().name)
+        try:
+            return super().search(term, timeout)
+        finally:
+            with self._guard:
+                self.in_flight -= 1
+
+
+class RendezvousCompleter:
+    """Answers only once ``parties`` proposals are in flight together.
+
+    A serial propose leg can never satisfy the barrier, so it times out and the
+    run comes back with errors instead of proposals — which is the assertion.
+    """
+
+    def __init__(self, parties, timeout=10.0):
+        self._barrier = threading.Barrier(parties, timeout=timeout)
+        self.threads: set[str] = set()
+
+    def __call__(self, system, user, schema):
+        self.threads.add(threading.current_thread().name)
+        self._barrier.wait()
+        return fake_complete(system, user, schema)
 
 
 def fake_complete(system, user, schema):
@@ -127,6 +167,42 @@ def test_generate_files_the_three_outcomes(factory, tmp_path, monkeypatch):
         assert by_key["name:premium tomato mix"].status == "no_match"
         proposed = by_key["name:macaroni"]
         assert proposed.status == "proposed" and proposed.products
+
+
+def test_proposals_overlap_while_searches_stay_serial(factory, tmp_path, monkeypatch):
+    """The point of the pipeline: one shop asked one thing at a time, N proposals."""
+    monkeypatch.setattr(live_search.storage, "write_raw", lambda *a, **k: None)
+    runner = WatchfulRunner()
+    # Three of the four rows need a proposal; the pantry line needs neither leg.
+    complete = RendezvousCompleter(parties=3)
+
+    job = gen.generate(
+        factory, count=10, complete=complete, runner=runner,
+        csv_path=_csv(tmp_path), llm_workers=4,
+    )
+
+    assert job.added == 3 and job.errors == 0
+    assert len(complete.threads) == 3      # all three were in flight together
+    assert runner.peak_in_flight == 1      # ...while the shop saw one call at a time
+    assert len(runner.threads) == 1
+    assert runner.threads.isdisjoint(complete.threads)
+    assert job.processed == job.total      # the pool's work is counted, not lost
+
+
+def test_one_worker_proposes_one_at_a_time(factory, tmp_path, monkeypatch):
+    """Still pipelined against the search loop — just no two proposals at once."""
+    monkeypatch.setattr(live_search.storage, "write_raw", lambda *a, **k: None)
+    runner = WatchfulRunner()
+
+    job = gen.generate(
+        factory, count=10, complete=fake_complete, runner=runner,
+        csv_path=_csv(tmp_path), llm_workers=1,
+    )
+
+    assert job.added == 3 and job.staples == 1 and job.errors == 0
+    assert runner.peak_in_flight == 1
+    with factory() as s:
+        assert s.query(IngredientMapping).count() == 4
 
 
 def test_generate_is_resumable(factory, tmp_path, monkeypatch):

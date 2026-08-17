@@ -226,14 +226,34 @@ def test_stats_reports_coverage_and_remaining(client):
     r = client.get("/api/mapping/stats")
     assert r.status_code == 200
     body = r.json()
-    # No curated recipes seeded, so line coverage is zero but the shape is right.
+    # One curated recipe is seeded, and its only ingredient is unmapped here.
     assert set(body) >= {
+        "recipes_total", "recipes_priceable", "recipes_pct",
         "lines_total", "lines_resolved", "lines_pct",
         "distinct_keys", "resolved_keys", "mappings_total", "approved",
         "remaining_to_add",
     }
     assert body["lines_pct"] == 0.0
+    assert body["recipes_total"] == 1
+    assert body["recipes_priceable"] == 0
+    assert body["recipes_pct"] == 0.0
     assert body["remaining_to_add"] == 0  # the one CSV row already has candidates
+
+
+def test_stats_headline_recipe_becomes_priceable_once_its_last_line_maps(client):
+    """The headline is per recipe: mapping the last gap flips it in one step."""
+    before = client.get("/api/mapping/stats").json()
+    assert before["recipes_priceable"] == 0
+
+    client.post(
+        f"/api/mapping/ingredients/{KEY_Q}",
+        json={"status": "approved", "accepted": [{"sku": "p1", "rank": 1}]},
+    )
+
+    after = client.get("/api/mapping/stats").json()
+    assert after["recipes_priceable"] == 1
+    assert after["recipes_pct"] == 100.0
+    assert after["lines_pct"] == 100.0
 
 
 def test_stats_counts_approved_mappings(client):

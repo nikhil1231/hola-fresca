@@ -307,6 +307,9 @@ def get_stats(
         generate_mod.pending_worklist(session, count=100_000, retailer=retailer)
     )
     return MappingStatsOut(
+        recipes_total=rep.recipes_total,
+        recipes_priceable=rep.recipes_priceable,
+        recipes_pct=round(rep.recipes_pct, 1),
         lines_total=rep.lines_total,
         lines_resolved=rep.lines_resolved,
         lines_pct=round(rep.pct, 1),

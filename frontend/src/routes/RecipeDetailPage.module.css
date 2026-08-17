@@ -581,6 +581,7 @@
 }
 
 .desktopTitle {
+  flex: 1 1 auto;
   max-width: 680px;
   color: var(--hf-text);
   font-size: var(--hf-page-title-size);
@@ -589,48 +590,49 @@
   text-wrap: balance;
 }
 
-.desktopHeroActions .secondaryCta,
-.desktopHeroActions .plannedControls {
+/* The menu is nudged down onto the title's first line rather than its box: a
+   heading's line box sits taller than its letters, so a flex-start icon floats
+   above the capitals it is meant to sit beside. */
+.desktopTitleRow > button {
+  flex: 0 0 auto;
+  margin-top: 6px;
+}
+
+/* The planned state, sized to sit level with the buttons it replaces. It keeps
+   its outline — it is a container holding a stepper, not a button — but takes
+   the same radius and height so the row does not change shape when a recipe is
+   added to the week. */
+.plannedControlsCompact {
+  justify-content: center;
   min-height: 36px;
-  border-radius: var(--hf-radius-sm) !important;
-}
-
-.desktopHeroActions .secondaryCta {
-  padding-inline: 14px;
-  font-size: var(--mantine-font-size-sm);
-}
-
-.desktopHeroActions .secondaryCta span {
-  display: block;
-}
-
-.desktopHeroActions .secondaryCta small {
-  display: none;
-}
-
-.desktopHeroActions .plannedControls {
   padding-inline: 4px;
+  border: 1px solid var(--hf-border-strong);
+  border-radius: var(--mantine-radius-lg);
+  background: rgba(73, 221, 132, 0.06);
 }
 
-.desktopHeroActions .portionStepper {
+.plannedControlsCompact .portionStepper {
   height: 32px;
   border: 0;
   background: transparent;
 }
 
-.desktopRatingsPanel {
-  width: fit-content;
-  max-width: 100%;
-  border-color: var(--hf-border) !important;
-  background: var(--hf-surface) !important;
+.desktopHeroMeta {
+  color: var(--hf-text-muted);
+  row-gap: 6px;
 }
 
-.desktopRatingItem {
-  min-width: 92px;
+.desktopHeroMeta svg {
+  flex-shrink: 0;
+  opacity: 0.75;
 }
 
-.desktopRatingValue {
-  min-height: 36px;
+.desktopRatingsRow {
+  min-height: 32px;
+}
+
+.libraryNotice {
+  border: 1px solid var(--hf-border-strong);
 }
 
 .desktopMacroGrid .macro {

@@ -55,6 +55,10 @@ class RecipeCard(BaseModel):
     intrinsic_score: float | None = None
     intrinsic_cost: float | None = None
     intrinsic_gap_count: int = 0
+    # False for a card the curation rules cut, which only a triage search returns.
+    # It reads as a badge, and as the reason the card offers to be added rather
+    # than planned.
+    in_library: bool = True
 
 
 class PaginatedRecipes(BaseModel):
@@ -64,6 +68,10 @@ class PaginatedRecipes(BaseModel):
     page_size: int
     has_more: bool
     next_offset: int | None = None
+    # How many more there would be outside the library, filled in only when a
+    # library search found nothing — the moment the offer to widen is worth
+    # making, and the only moment the extra count query is worth paying for.
+    uncurated_total: int | None = None
 
 
 class IngredientOut(BaseModel):
@@ -180,6 +188,14 @@ class RecipeDetail(BaseModel):
     ingredients: list[IngredientOut] = Field(default_factory=list)
     steps: list[StepOut] = Field(default_factory=list)
     nutrition: list[NutritionOut] = Field(default_factory=list)
+
+    # Library membership. The detail page is the one read that serves a recipe
+    # outside the library, so it has to say so: `in_library` decides whether the
+    # page offers to plan the recipe or to admit it, and `curated` distinguishes
+    # a recipe the rules chose from one somebody added, which is the difference
+    # between "remove" being available and not.
+    in_library: bool = True
+    curated: bool = True
 
     # Audit state. `macros_suspect` is the computed heuristic; `flagged_suspicious`
     # is a person having asked for a second look. Kept apart on purpose.
@@ -646,6 +662,11 @@ class PlannerSuggestionsOut(BaseModel):
     page_size: int
     has_more: bool
     next_offset: int | None = None
+    # Same meaning as on :class:`PaginatedRecipes`, and here for the same reason:
+    # this is the endpoint browse reads while a week is being planned, so without
+    # it the offer to look outside the library would be missing from exactly the
+    # screen people search on most.
+    uncurated_total: int | None = None
 
 
 # --- Ingredient → product mapping review -----------------------------------
@@ -779,8 +800,14 @@ class GenerateIn(BaseModel):
 
 
 class MappingStatsOut(BaseModel):
-    # Coverage measured by ingredient *uses* across the curated library, which is
-    # what actually matters: resolving one common ingredient beats ten rare ones.
+    # The headline: library recipes that can be shopped end to end, meaning every
+    # ingredient line resolves. One unmapped line is a hole in the basket, so a
+    # recipe is either priceable or it is not.
+    recipes_total: int = 0
+    recipes_priceable: int = 0
+    recipes_pct: float = 0.0
+    # The work measure underneath it: coverage by ingredient *uses*, which moves
+    # with every decision even when no recipe's last gap has closed yet.
     lines_total: int = 0
     lines_resolved: int = 0
     lines_pct: float = 0.0
