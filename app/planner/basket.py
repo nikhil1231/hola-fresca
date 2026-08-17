@@ -1115,11 +1115,16 @@ def _draw_from_pantry(
     display; mass ingredients in grams. The cupboard is a lower bound on what is
     actually there, so drawing up to it never over-promises more than the pantry
     model already does.
+
+    A count draw is capped at whole units of stock, since that is what stock of
+    a countable thing comes in. The demand it is met against stays fractional —
+    a recipe scaled to three portions really does want 5.94 sausages — so the
+    remainder can be fractional too, and the cover ceils it back to whole packs.
     """
     if ingredient.unit_kind == "count":
         if not demand.units or not held.units:
             return demand, None
-        take = min(demand.units, held.units)
+        take = min(demand.units, float(math.floor(held.units)))
         if take <= 0:
             return demand, None
         fraction = take / demand.units

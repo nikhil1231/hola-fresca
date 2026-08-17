@@ -488,6 +488,9 @@ class PantryItemOut(BaseModel):
     salvage: float
     cycles_held: int
     confirmed_week_start: str | None = None
+    #: ``YYYY-MM-DD``. Where set it replaces the salvage curve: the lot counts
+    #: in full until the date and for nothing after it.
+    use_by: str | None = None
 
 
 class PantryOut(BaseModel):
@@ -511,6 +514,9 @@ class PantryItemIn(BaseModel):
     #: ingredients the shop sells by count. Sending either states the amount.
     grams: float | None = Field(default=None, ge=0)
     qty: float | None = Field(default=None, ge=0)
+    #: ``YYYY-MM-DD``, or null to clear it and fall back to the salvage curve.
+    #: Only meaningful alongside a quantity.
+    use_by: str | None = None
 
 
 class PantryIngredientOut(BaseModel):
@@ -519,9 +525,12 @@ class PantryIngredientOut(BaseModel):
     ingredient_key: str
     name: str
     unit_kind: str = "mass"
-    #: How well it keeps, so the picker can warn that a fresh thing will decay
-    #: away before the next shop rather than silently accepting it.
+    #: How well it keeps. Below :data:`app.pantry.model.PANTRY_MIN_SALVAGE` the
+    #: picker asks for a use-by date instead of guessing, since the curve
+    #: describes fresh food badly.
     salvage: float
+    #: Shorthand for that threshold, so the page does not restate the constant.
+    perishable: bool = False
     #: Already in the cupboard, so the box can offer "edit" instead of "add".
     held: bool = False
 

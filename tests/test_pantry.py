@@ -717,3 +717,134 @@ def test_running_out_empties_the_shelf_through_the_api(pantry_client):
     )
     assert response.status_code == 200
     assert response.json()["items"] == []
+
+
+# --------------------------------------------------------------------------
+# A date on the food, where the salvage curve is the wrong shape
+# --------------------------------------------------------------------------
+
+def test_a_dated_lot_counts_in_full_while_it_is_in_date():
+    """The whole point: eight sausages stated on the Monday are eight sausages
+    at the shop, not eight times the chilled salvage figure."""
+    lot = Lot(
+        ingredient_key="name:sausages",
+        ingredient_name="Sausages",
+        week_start="2026-08-17",
+        available=Quantity(grams=454.0, units=8.0),
+        salvage=0.257,
+        contributions={},
+        unit_kind="count",
+        confirmed_week_start="2026-08-17",
+        use_by="2026-08-26",
+    )
+    got = held(lot, cooked_recipe_ids=set(), target_week="2026-08-24", cadence_weeks=1)
+    assert got.units == pytest.approx(8.0)
+
+
+def test_a_dated_lot_counts_for_nothing_once_it_is_out_of_date():
+    """No curve, no fraction: the shop lands after the date, so there is none
+    of it left to spend."""
+    lot = Lot(
+        ingredient_key="name:sausages",
+        ingredient_name="Sausages",
+        week_start="2026-08-17",
+        available=Quantity(grams=454.0, units=8.0),
+        salvage=0.257,
+        contributions={},
+        unit_kind="count",
+        use_by="2026-08-20",
+    )
+    assert not held(
+        lot, cooked_recipe_ids=set(), target_week="2026-08-24", cadence_weeks=1
+    )
+
+
+def test_a_date_replaces_the_curve_rather_than_compounding_with_it():
+    """Two lots, same age and salvage; only the dated one survives intact."""
+    common = dict(
+        ingredient_key=KEY,
+        ingredient_name="Chicken Thighs",
+        week_start="2026-08-17",
+        available=Quantity(grams=500.0),
+        salvage=0.15,
+        contributions={},
+    )
+    undated = held(
+        Lot(**common), cooked_recipe_ids=set(), target_week="2026-08-24", cadence_weeks=1
+    )
+    dated = held(
+        Lot(**common, use_by="2026-08-30"),
+        cooked_recipe_ids=set(),
+        target_week="2026-08-24",
+        cadence_weeks=1,
+    )
+    assert undated.grams == pytest.approx(75.0)  # 500 * 0.15
+    assert dated.grams == pytest.approx(500.0)
+
+
+def test_a_cooked_recipe_still_takes_its_share_of_a_dated_lot():
+    """The cliff governs ageing, not consumption."""
+    lot = Lot(
+        ingredient_key=KEY,
+        ingredient_name="Chicken Thighs",
+        week_start="2026-08-17",
+        available=Quantity(grams=500.0),
+        salvage=0.15,
+        contributions={7: Quantity(grams=200.0)},
+        use_by="2026-08-30",
+    )
+    got = held(
+        lot, cooked_recipe_ids={7}, target_week="2026-08-24", cadence_weeks=1
+    )
+    assert got.grams == pytest.approx(300.0)
+
+
+def test_food_past_its_date_is_stale_however_recently_it_was_stated():
+    lot = Lot(
+        ingredient_key=KEY,
+        ingredient_name="Chicken Thighs",
+        week_start="2026-08-17",
+        available=Quantity(grams=500.0),
+        salvage=0.15,
+        contributions={},
+        confirmed_week_start="2026-08-17",
+        use_by="2026-08-18",
+    )
+    assert is_stale(lot, today=date(2026, 8, 19), cadence_weeks=1)
+    assert not is_stale(lot, today=date(2026, 8, 18), cadence_weeks=1)
+
+
+def test_a_garbled_date_is_ignored_rather_than_binning_the_food():
+    lot = Lot(
+        ingredient_key=KEY,
+        ingredient_name="Rice",
+        week_start="2026-08-17",
+        available=Quantity(grams=500.0),
+        salvage=0.85,
+        contributions={},
+        use_by="not-a-date",
+    )
+    assert held(
+        lot, cooked_recipe_ids=set(), target_week="2026-08-24", cadence_weeks=1
+    ).grams == pytest.approx(500.0)
+
+
+# --------------------------------------------------------------------------
+# Counts are whole
+# --------------------------------------------------------------------------
+
+def test_decaying_a_count_leaves_whole_ones():
+    """Nobody has 2.06 sausages. Eight aged one chilled shop is two."""
+    aged = decay(Quantity(grams=454.0, units=8.0), salvage=0.257, cycles=1)
+    assert aged.units == 2.0
+
+
+def test_decaying_a_weight_keeps_its_fraction():
+    aged = decay(Quantity(grams=1000.0), salvage=0.85, cycles=1)
+    assert aged.grams == pytest.approx(850.0)
+
+
+def test_a_count_that_decays_below_one_holds_nothing():
+    aged = decay(Quantity(grams=57.0, units=1.0), salvage=0.257, cycles=1)
+    assert aged.units == 0.0
+    assert not aged

@@ -1149,6 +1149,16 @@ class PantryLot(Base):
     #: from what was actually bought, so the error does not survive a second
     #: shop.
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: A date the food is good until. Set by hand, and only worth setting for
+    #: things that go off — for which it replaces the salvage curve outright.
+    #:
+    #: The curve is a guess about a pack nobody has reported on, and it is the
+    #: wrong shape for fresh food: chicken is not 15% chicken by Friday, it is
+    #: fine and then it is rubbish. It is also what makes carrying fresh stock
+    #: possible at all. Stating "eight sausages" on Monday and shopping for the
+    #: following week put 8 x 0.257 = 2.06 sausages in the basket — a fractional
+    #: sausage nobody owns, arrived at from a number the user did say.
+    use_by: Mapped[str | None] = mapped_column(String(16), nullable=True)
     #: "I have run out of this" — the one correction that is always believed.
     emptied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     #: "Yes, this is still in the cupboard", which restarts the decay clock.

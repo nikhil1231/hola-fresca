@@ -1175,16 +1175,17 @@ def test_the_cupboard_keeps_a_sold_out_ingredient_off_the_gap_list():
 
 
 def test_count_ingredients_are_drawn_in_whole_units():
-    """Half a lime in the cupboard does not stop a recipe needing a whole one:
-    the cover ceils units, so a fractional draw would buy the same pack anyway
-    while claiming a saving."""
+    """Stock of a countable thing comes in whole ones, so 1.5 limes in the
+    cupboard spends as one. The demand it is met against stays fractional —
+    portion scaling makes that real — and the cover ceils the remainder back to
+    whole packs, so nothing is lost by rounding the shelf down."""
     index = _pantry_index(unit_kind="count", each_to_grams=100.0)
     built = B.build_basket(
         index, [B.Selection(1, 2)], pantry={KEY_RICE: B.Demand(grams=150.0, units=1.5)}
     )
     line = built.lines[0]
-    assert line.pantry_qty == 1.5
-    assert line.need_qty == pytest.approx(1.5)
+    assert line.pantry_qty == 1.0
+    assert line.need_qty == pytest.approx(2.0)
 
 
 def test_an_empty_cupboard_changes_nothing():

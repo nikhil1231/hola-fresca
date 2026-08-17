@@ -65,8 +65,9 @@ export function heldValue(item) {
     : Math.round(item.held_g ?? 0)
 }
 
-export function unitLabel(unitKind) {
-  return unitKind === 'count' ? 'units' : 'g'
+export function unitLabel(unitKind, amount = 0) {
+  if (unitKind !== 'count') return 'g'
+  return Number(amount) === 1 ? 'unit' : 'units'
 }
 
 /** Where a figure came from — a shop's leftovers, or something you said.
@@ -75,4 +76,28 @@ export function unitLabel(unitKind) {
 export function provenance(item) {
   if (item.confirmed_week_start) return { kind: 'stated', week: item.confirmed_week_start }
   return { kind: 'shop', week: item.week_start }
+}
+
+/** A use-by as a date input wants it, and back. The API speaks YYYY-MM-DD,
+ *  which is what <input type="date"> uses too, so this is only a null guard. */
+export function useByValue(item) {
+  return item?.use_by ?? ''
+}
+
+/** How a date reads next to a quantity: what it means is when the stock stops
+ *  counting, so the wording is about the food rather than about the field. */
+export function formatUseBy(useBy) {
+  if (!useBy) return null
+  const date = new Date(`${useBy}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return null
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(date)
+}
+
+/** Today as YYYY-MM-DD, for the date input's floor — a use-by in the past would
+ *  mean the food is already gone, which is what removing it says. */
+export function todayIso() {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
 }

@@ -12,6 +12,7 @@ import {
   NumberInput,
   Stack,
   Text,
+  TextInput,
   Tooltip,
 } from '@mantine/core'
 import {
@@ -27,9 +28,12 @@ import { formatWeekStart } from '../hooks/useSchedule.js'
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch.js'
 import {
   formatHeld,
+  formatUseBy,
   heldValue,
   provenance,
+  todayIso,
   unitLabel,
+  useByValue,
   usePantry,
   usePantryIngredients,
   useRemovePantryItem,
@@ -38,17 +42,22 @@ import {
 import PageHeader from '../components/PageHeader.jsx'
 import classes from './PantryPage.module.css'
 
-// Below this an ingredient keeps so badly that it will be gone before the next
-// shop, so stating a quantity for it is worth a word of warning. Matches
-// PANTRY_MIN_SALVAGE on the server.
-const KEEPS_BADLY = 0.5
+// Sensible starting amounts. Two of them because grams and units are not
+// interchangeable numbers, and 500 of a thing you count is absurd.
+const DEFAULT_GRAMS = 500
+const DEFAULT_UNITS = 1
 
 function ProvenanceText({ item }) {
   const { kind, week } = provenance(item)
+  const useBy = formatUseBy(item.use_by)
+  // A date supersedes the ageing story rather than adding to it: the lot no
+  // longer shrinks each shop, it simply stops counting on the day.
+  const suffix = useBy ? ` · use by ${useBy}` : ''
   if (kind === 'stated') {
     return (
       <Text size="xs" c="dimmed">
         You said so, week of {formatWeekStart(week)}
+        {suffix}
       </Text>
     )
   }
@@ -57,6 +66,7 @@ function ProvenanceText({ item }) {
       Left over from the shop of {formatWeekStart(week)}
       {item.cycles_held > 0 &&
         ` · ${item.cycles_held} ${item.cycles_held === 1 ? 'shop' : 'shops'} ago`}
+      {suffix}
     </Text>
   )
 }
@@ -64,18 +74,20 @@ function ProvenanceText({ item }) {
 function PantryRow({ item, onSave, onRemove, busy }) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(() => heldValue(item))
-  const unit = unitLabel(item.unit_kind)
+  const [useBy, setUseBy] = useState(() => useByValue(item))
+  const unit = unitLabel(item.unit_kind, value)
 
   const start = () => {
     setValue(heldValue(item))
+    setUseBy(useByValue(item))
     setEditing(true)
   }
   const commit = () => {
     setEditing(false)
     const next = Number(value)
     if (!Number.isFinite(next) || next < 0) return
-    if (next === heldValue(item)) return
-    onSave(item, next)
+    if (next === heldValue(item) && useBy === useByValue(item)) return
+    onSave(item, next, useBy || null)
   }
 
   return (
@@ -96,8 +108,21 @@ function PantryRow({ item, onSave, onRemove, busy }) {
             step={item.unit_kind === 'count' ? 1 : 50}
             suffix={` ${unit}`}
             size="xs"
-            w={130}
+            w={120}
             autoFocus
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commit()
+              if (event.key === 'Escape') setEditing(false)
+            }}
+          />
+          <TextInput
+            type="date"
+            value={useBy}
+            min={todayIso()}
+            onChange={(event) => setUseBy(event.currentTarget.value)}
+            size="xs"
+            w={140}
+            aria-label={`Use ${item.name} by`}
             onKeyDown={(event) => {
               if (event.key === 'Enter') commit()
               if (event.key === 'Escape') setEditing(false)
@@ -160,7 +185,8 @@ function AddItem({ onAdd, busy }) {
   const [search, setSearch] = useState('')
   const [text, setText] = useDebouncedSearch(search, setSearch)
   const [picked, setPicked] = useState(null)
-  const [amount, setAmount] = useState(500)
+  const [amount, setAmount] = useState(DEFAULT_GRAMS)
+  const [useBy, setUseBy] = useState('')
   const { data } = usePantryIngredients(search)
 
   const options = useMemo(() => data?.items ?? [], [data])
@@ -170,22 +196,34 @@ function AddItem({ onAdd, busy }) {
     return map
   }, [options])
 
+  // Grams and units are not interchangeable numbers: carrying 500 across from a
+  // bag of rice to a pack of sausages offers to put 500 sausages in the
+  // cupboard, and would have submitted it.
+  const pick = (option) => {
+    setPicked(option)
+    if (option && option.unit_kind !== picked?.unit_kind) {
+      setAmount(option.unit_kind === 'count' ? DEFAULT_UNITS : DEFAULT_GRAMS)
+    }
+    if (!option) setUseBy('')
+  }
+
   const choose = (name) => {
     setText(name)
-    setPicked(byName.get(name) ?? null)
+    pick(byName.get(name) ?? null)
   }
 
   const submit = () => {
     if (!picked) return
     const next = Number(amount)
     if (!Number.isFinite(next) || next <= 0) return
-    onAdd(picked, next)
+    onAdd(picked, next, useBy || null)
     setText('')
     setPicked(null)
-    setAmount(500)
+    setAmount(DEFAULT_GRAMS)
+    setUseBy('')
   }
 
-  const unit = picked ? unitLabel(picked.unit_kind) : 'g'
+  const unit = picked ? unitLabel(picked.unit_kind, amount) : 'g'
 
   return (
     <Box className={classes.addBox}>
@@ -196,7 +234,7 @@ function AddItem({ onAdd, busy }) {
           value={text}
           onChange={(next) => {
             setText(next)
-            setPicked(byName.get(next) ?? null)
+            pick(byName.get(next) ?? null)
           }}
           onOptionSubmit={choose}
           data={options.map((option) => option.name)}
@@ -214,6 +252,18 @@ function AddItem({ onAdd, busy }) {
           w={150}
           onKeyDown={(event) => event.key === 'Enter' && submit()}
         />
+        <TextInput
+          type="date"
+          label="Use by"
+          placeholder="optional"
+          value={useBy}
+          min={todayIso()}
+          onChange={(event) => setUseBy(event.currentTarget.value)}
+          size="sm"
+          w={165}
+          disabled={!picked}
+          onKeyDown={(event) => event.key === 'Enter' && submit()}
+        />
         <Button
           size="sm"
           leftSection={<IconPlus size={15} />}
@@ -224,10 +274,11 @@ function AddItem({ onAdd, busy }) {
         </Button>
       </Group>
 
-      {picked && picked.salvage < KEEPS_BADLY && (
+      {picked?.perishable && (
         <Text size="xs" c="dimmed" mt="xs">
-          {picked.name} does not keep — whatever you put in will have decayed
-          away by the next shop.
+          {picked.name} does not keep. Give it a date and it counts in full
+          until then, and not at all after. Without one it will have aged away
+          to almost nothing by the next shop.
         </Text>
       )}
       {picked?.held && (
@@ -246,18 +297,12 @@ export default function PantryPage() {
   const removeItem = useRemovePantryItem()
   const busy = setItem.isPending || removeItem.isPending
 
-  const save = (item, value) =>
-    setItem.mutate(
-      item.unit_kind === 'count'
-        ? { ingredientKey: item.ingredient_key, qty: value }
-        : { ingredientKey: item.ingredient_key, grams: value },
-    )
-  const add = (option, value) =>
-    setItem.mutate(
-      option.unit_kind === 'count'
-        ? { ingredientKey: option.ingredient_key, qty: value }
-        : { ingredientKey: option.ingredient_key, grams: value },
-    )
+  const state = (ingredient, value, useBy) =>
+    setItem.mutate({
+      ingredientKey: ingredient.ingredient_key,
+      useBy,
+      ...(ingredient.unit_kind === 'count' ? { qty: value } : { grams: value }),
+    })
 
   const items = pantry.data?.items ?? []
 
@@ -282,7 +327,7 @@ export default function PantryPage() {
         </Alert>
       )}
 
-      <AddItem onAdd={add} busy={busy} />
+      <AddItem onAdd={state} busy={busy} />
 
       {pantry.isError ? (
         <Alert color="red" title="Couldn't load the pantry" icon={<IconAlertCircle size={18} />}>
@@ -310,7 +355,7 @@ export default function PantryPage() {
             <PantryRow
               key={item.ingredient_key}
               item={item}
-              onSave={save}
+              onSave={state}
               onRemove={(target) => removeItem.mutate(target.ingredient_key)}
               busy={busy}
             />
@@ -321,7 +366,7 @@ export default function PantryPage() {
       <Text size="xs" c="dimmed">
         Amounts shrink each shop by how well the food keeps, and are dropped
         once they are too old to trust. Say what got cooked on the{' '}
-        <Link to="/past">Past recipes</Link> page.
+        <Link to="/">shops</Link> page.
       </Text>
     </Stack>
   )

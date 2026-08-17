@@ -40,11 +40,14 @@ export function fetchPantryIngredients(q = '') {
  *  `present` is the quick correction, a quantity is the fuller one and also
  *  how something new is added. The key travels in the body because ingredient
  *  keys hold slashes and a path segment would eat them. */
-export function setPantryItem({ ingredientKey, present, grams, qty }) {
+export function setPantryItem({ ingredientKey, present, grams, qty, useBy }) {
   const body = { ingredient_key: ingredientKey }
   if (present !== undefined) body.present = present
   if (grams !== undefined) body.grams = grams
   if (qty !== undefined) body.qty = qty
+  // Sent whenever a quantity is: null clears the date and hands the lot back
+  // to the salvage curve, so leaving it out would make a date unremovable.
+  if (grams !== undefined || qty !== undefined) body.use_by = useBy ?? null
   return request('/api/pantry/item', { method: 'PUT', body })
 }
 

@@ -90,13 +90,14 @@ function formatQuantity(value, unit = 'g') {
   return formatGrams(value)
 }
 
-// What the cupboard took off this line. A line with nothing left to buy shows
-// this in place of a pack, so a missing price reads as "already have it" rather
-// than as something the planner failed to cover.
+// What the pantry supplied *to this line* — not what is on the shelf, which may
+// be more. "In the pantry" claimed the latter and was read as a stock level.
+// A line with nothing left to buy shows this in place of a pack, so a missing
+// price reads as "already have it" rather than as a failure to cover.
 function pantryLabel(line) {
   const held = line.quantity_unit === 'unit' ? line.pantry_qty : line.pantry_g
   if (!held) return null
-  return `${formatQuantity(held, line.quantity_unit)} in the pantry`
+  return `${formatQuantity(held, line.quantity_unit)} from the pantry`
 }
 
 function formatDelta(value) {
@@ -686,7 +687,7 @@ function LineTable({
                               <Tooltip
                                 multiline
                                 w={240}
-                                label={`${pantryLabel(line)} from an earlier shop. Correct it on the Pantry page.`}
+                                label={`${pantryLabel(line)}, so this line buys less. Correct it on the Pantry page.`}
                               >
                                 <Badge size="xs" color="teal" variant="light">
                                   {pantryLabel(line)}
@@ -1298,7 +1299,7 @@ export default function BasketPage() {
   } = useActiveRetailer()
   // A ?view=checkout link survives a switch to a shop with no trolley, so the
   // view falls back rather than leaving an empty panel with no way out of it.
-  const pageView = retailerShoppable ? requestedView : 'basket'
+  const pageView = (retailerShoppable && !readOnly) ? requestedView : 'basket'
   const packPreference = usePackPreference()
   const [packLineKey, setPackLineKey] = useState(null)
   const [packScope, setPackScope] = useState('week')
@@ -1401,11 +1402,12 @@ export default function BasketPage() {
   // page in several tabs. The ref avoids noise in one mount; the backend's
   // user/retailer reservation is the authority across all of them.
   useEffect(() => {
+    if (readOnly) return
     if (!retailerId || !selections.length) return
     if (autoRefreshedRetailer.current === retailerId) return
     autoRefreshedRetailer.current = retailerId
     refreshStock({ selections, packOverrides, snapOverrides })
-  }, [retailerId, selections, packOverrides, snapOverrides, refreshStock])
+  }, [readOnly, retailerId, selections, packOverrides, snapOverrides, refreshStock])
 
   useEffect(() => {
     if (!nextRefreshAt) return undefined
@@ -1482,19 +1484,21 @@ export default function BasketPage() {
       </div>
 
       <div className={classes.pageFrame}>
-        <RecipeRail
-          entries={entries}
-          recipesPerWeek={recipesPerWeek}
-          recipesScrollRef={recipesScrollRef}
-          recipeRefs={recipeRefs}
-          recipePrices={recipePrices}
-          glowRecipeIds={glowRecipeIds}
-          setHoverRecipeId={setHoverRecipeId}
-          removeRecipeFromWeek={removeRecipeFromWeek}
-          setRecipePortions={setRecipePortions}
-          weekStart={weekStart}
-          readOnly={readOnly}
-        />
+        {!readOnly && (
+          <RecipeRail
+            entries={entries}
+            recipesPerWeek={recipesPerWeek}
+            recipesScrollRef={recipesScrollRef}
+            recipeRefs={recipeRefs}
+            recipePrices={recipePrices}
+            glowRecipeIds={glowRecipeIds}
+            setHoverRecipeId={setHoverRecipeId}
+            removeRecipeFromWeek={removeRecipeFromWeek}
+            setRecipePortions={setRecipePortions}
+            weekStart={weekStart}
+            readOnly={readOnly}
+          />
+        )}
 
         <section className={classes.mainColumn}>
           <div className={classes.mobileTopRow}>
@@ -1522,7 +1526,7 @@ export default function BasketPage() {
 
           <BasketControls
             pageView={pageView}
-            canCheckout={retailerShoppable}
+            canCheckout={retailerShoppable && !readOnly}
             setPageView={setPageView}
             weekStart={weekStart}
             setWeekStart={setWeekStart}
@@ -1575,17 +1579,19 @@ export default function BasketPage() {
               </Box>
             ) : (
               <div className={classes.orderPanel}>
-                <OrderPanelHeader
-                  title="Online order"
-                  subtitle={entries.map((entry) => entry.recipe.name).join(', ')}
-                  itemCount={onlineLines.length}
-                  stockText={orderStockText}
-                  stockRefresh={stockRefresh}
-                  refreshDisabled={refreshDisabled}
-                  selections={selections}
-                  packOverrides={packOverrides}
-                  snapOverrides={snapOverrides}
-                />
+                {!readOnly && (
+                  <OrderPanelHeader
+                    title="Online order"
+                    subtitle={entries.map((entry) => entry.recipe.name).join(', ')}
+                    itemCount={onlineLines.length}
+                    stockText={orderStockText}
+                    stockRefresh={stockRefresh}
+                    refreshDisabled={refreshDisabled}
+                    selections={selections}
+                    packOverrides={packOverrides}
+                    snapOverrides={snapOverrides}
+                  />
+                )}
 
                 {data.unmapped.length > 0 && (
                   <Alert

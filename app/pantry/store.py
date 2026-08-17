@@ -41,6 +41,7 @@ def _as_lot(row: PantryLot) -> Lot:
         unit_kind=row.unit_kind or "mass",
         emptied=row.emptied_at is not None,
         confirmed_week_start=row.confirmed_week_start,
+        use_by=row.use_by,
     )
 
 
@@ -187,10 +188,14 @@ def read_cupboard(
                         else None
                     ),
                     "salvage": round(row.salvage or 0.0, 2),
-                    "cycles_held": model.cycles_between(
+                    # A dated lot does not age on the cycle, so the count of
+                    # shops it has survived would be a misleading thing to show
+                    # beside it.
+                    "cycles_held": 0 if row.use_by else model.cycles_between(
                         lot.counts_from, target_week, cadence_weeks=cadence_weeks
                     ),
                     "confirmed_week_start": row.confirmed_week_start,
+                    "use_by": row.use_by,
                 }
             )
     return out
@@ -417,6 +422,7 @@ def confirm(
         name = row.ingredient_name or ingredient_key
         unit_kind = row.unit_kind or "mass"
         salvage = row.salvage or 0.0
+        use_by = row.use_by
     set_quantity(
         factory,
         user_id=user_id,
@@ -427,6 +433,7 @@ def confirm(
         salvage=salvage,
         unit_kind=unit_kind,
         week_start=week_start,
+        use_by=use_by,
     )
     return True
 
@@ -442,6 +449,7 @@ def set_quantity(
     salvage: float,
     unit_kind: str = "mass",
     week_start: str | None = None,
+    use_by: str | None = None,
 ) -> None:
     """"There is exactly this much of it." Adds the row, or replaces the guess.
 
@@ -476,6 +484,7 @@ def set_quantity(
         row.available_qty = quantity.units
         row.unit_kind = unit_kind
         row.salvage = salvage
+        row.use_by = use_by
         row.contributions_json = None
         row.superseded_at = None
         row.emptied_at = None

@@ -35,6 +35,7 @@ which is to say it degrades to how the planner behaved before it existed.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import date
 
@@ -73,10 +74,18 @@ class Quantity:
         return self.grams >= NEGLIGIBLE_G
 
     def scaled(self, factor: float) -> "Quantity":
-        return Quantity(
-            grams=self.grams * factor,
-            units=None if self.units is None else self.units * factor,
-        )
+        """Aged or scaled down, keeping counts whole.
+
+        Nobody has 2.06 sausages. Demand is legitimately fractional — a recipe
+        scaled to three portions wants 5.94 of them — but *stock* is a thing you
+        could walk over and count, so decaying eight of them leaves two rather
+        than 2.057. Rounding down is the same direction every other estimate
+        here leans.
+        """
+        grams = self.grams * factor
+        if self.units is None:
+            return Quantity(grams=grams)
+        return Quantity(grams=grams, units=float(math.floor(self.units * factor)))
 
     def minus(self, other: "Quantity") -> "Quantity":
         return Quantity(
@@ -212,6 +221,9 @@ class Lot:
     unit_kind: str = "mass"
     emptied: bool = False
     confirmed_week_start: str | None = None
+    #: A date the food is good until, ``YYYY-MM-DD``. Replaces the salvage curve
+    #: entirely — see :func:`held`.
+    use_by: str | None = None
 
     @property
     def counts_from(self) -> str:
@@ -224,6 +236,21 @@ class Lot:
         return self.confirmed_week_start or self.week_start
 
 
+def in_date(use_by: str | None, target_week: str) -> bool:
+    """Whether food lasts until the shop being planned lands.
+
+    The shop arrives at the start of its week, so that is the date to survive to
+    — anything sitting in the fridge now is either still good when the delivery
+    turns up or it is not, and there is no useful fraction in between.
+    """
+    if not use_by:
+        return True
+    try:
+        return sched.parse_date(use_by) >= sched.parse_date(target_week)
+    except ValueError:
+        return True
+
+
 def held(
     lot: Lot,
     *,
@@ -231,21 +258,45 @@ def held(
     target_week: str,
     cadence_weeks: int,
 ) -> Quantity:
-    """What may be spent against ``target_week``'s demand, decay included."""
+    """What may be spent against ``target_week``'s demand, decay included.
+
+    A stated ``use_by`` replaces the salvage curve rather than joining it. The
+    curve answers "how much of this is worth something at the next shop", which
+    is a reasonable guess about a pack whose fate nobody has reported — but food
+    with a date on it does not behave like that. Chicken is not 15% chicken on
+    Friday; it is fine, then it is rubbish. So a dated lot counts in full while
+    it is in date and for nothing afterwards, which is both more honest than the
+    curve and the only way a fresh ingredient can be carried at all: it would
+    otherwise decay to a fraction of itself between being typed in and being
+    shopped for.
+    """
+    empty = Quantity(grams=0.0, units=None if lot.available.units is None else 0.0)
     if lot.emptied:
-        return Quantity(grams=0.0, units=None if lot.available.units is None else 0.0)
+        return empty
     left = remaining(
         available=lot.available,
         contributions=lot.contributions,
         cooked_recipe_ids=cooked_recipe_ids,
     )
+    if lot.use_by:
+        return left if in_date(lot.use_by, target_week) else empty
     cycles = cycles_between(lot.counts_from, target_week, cadence_weeks=cadence_weeks)
     return decay(left, salvage=lot.salvage, cycles=cycles)
 
 
 def is_stale(lot: Lot, *, today: date | None = None, cadence_weeks: int) -> bool:
-    """Past the trust horizon measured from now, so worth deleting rather than reading."""
-    now = sched.format_date(sched.week_start_for(today or date.today()))
+    """Worth deleting rather than reading: out of date, or past the trust horizon.
+
+    A date is the sharper of the two tests — food that is off is gone, whatever
+    the horizon says — so it answers on its own where there is one.
+    """
+    day = today or date.today()
+    now = sched.format_date(sched.week_start_for(day))
+    if lot.use_by:
+        try:
+            return sched.parse_date(lot.use_by) < day
+        except ValueError:
+            return False
     return (
         cycles_between(lot.counts_from, now, cadence_weeks=cadence_weeks)
         >= TRUST_HORIZON_CYCLES

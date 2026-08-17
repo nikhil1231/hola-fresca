@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dataclasses import dataclass
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -40,7 +42,7 @@ from app.api.schemas import (
 )
 from app.db.models import IngredientMapping, User
 from app.pantry import store
-from app.pantry.model import Quantity
+from app.pantry.model import PANTRY_MIN_SALVAGE, Quantity
 from app.planner import waste
 from app.planner.cache import get_index
 
@@ -74,17 +76,41 @@ def _cupboard_out(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _Facts:
+    """What the planner knows about an ingredient that the cupboard needs."""
+
+    unit_kind: str
+    salvage: float
+    each_to_grams: float | None = None
+
+    @property
+    def perishable(self) -> bool:
+        """Keeps badly enough that a date beats the curve."""
+        return self.salvage < PANTRY_MIN_SALVAGE
+
+
+def _require_date(value: str | None) -> str | None:
+    """A ``YYYY-MM-DD`` use-by, or ``None``. Anything else is a client bug."""
+    if not value:
+        return None
+    try:
+        return sched.format_date(sched.parse_date(value))
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Not a date: {value}") from None
+
+
 def _ingredient_facts(
     factory: sessionmaker[Session],
     csv_path: Path | None,
     retailer: str,
     key: str,
-) -> tuple[str, float] | None:
-    """``(unit_kind, salvage)`` for an ingredient, from the planner's own view.
+) -> _Facts | None:
+    """An ingredient as the planner sees it, or ``None`` if this shop has no such thing.
 
-    Salvage is read off the packs rather than guessed, so a hand-added entry
-    decays on the same curve as one the shop left behind — state that you have
-    chicken and it will be gone by the next shop, exactly as it should be.
+    Salvage is read off the real packs rather than guessed, so a hand-added
+    entry ages on the same curve as one a shop left behind — and, where that
+    curve is the wrong shape, is the signal to ask for a date instead.
     """
     index = get_index(factory, recipe_ids=[], csv_path=csv_path, retailer=retailer)
     ingredient = index.ingredient(key)
@@ -96,7 +122,11 @@ def _ingredient_facts(
         if packs
         else waste.SALVAGE_UNKNOWN
     )
-    return ingredient.unit_kind, salvage
+    return _Facts(
+        unit_kind=ingredient.unit_kind,
+        salvage=salvage,
+        each_to_grams=ingredient.each_to_grams,
+    )
 
 
 @router.get("", response_model=PantryOut)
@@ -147,14 +177,16 @@ def ingredients(
     )
     out = []
     for row in rows:
-        facts = _ingredient_facts(factory, csv_path, retailer, row.ingredient_key)
-        unit_kind, salvage = facts or (row.unit_kind, waste.SALVAGE_UNKNOWN)
+        facts = _ingredient_facts(
+            factory, csv_path, retailer, row.ingredient_key
+        ) or _Facts(unit_kind=row.unit_kind, salvage=waste.SALVAGE_UNKNOWN)
         out.append(
             PantryIngredientOut(
                 ingredient_key=row.ingredient_key,
                 name=row.name,
-                unit_kind=unit_kind,
-                salvage=round(salvage, 2),
+                unit_kind=facts.unit_kind,
+                salvage=round(facts.salvage, 2),
+                perishable=facts.perishable,
                 held=row.ingredient_key in already,
             )
         )
@@ -186,17 +218,23 @@ def set_item(
             raise HTTPException(
                 status_code=404, detail=f"{retailer} has no ingredient {key}"
             )
-        unit_kind, salvage = facts
         row = session.scalar(
             select(IngredientMapping).where(
                 IngredientMapping.retailer == retailer,
                 IngredientMapping.ingredient_key == key,
             )
         )
-        quantity = Quantity(
-            grams=body.grams or 0.0,
-            units=body.qty if unit_kind == "count" else None,
-        )
+        use_by = _require_date(body.use_by)
+        if facts.unit_kind == "count":
+            units = float(body.qty or 0.0)
+            # Grams alongside the count, so a count lot is not stored as weighing
+            # nothing: the figures are two views of one shelf, and the display
+            # and the harvest both read the gram one.
+            quantity = Quantity(
+                grams=units * (facts.each_to_grams or 0.0), units=units
+            )
+        else:
+            quantity = Quantity(grams=body.grams or 0.0)
         if not quantity:
             # Stating nothing is stating it has gone, which is what the page's
             # own remove control says more plainly.
@@ -209,8 +247,9 @@ def set_item(
             ingredient_key=key,
             ingredient_name=row.name if row is not None else key,
             quantity=quantity,
-            salvage=salvage,
-            unit_kind=unit_kind,
+            salvage=facts.salvage,
+            unit_kind=facts.unit_kind,
+            use_by=use_by,
         )
         return _cupboard_out(factory, session, user, retailer)
 
