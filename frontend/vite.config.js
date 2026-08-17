@@ -28,8 +28,14 @@ const pageFiles = {
     'frontend/src/routes/HomePage.module.css',
     'frontend/src/hooks/useSchedule.js',
     'frontend/src/hooks/useWeeklyPlan.js',
+    // The cooked ticks live on the week rows here, so what decides whether a
+    // recipe reads as cooked belongs to this page's history too.
+    'frontend/src/hooks/usePastRecipes.js',
+    'frontend/src/api/planClient.js',
     'frontend/src/api/scheduleClient.js',
+    'app/api/plan.py',
     'app/api/schedule.py',
+    'app/pantry/cooks.py',
     'app/schedule.py',
   ],
   settings: [
@@ -64,16 +70,6 @@ const pageFiles = {
     'app/api/cart.py',
     'app/api/planner.py',
     'app/planner/basket.py',
-  ],
-  past: [
-    'frontend/src/routes/PastRecipesPage.jsx',
-    'frontend/src/routes/PastRecipesPage.module.css',
-    'frontend/src/hooks/usePastRecipes.js',
-    'frontend/src/hooks/useSchedule.js',
-    'frontend/src/hooks/useWeeklyPlan.js',
-    'frontend/src/api/planClient.js',
-    'app/api/plan.py',
-    'app/pantry/cooks.py',
   ],
   pantry: [
     'frontend/src/routes/PantryPage.jsx',
