@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ActionIcon,
@@ -6,9 +6,10 @@ import {
   Badge,
   Box,
   Button,
-  Divider,
+  Checkbox,
   Group,
   Loader,
+  SegmentedControl,
   Skeleton,
   Stack,
   Text,
@@ -21,9 +22,7 @@ import {
   IconCalendarWeek,
   IconChevronUp,
   IconPlayerPause,
-  IconPlayerPlay,
   IconPlus,
-  IconSettings,
   IconX,
 } from '@tabler/icons-react'
 
@@ -40,6 +39,7 @@ import {
   formatProteinModifier,
   useWeeklyPlan,
 } from '../hooks/useWeeklyPlan.js'
+import { useCooked, useSetCooked } from '../hooks/usePastRecipes.js'
 import PageHeader from '../components/PageHeader.jsx'
 import classes from './HomePage.module.css'
 
@@ -54,9 +54,14 @@ const STATUS_BADGE = {
 const PAST_WEEKS_STEP = 4
 
 // History says what became of a week, not how long is left to change it.
-function pastBadge(week) {
+function pastBadge(week, shopped) {
   if (week.skipped) return { label: 'Skipped', color: 'orange' }
   if (!week.complete) return { label: 'This week', color: 'fresh' }
+  if (shopped === false) return {
+    label: 'Not shopped',
+    color: 'gray',
+    tooltip: 'Never pushed to a cart, so nothing here counts as cooked.',
+  }
   return { label: 'Done', color: 'gray' }
 }
 
@@ -73,14 +78,21 @@ function cutoffDaysLabel(cutoffAt) {
   return `Cutoff in ${days} ${days === 1 ? 'day' : 'days'}`
 }
 
-function RecipeTile({ entry, weekStart, onRemove, editable }) {
+function RecipeTile({ entry, weekStart, onRemove, editable, cookedState }) {
   const { recipe } = entry
   // How it was cooked, not how it is written. A week's protein swap or scaling
   // is the difference between the dish you planned and the one in the library,
   // and it is worth nothing if you have to remember it yourself.
   const modifier = formatProteinModifier(entry.protein)
   return (
-    <Box className={classes.tile}>
+    <Box
+      className={[
+        classes.tile,
+        cookedState && cookedState.cooked ? classes.tileCooked : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       {/* The week goes with the link: the detail page shows the modifications
           the week holds, and without it a tile from March opens showing next
           week's plan for the same recipe. */}
@@ -116,6 +128,22 @@ function RecipeTile({ entry, weekStart, onRemove, editable }) {
           </ActionIcon>
         </Tooltip>
       )}
+      {cookedState && (
+        <Checkbox
+          className={[
+            classes.tileCookedCheck,
+            cookedState.marked ? classes.tileCookedMarked : classes.tileCookedAssumed,
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          checked={cookedState.cooked}
+          disabled={cookedState.pending}
+          onChange={(event) => cookedState.onToggle(event.currentTarget.checked)}
+          label="Cooked"
+          size="xs"
+          aria-label={`${recipe.name}: cooked`}
+        />
+      )}
     </Box>
   )
 }
@@ -144,8 +172,14 @@ function WeekRow({
   onRemoveRecipe,
   onToggleSkip,
   skipPending,
+  cookedFlags,
+  cookedPendingKey,
+  onToggleCooked,
+  shopped,
 }) {
-  const badge = past ? pastBadge(week) : STATUS_BADGE[week.status] ?? STATUS_BADGE.open
+  const badge = past
+    ? pastBadge(week, shopped)
+    : STATUS_BADGE[week.status] ?? STATUS_BADGE.open
   const cutoffLabel = showCutoff ? cutoffDaysLabel(week.cutoff_at) : null
   // A week that has been shopped for is a record, not a draft: its recipes are
   // what was cooked, and editing them would rewrite history rather than change
@@ -173,9 +207,17 @@ function WeekRow({
           <Title order={4} className={classes.weekTitle}>
             {formatWeekStart(week.week_start)}
           </Title>
-          <Badge size="sm" variant="light" color={badge.color} radius="sm">
-            {badge.label}
-          </Badge>
+          {badge.tooltip ? (
+            <Tooltip label={badge.tooltip} withArrow multiline maw={260}>
+              <Badge size="sm" variant="light" color={badge.color} radius="sm" style={{ cursor: 'help' }}>
+                {badge.label}
+              </Badge>
+            </Tooltip>
+          ) : (
+            <Badge size="sm" variant="light" color={badge.color} radius="sm">
+              {badge.label}
+            </Badge>
+          )}
         </Group>
 
         <Group gap={6} className={classes.weekDetails}>
@@ -191,6 +233,7 @@ function WeekRow({
             </Text>
           )}
         </Group>
+
       </div>
 
       <div className={classes.weekActions}>
@@ -224,15 +267,39 @@ function WeekRow({
 
       {entries.length > 0 && (
         <div className={classes.tiles}>
-          {entries.map((entry) => (
-            <RecipeTile
-              key={entry.recipe.id}
-              entry={entry}
-              weekStart={week.week_start}
-              editable={editable}
-              onRemove={() => onRemoveRecipe(week.week_start, entry.recipe.id)}
-            />
-          ))}
+          {entries.map((entry) => {
+            const flag = cookedFlags?.get(entry.recipe.id)
+            return (
+              <RecipeTile
+                key={entry.recipe.id}
+                entry={entry}
+                weekStart={week.week_start}
+                editable={editable}
+                onRemove={
+                  onRemoveRecipe
+                    ? () => onRemoveRecipe(week.week_start, entry.recipe.id)
+                    : undefined
+                }
+                cookedState={
+                  past && cookedFlags
+                    ? {
+                        cooked: flag?.cooked ?? false,
+                        marked: flag?.marked ?? false,
+                        pending:
+                          cookedPendingKey ===
+                          `${week.week_start}:${entry.recipe.id}`,
+                        onToggle: (cooked) =>
+                          onToggleCooked(
+                            week.week_start,
+                            entry.recipe.id,
+                            cooked,
+                          ),
+                      }
+                    : undefined
+                }
+              />
+            )
+          })}
         </div>
       )}
     </Box>
@@ -240,20 +307,69 @@ function WeekRow({
 }
 
 export default function HomePage() {
-  // The last finished shop is shown by default — it is the one you are most
-  // likely to be looking back at — and older ones are asked for a few at a time.
+  const [view, setView] = useState('current')
+  const isPastView = view === 'past'
+
+  // In past view we want more history by default; in current view the most
+  // recent completed week is enough context.
   const [pastWeeks, setPastWeeks] = useState(1)
-  const { data: schedule, isError, error, isFetching, isPaused } = useSchedule(pastWeeks)
+  const effectivePastWeeks = isPastView
+    ? Math.max(pastWeeks, PAST_WEEKS_STEP)
+    : pastWeeks
+
+  const { data: schedule, isError, error, isFetching, isPaused } = useSchedule(effectivePastWeeks)
   const { getWeekRecipes, removeRecipeFromWeek } = useWeeklyPlan()
   const setSkipped = useSetWeekSkipped()
   const updateSettings = useUpdateScheduleSettings()
 
+  // --- Cooked state (only active in past view) ---
+  const pastList = schedule?.past_weeks ?? []
+  const weekStarts = useMemo(
+    () => pastList.map((week) => week.week_start),
+    [pastList],
+  )
+  const cooked = useCooked(isPastView ? weekStarts : [])
+  const setCooked = useSetCooked()
+  const cookedByWeek = useMemo(() => {
+    const map = new Map()
+    for (const week of cooked.data?.weeks ?? []) map.set(week.week_start, week)
+    return map
+  }, [cooked.data])
+  const cookedPendingKey = setCooked.isPending
+    ? `${setCooked.variables?.weekStart}:${setCooked.variables?.recipeId}`
+    : null
+  const onToggleCooked = (weekStart, recipeId, value) =>
+    setCooked.mutate({ weekStart, recipeId, cooked: value })
+
+  // Build per-week cooked flag maps for passing to WeekRow.
+  const cookedFlagsForWeek = useMemo(() => {
+    const result = new Map()
+    for (const [weekStart, weekData] of cookedByWeek) {
+      const map = new Map()
+      for (const recipe of weekData.recipes ?? []) {
+        map.set(recipe.recipe_id, recipe)
+      }
+      result.set(weekStart, map)
+    }
+    return result
+  }, [cookedByWeek])
+
   // The old, shorter history stays on screen while a longer one loads, so the
   // spinner belongs to that request only — not to every background refetch.
-  const expanding = isFetching && (schedule?.past_weeks?.length ?? 0) < pastWeeks
+  const expanding = isFetching && (schedule?.past_weeks?.length ?? 0) < effectivePastWeeks
   const settings = schedule?.settings
   const paused = Boolean(settings?.paused)
   const recipesPerWeek = settings?.recipes_per_week ?? DEFAULT_RECIPES_PER_WEEK
+
+  // Past view: reverse chronological, only weeks that have recipes.
+  const pastWeeksWithRecipes = useMemo(
+    () =>
+      pastList
+        .slice()
+        .reverse()
+        .filter((week) => getWeekRecipes(week.week_start).length > 0),
+    [pastList, getWeekRecipes],
+  )
 
   const scheduleDescription = settings ? (
     `${cadenceLabel(settings.cadence_weeks)} · recipes settled by ${
@@ -274,36 +390,22 @@ export default function HomePage() {
         description={scheduleDescription}
         icon={<IconCalendarWeek size={22} />}
         actions={(
-          <Group gap="xs" wrap="nowrap" className={classes.headerActions}>
-          <Button
-            variant={paused ? 'filled' : 'default'}
-            color={paused ? 'fresh' : 'gray'}
+          <Group gap="sm" wrap="nowrap" className={classes.headerActions}>
+          <SegmentedControl
+            className={classes.viewToggle}
             size="sm"
-            loading={updateSettings.isPending}
-            leftSection={
-              paused ? <IconPlayerPlay size={16} /> : <IconPlayerPause size={16} />
-            }
-            onClick={() => updateSettings.mutate({ paused: !paused })}
-          >
-            {paused ? 'Resume' : 'Pause'}
-          </Button>
-          <Tooltip label="Schedule settings" withArrow>
-            <ActionIcon
-              className={classes.settingsButton}
-              component={Link}
-              to="/settings"
-              variant="default"
-              size="lg"
-              aria-label="Schedule settings"
-            >
-              <IconSettings size={18} />
-            </ActionIcon>
-          </Tooltip>
+            value={view}
+            onChange={setView}
+            data={[
+              { label: 'Current', value: 'current' },
+              { label: 'Past', value: 'past' },
+            ]}
+          />
           </Group>
         )}
       />
 
-      {paused && (
+      {!isPastView && paused && (
         <Alert color="gray" variant="light" icon={<IconPlayerPause size={18} />}>
           The schedule is paused — no week is being planned. Resume to pick up the
           cadence where it left off.
@@ -313,6 +415,12 @@ export default function HomePage() {
       {(setSkipped.error || updateSettings.error) && (
         <Alert color="red" icon={<IconAlertCircle size={18} />}>
           {(setSkipped.error ?? updateSettings.error).message}
+        </Alert>
+      )}
+
+      {setCooked.error && (
+        <Alert color="red" icon={<IconAlertCircle size={18} />}>
+          {setCooked.error.message}
         </Alert>
       )}
 
@@ -338,8 +446,35 @@ export default function HomePage() {
         <Group justify="center" py="xl">
           <Loader color="fresh" />
         </Group>
-      ) : (
+      ) : isPastView ? (
+        /* ── Past view ────────────────────────────────────── */
         <Stack gap="md">
+          {pastWeeksWithRecipes.length === 0 ? (
+            <Box className={classes.emptyState}>
+              <Text fw={800}>No shops behind you yet</Text>
+              <Text size="sm" c="dimmed">
+                Finished weeks land here once their baskets have been pushed.
+              </Text>
+            </Box>
+          ) : (
+            pastWeeksWithRecipes.map((week) => {
+              const cookedWeek = cookedByWeek.get(week.week_start)
+              return (
+                <WeekRow
+                  key={week.week_start}
+                  week={week}
+                  entries={getWeekRecipes(week.week_start)}
+                  recipesPerWeek={recipesPerWeek}
+                  past
+                  shopped={Boolean(cookedWeek?.shopped)}
+                  cookedFlags={cookedFlagsForWeek.get(week.week_start) ?? new Map()}
+                  cookedPendingKey={cookedPendingKey}
+                  onToggleCooked={onToggleCooked}
+                />
+              )
+            })
+          )}
+
           {schedule.has_more_past && (
             <Group justify="center">
               <Button
@@ -349,7 +484,9 @@ export default function HomePage() {
                 loading={expanding}
                 leftSection={<IconChevronUp size={14} />}
                 onClick={() =>
-                  setPastWeeks((count) => Math.min(count + PAST_WEEKS_STEP, MAX_PAST_WEEKS))
+                  setPastWeeks((count) =>
+                    Math.min(count + PAST_WEEKS_STEP, MAX_PAST_WEEKS),
+                  )
                 }
               >
                 Show {PAST_WEEKS_STEP} earlier weeks
@@ -357,24 +494,14 @@ export default function HomePage() {
             </Group>
           )}
 
-          {(schedule.past_weeks ?? []).map((week) => (
-            <WeekRow
-              key={week.week_start}
-              week={week}
-              entries={getWeekRecipes(week.week_start)}
-              recipesPerWeek={recipesPerWeek}
-              past
-            />
-          ))}
-
-          {schedule.past_weeks?.length > 0 && (
-            <Divider
-              className={classes.historyDivider}
-              labelPosition="center"
-              label="Coming up"
-            />
-          )}
-
+          <Text size="xs" c="dimmed">
+            What these recipes did not use is in the{' '}
+            <Link to="/pantry">pantry</Link>, and comes off the next shop.
+          </Text>
+        </Stack>
+      ) : (
+        /* ── Current view ─────────────────────────────────── */
+        <Stack gap="md">
           {schedule.weeks.map((week, index) => (
             <WeekRow
               key={week.week_start}

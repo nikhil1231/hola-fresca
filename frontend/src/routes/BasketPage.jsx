@@ -34,6 +34,7 @@ import {
   IconInfoCircle,
   IconLock,
   IconPackages,
+  IconRefresh,
   IconSnowflake,
   IconStarFilled,
   IconToolsKitchen2,
@@ -1186,9 +1187,6 @@ function MobileLineList({
 }
 
 function OrderPanelHeader({
-  title,
-  subtitle,
-  itemCount,
   stockText,
   stockRefresh,
   refreshDisabled,
@@ -1197,27 +1195,21 @@ function OrderPanelHeader({
   snapOverrides,
 }) {
   return (
-    <Group justify="space-between" align="flex-start" className={classes.orderHeader}>
-      <div>
-        <Group gap="xs" align="baseline">
-          <Title order={3} className={classes.orderTitle}>{title}</Title>
-          <Text className={classes.orderCount}>{itemCount} items</Text>
-        </Group>
-        {subtitle && <Text className={classes.orderSubtitle}>{subtitle}</Text>}
-      </div>
+    <Group justify="flex-end" align="flex-start" className={classes.orderHeader}>
       <Group gap="md" align="center" wrap="nowrap" className={classes.stockControls}>
-        <Text className={classes.stockText}>{stockText}</Text>
-        <Button
-          variant="outline"
-          size="sm"
-          radius="lg"
-          className={classes.refreshButton}
-          loading={stockRefresh.isPending}
-          disabled={!selections.length || refreshDisabled}
-          onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
-        >
-          Refresh prices
-        </Button>
+        <Tooltip label={stockText} withArrow>
+          <ActionIcon
+            variant="default"
+            size="lg"
+            className={classes.refreshButton}
+            loading={stockRefresh.isPending}
+            disabled={!selections.length || refreshDisabled}
+            onClick={() => stockRefresh.mutate({ selections, packOverrides, snapOverrides })}
+            aria-label="Refresh prices"
+          >
+            <IconRefresh size={18} />
+          </ActionIcon>
+        </Tooltip>
       </Group>
     </Group>
   )
@@ -1484,21 +1476,19 @@ export default function BasketPage() {
       </div>
 
       <div className={classes.pageFrame}>
-        {!readOnly && (
-          <RecipeRail
-            entries={entries}
-            recipesPerWeek={recipesPerWeek}
-            recipesScrollRef={recipesScrollRef}
-            recipeRefs={recipeRefs}
-            recipePrices={recipePrices}
-            glowRecipeIds={glowRecipeIds}
-            setHoverRecipeId={setHoverRecipeId}
-            removeRecipeFromWeek={removeRecipeFromWeek}
-            setRecipePortions={setRecipePortions}
-            weekStart={weekStart}
-            readOnly={readOnly}
-          />
-        )}
+        <RecipeRail
+          entries={entries}
+          recipesPerWeek={recipesPerWeek}
+          recipesScrollRef={recipesScrollRef}
+          recipeRefs={recipeRefs}
+          recipePrices={recipePrices}
+          glowRecipeIds={glowRecipeIds}
+          setHoverRecipeId={setHoverRecipeId}
+          removeRecipeFromWeek={removeRecipeFromWeek}
+          setRecipePortions={setRecipePortions}
+          weekStart={weekStart}
+          readOnly={readOnly}
+        />
 
         <section className={classes.mainColumn}>
           <div className={classes.mobileTopRow}>
@@ -1581,9 +1571,6 @@ export default function BasketPage() {
               <div className={classes.orderPanel}>
                 {!readOnly && (
                   <OrderPanelHeader
-                    title="Online order"
-                    subtitle={entries.map((entry) => entry.recipe.name).join(', ')}
-                    itemCount={onlineLines.length}
                     stockText={orderStockText}
                     stockRefresh={stockRefresh}
                     refreshDisabled={refreshDisabled}

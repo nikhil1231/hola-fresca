@@ -14,7 +14,6 @@ function pageMetaForPath(pathname) {
   if (pathname === '/settings') return PAGE_LAST_UPDATED.settings
   if (pathname === '/basket') return PAGE_LAST_UPDATED.basket
   if (pathname === '/pantry') return PAGE_LAST_UPDATED.pantry
-  if (pathname === '/past') return PAGE_LAST_UPDATED.past
   if (pathname === '/mapping/aliases') return PAGE_LAST_UPDATED.mappingAliases
   if (pathname === '/mapping/manual') return PAGE_LAST_UPDATED.mappingManual
   // Must stay below the exact sub-page paths above, which it would swallow.

@@ -267,8 +267,8 @@
 }
 
 .orderHeader {
-  min-height: 104px;
-  padding: 24px 30px 22px;
+  min-height: 48px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--hf-border);
 }
 
@@ -297,17 +297,10 @@
   margin-top: -2px;
 }
 
-.stockText {
-  max-width: 120px;
-  font-size: 0.8rem;
-  line-height: 1.05;
-}
+
 
 .refreshButton {
-  min-width: 132px;
-  border-color: var(--hf-border-strong);
-  color: var(--hf-accent-soft);
-  font-weight: 600;
+  flex: 0 0 auto;
 }
 
 .nectarPrice {
@@ -930,8 +923,8 @@
   }
 
   .orderHeader {
-    min-height: 120px;
-    padding: 20px 24px 16px;
+    min-height: 48px;
+    padding: 12px 16px;
   }
 
   .orderTitle {
@@ -952,13 +945,9 @@
     justify-content: space-between;
   }
 
-  .stockText {
-    max-width: none;
-  }
 
-  .refreshButton {
-    min-width: 152px;
-  }
+
+
 
   .desktopTables {
     display: none;

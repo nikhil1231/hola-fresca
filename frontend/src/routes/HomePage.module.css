@@ -44,18 +44,6 @@
   font-weight: 700;
 }
 
-.historyDivider {
-  margin-block: 2px;
-}
-
-.historyDivider :global(.mantine-Divider-label) {
-  color: var(--hf-text-subtle);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .weekInfo {
   grid-area: info;
   display: flex;
@@ -223,9 +211,6 @@
     padding-inline: 12px;
   }
 
-  .settingsButton {
-    display: none;
-  }
 
   .weekRow {
     gap: 12px;
@@ -296,5 +281,59 @@
       'info'
       'actions'
       'tiles';
+  }
+}
+
+/* ── View toggle ──────────────────────────────────── */
+
+.viewToggle {
+  flex-shrink: 0;
+}
+
+/* ── Cooked checkbox on recipe tiles (past view) ── */
+
+.tileCooked {
+  border-color: color-mix(in srgb, var(--hf-accent) 40%, var(--hf-border));
+}
+
+.tileCookedCheck {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  padding: 2px 8px 2px 4px;
+  border-radius: var(--mantine-radius-sm);
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.tileCookedCheck :global(.mantine-Checkbox-label) {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 600;
+  padding-left: 4px;
+}
+
+/* When the user hasn't explicitly marked it, the label reads faint. */
+.tileCookedAssumed :global(.mantine-Checkbox-label) {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* When the user has explicitly marked it, the label is solid. */
+.tileCookedMarked :global(.mantine-Checkbox-label) {
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* ── Empty state ──────────────────────────────────── */
+
+.emptyState {
+  text-align: center;
+  padding: var(--mantine-spacing-xl) 0;
+}
+
+@media (max-width: 48em) {
+  .viewToggle {
+    order: -1;
   }
 }
