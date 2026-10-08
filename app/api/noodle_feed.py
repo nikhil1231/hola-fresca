@@ -11,7 +11,7 @@ The contract is shared by every system that feeds Noodle:
 ``context`` is read by the model when someone asks Noodle a question; ``upcoming``
 lands in Noodle's Coming up list and its morning summary. It covers every
 connected account in the household (one person's Ocado often holds the shared
-order), labelled by whose it is. An account that fails is reported in
+order), labelled by whose it is, and nobody outside it (:mod:`app.household`). An account that fails is reported in
 ``context`` and skipped, never fails the feed.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config
+from app import config, household
 from app.api import access
 from app.api.deps import get_session
 from app.api.hellofresh import client_for as hellofresh_client
@@ -99,7 +99,8 @@ SECTIONS = {"ocado": ocado_section, "hellofresh": hellofresh_section}
 def feed(session: Session = Depends(get_session)) -> dict[str, Any]:
     rows = session.execute(
         select(RetailerAccount, User).join(User, User.id == RetailerAccount.user_id)
-        .where(RetailerAccount.retailer.in_(SECTIONS), RetailerAccount.status == "connected")
+        .where(RetailerAccount.retailer.in_(SECTIONS), RetailerAccount.status == "connected",
+               RetailerAccount.user_id.in_(household.member_ids(session)))
     ).all()
     lines: list[str] = []
     upcoming: list[dict] = []

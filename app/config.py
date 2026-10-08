@@ -72,6 +72,16 @@ ACCESS_SERVICES = {
     )
     if client_id.strip() and email.strip()
 }
+#: The people (their HolaFresca sign-in emails, comma-separated) who share one
+#: household's shopping. Noodle's feed covers their accounts and nobody else's, and
+#: any of them may manage an order on another's account, since one person's Ocado
+#: often holds the shared shop. Unset: the owner alone. With no owner either (a
+#: single-user LAN install), everyone, which is the same thing there.
+HOUSEHOLD = {
+    email.strip().lower()
+    for email in (os.environ.get("HOLAFRESCA_HOUSEHOLD") or ACCESS_OWNER_EMAIL or "").split(",")
+    if email.strip()
+}
 LOCAL_USER_EMAIL = (
     os.environ.get("HOLAFRESCA_LOCAL_USER_EMAIL")
     or ACCESS_OWNER_EMAIL

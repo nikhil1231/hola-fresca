@@ -36,6 +36,9 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, time as dtime, timedelta
 
+from sqlalchemy import select
+
+from app import config
 from app.ocado.session import list_account_runtimes
 
 log = logging.getLogger("holafresca.ocado")
@@ -205,6 +208,26 @@ class Heartbeat:
             )
             return
         log.info("ocado heartbeat: %s -> %s", account_id, state)
+        self._record(account_id, state)
+
+    @staticmethod
+    def _record(account_id: str, state: object) -> None:
+        """A passing check is news worth keeping: the account's status says whether
+        it works, and the Noodle feed only reads accounts that do. Without this an
+        account whose session was set up outside the Settings login (or before
+        statuses existed) stays "never" however many checks it passes."""
+        from app.db import retailer_accounts
+        from app.db.models import RetailerAccount
+        from app.ocado.session import _default_account_factory
+
+        try:
+            with _default_account_factory(config.DB_PATH)() as db:
+                account = db.scalar(select(RetailerAccount).where(
+                    RetailerAccount.retailer == "ocado", RetailerAccount.key == account_id))
+                if account is not None:
+                    retailer_accounts.record_status(db, account, str(state))
+        except Exception:  # noqa: BLE001 - bookkeeping must not turn a good check into a failure
+            log.warning("ocado heartbeat: could not record %s for %s", state, account_id, exc_info=True)
 
     def reconcile(self, now: datetime) -> None:
         """Take up accounts that have appeared, and drop ones that have gone.

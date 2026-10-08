@@ -40,7 +40,9 @@ from app.api.schemas import (
 )
 from app.db import retailer_accounts
 from app.api.cart import _push_lock
-from app.db.models import OcadoAuthEvent, Product, User
+from app.db.models import OcadoAuthEvent, Product, RetailerAccount, User
+from app import household
+from app.ocado import amend
 from app.ocado import orders as ocado_orders
 from app.ocado import shop
 from app.ocado.availability import fetch_statuses
@@ -250,3 +252,73 @@ def reserve(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado slot reserve failed: {exc}") from exc
     return OcadoReserveOut(raw=payload)
+
+
+# ---- the household's orders, and moving one --------------------------------------
+# One person's Ocado often holds the household's shop, so these look across the
+# accounts the caller may act on (their own, then the household's: app.household),
+# find the order there, and act with that account's session.
+class MoveSlotIn(BaseModel):
+    slot_id: str
+    #: Moving a delivery is ocado.com's own "Confirm changes": not something to do by accident.
+    confirm: bool = False
+
+
+def _household_clients(session: Session, user: User) -> list[tuple[RetailerAccount, OcadoClient]]:
+    return [(account, OcadoClient(get_shared_session(account.key)))
+            for account in household.accounts(session, user, "ocado")]
+
+
+def _order_client(session: Session, user: User, order_id: str) -> tuple[OcadoClient, dict]:
+    for _account, client in _household_clients(session, user):
+        try:
+            order = amend.find_order(client, order_id)
+        except Exception as exc:  # noqa: BLE001 - a dead session is one account, not all of them
+            log.info("ocado: orders for %s not read: %s", _account.key, exc)
+            continue
+        if order is not None:
+            return client, order
+    raise HTTPException(status_code=404, detail=f"Order {order_id} isn't a coming order on any account you can manage")
+
+
+@router.get("/household/orders")
+def household_orders(session: Session = Depends(get_session), user: User = Depends(get_current_user)) -> dict:
+    """Coming orders on every account the caller may manage, each with whose it is."""
+    out = []
+    for account, client in _household_clients(session, user):
+        try:
+            orders = [asdict(ocado_orders.summarise(o)) for o in client.orders(pending=True)]
+            out.append({"account": account.key, "email": account.email, "orders": orders})
+        except Exception as exc:  # noqa: BLE001
+            out.append({"account": account.key, "email": account.email, "orders": [], "error": str(exc)})
+    return {"accounts": out}
+
+
+@router.get("/orders/{order_id}/slots", response_model=OcadoSlotsOut)
+def order_slots(order_id: str, days: int = 7, session: Session = Depends(get_session),
+                user: User = Depends(get_current_user)) -> OcadoSlotsOut:
+    """The slots a coming order could move to."""
+    client, order = _order_client(session, user, order_id)
+    with _push_lock("ocado"):  # the edit session takes over the cart for a moment
+        try:
+            items = amend.slots_for(client, order, days=min(max(days, 1), 14))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Ocado slot fetch failed: {exc}") from exc
+    return OcadoSlotsOut(items=[OcadoSlotOut(**asdict(slot)) for slot in items])
+
+
+@router.post("/orders/{order_id}/slot")
+def move_order_slot(order_id: str, body: MoveSlotIn, session: Session = Depends(get_session),
+                    user: User = Depends(get_current_user)) -> dict:
+    """Move a coming order to another slot (this delivery only, for a recurring
+    order). On any failure the order is left exactly as it was."""
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail='Moving a delivery needs {"confirm": true}')
+    client, _order = _order_client(session, user, order_id)
+    with _push_lock("ocado"):
+        try:
+            moved = amend.move_slot(client, order_id, body.slot_id)
+        except amend.OrderChangeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    log.info("ocado: order %s moved to %s", order_id, moved.delivery_start)
+    return asdict(moved)

@@ -11,6 +11,7 @@ Every path and body here is taken from traffic captured off the live site (see
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -28,6 +29,17 @@ RESERVATION_PATH = "/api/ecomslots/v1/slots/reservation"
 #: ``{"result": [ids], "entities": {"order": {id: order}}, "nextPageToken"}``.
 ORDERS_PATH = "/api/order/v6/orders"
 PENDING_ORDERS_PATH = "/api/order/v6/orders/pending"
+# Changing an order is ocado.com's "Edit order": an edit session turns the active cart
+# into that order, changes are made to it as to any cart, and checking out confirms
+# them. Deleting the session drops every change and leaves the order as it was.
+ORDER_EDIT_PATH = "/api/customersessions/v2/sessions/order-edit"
+CHECKOUT_START_PATH = "/api/cart/v1/carts/active/checkout-start"
+CHECKOUT_SUMMARY_PATH = "/api/cart/v2/carts/active/checkout-summary"
+DEFAULT_BILLING_ADDRESS_PATH = "/api/address/v1/billing-addresses/default"
+WALLET_ITEMS_PATH = "/api/walletservice/v3/wallet-items"
+ORDER_PAYMENTS_PATH = "/api/orderpayment/v1/order-payments/{order_id}"
+CHECKOUT_PATH = "/api/orderpayment/v2/checkout"
+CHECKOUT_CONTENT_TYPE = "application/vnd.ocado.orderpayment.customer-initiated-active-session-based+json"
 #: The same search the scraper makes, asked with the account's own session so the
 #: prices and stock are for its delivery region.
 SEARCH_PATH = "/api/webproductpagews/v6/product-pages/search"
@@ -170,6 +182,38 @@ class OcadoClient:
         payload = self._json("GET", PENDING_ORDERS_PATH if pending else ORDERS_PATH)
         entities = (payload.get("entities") or {}).get("order") or {}
         return [entities[order_id] for order_id in payload.get("result") or [] if order_id in entities]
+
+    # -- changing an existing order ------------------------------------------
+    def start_order_edit(self, order_id: str, region: str) -> dict[str, Any]:
+        return self._json("POST", ORDER_EDIT_PATH, json={"orderId": order_id, "regionId": region})
+
+    def cancel_order_edit(self, order_id: str, region: str) -> None:
+        self._json("DELETE", f"{ORDER_EDIT_PATH}/{order_id}", params={"regionId": region})
+
+    def checkout_start(self, shipping_group: str = DEFAULT_SHIPPING_GROUP) -> dict[str, Any]:
+        return self._json("POST", CHECKOUT_START_PATH, json={"shippingGroupType": shipping_group})
+
+    def checkout_summary(self) -> dict[str, Any]:
+        return self._json("PUT", CHECKOUT_SUMMARY_PATH)
+
+    def default_billing_address_id(self, country: str = "GB") -> str | None:
+        """None when the account has none: the checkout then goes without, as on ocado.com."""
+        response = self.session.request("GET", DEFAULT_BILLING_ADDRESS_PATH, params={"countryCode": country})
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return (response.json() or {}).get("billingAddressId")
+
+    def wallet_items(self) -> list[dict[str, Any]]:
+        return self._json("GET", WALLET_ITEMS_PATH) or []
+
+    def order_payments(self, order_id: str) -> dict[str, Any]:
+        return self._json("GET", ORDER_PAYMENTS_PATH.format(order_id=order_id))
+
+    def checkout(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Place the active cart, which in an edit session confirms the order's changes."""
+        return self._json("POST", CHECKOUT_PATH, data=json.dumps(body),
+                          headers={"Content-Type": CHECKOUT_CONTENT_TYPE})
 
     def _json(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self.session.request(method, path, **kwargs)

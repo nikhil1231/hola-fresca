@@ -51,6 +51,7 @@ def test_feed_covers_every_connected_account_and_survives_a_broken_one(client, m
     session = next(main.app.dependency_overrides.get(get_session, get_session)())
     from app.db.models import User
     user = session.query(User).first()
+    monkeypatch.setattr(config, "HOUSEHOLD", {(user.email or "").lower()} - {""})
     for retailer in ("ocado", "hellofresh"):
         account = retailer_accounts.connect(session, user.id, retailer, email=f"{retailer}@x.com")
         retailer_accounts.record_status(session, account, "ready")
@@ -64,3 +65,20 @@ def test_feed_covers_every_connected_account_and_survives_a_broken_one(client, m
     body = client.get("/api/noodle/feed", headers={"Authorization": "Bearer tok"}).json()
     assert "£92.34" in body["context"] and "hellofresh (hellofresh@x.com): unavailable (session expired)" in body["context"]
     assert [u["at"] for u in body["upcoming"]] == sorted(u["at"] for u in body["upcoming"])
+
+
+def test_feed_leaves_out_accounts_outside_the_household(client, monkeypatch):
+    session = next(main.app.dependency_overrides.get(get_session, get_session)())
+    from app.db.models import User
+    me = session.query(User).first()
+    me.email = "me@x.com"
+    friend = User(email="friend@x.com", name="Friend")
+    session.add(friend)
+    session.commit()
+    for user in (me, friend):
+        retailer_accounts.record_status(session, retailer_accounts.connect(session, user.id, "ocado", email=f"{user.id}@shop.com"), "ready")
+    monkeypatch.setattr(config, "HOUSEHOLD", {"me@x.com"})
+    seen = []
+    monkeypatch.setitem(noodle_feed.SECTIONS, "ocado", lambda account, whose: (seen.append(whose) or [f"- {whose}"], []))
+    client.get("/api/noodle/feed", headers={"Authorization": "Bearer tok"})
+    assert len(seen) == 1 and seen[0] in (f"{me.id}@shop.com", f"user {me.id}")  # the friend's account isn't read
