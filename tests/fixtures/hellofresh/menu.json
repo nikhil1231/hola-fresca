@@ -1,0 +1,72 @@
+{
+ "id": "6ab251f69d56f5d1bd4d9e7a",
+ "week": "2026-W44",
+ "meals": [
+  {
+   "recipeFamily": "classic-plan",
+   "index": 1,
+   "selection": {
+    "quantity": 1
+   },
+   "recipe": {
+    "id": "6a8f1b5b24b9d7fd9be4bda6",
+    "name": "Crispy Chicken Tenders and Cheesy Chips",
+    "headline": "with Gravy, Aioli and Apple & Baby Leaf Salad"
+   }
+  },
+  {
+   "recipeFamily": "classic-plan",
+   "index": 2,
+   "selection": {
+    "quantity": 1
+   },
+   "recipe": {
+    "id": "6a8f1b5fd944d293738a3af7",
+    "name": "Beef and Pork Rogan Josh Style Curry ",
+    "headline": "with Pepper, Spinach and Ginger Rice "
+   }
+  },
+  {
+   "recipeFamily": "classic-plan",
+   "index": 3,
+   "selection": {
+    "quantity": 1
+   },
+   "recipe": {
+    "id": "6a8f1b6624b9d7fd9be4bddb",
+    "name": "Mexican Style Cheesy Pork Nachos Rapidos",
+    "headline": "with Pepper, Spinach and Soured Cream"
+   }
+  },
+  {
+   "recipeFamily": "classic-plan",
+   "index": 49,
+   "selection": null,
+   "recipe": {
+    "id": "6a8f1b8bf3876e995cfad51f",
+    "name": "Spinach and Ricotta Tortelloni in Spicy Cajun Sauce",
+    "headline": "with Charred Courgette and Pepper"
+   }
+  },
+  {
+   "recipeFamily": "classic-plan",
+   "index": 37,
+   "selection": null,
+   "recipe": {
+    "id": "6a8f1b6624b9d7fd9be4bdd8",
+    "name": "Roasted Chicken Thighs and Cheesy Leek Sauce",
+    "headline": "with Spinach and Mash"
+   }
+  },
+  {
+   "recipeFamily": "classic-plan",
+   "index": 6,
+   "selection": null,
+   "recipe": {
+    "id": "6a8f1b5cf3876e995cfad42d",
+    "name": "Roasted Vegetable Lasagne",
+    "headline": "with Bell Pepper, Courgette and Cheddar Cheese"
+   }
+  }
+ ]
+}

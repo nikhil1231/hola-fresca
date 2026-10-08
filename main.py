@@ -20,6 +20,8 @@ from app.api.plan import router as plan_router
 from app.api.planner import router as planner_router
 from app.api.recipes import router as recipes_router
 from app.api.retailers import router as retailers_router
+from app.api.hellofresh import router as hellofresh_router
+from app.api.noodle_feed import router as noodle_feed_router
 from app.api.schedule import router as schedule_router
 
 # uvicorn installs handlers for its own loggers but leaves the root logger at
@@ -71,6 +73,8 @@ app.include_router(schedule_router)
 app.include_router(plan_router)
 app.include_router(pantry_router)
 app.include_router(retailers_router)
+app.include_router(hellofresh_router)
+app.include_router(noodle_feed_router)
 
 # Windows can report Vite's module bundles as text/plain via the registry-backed
 # mimetypes table, which modern browsers reject for <script type="module">.

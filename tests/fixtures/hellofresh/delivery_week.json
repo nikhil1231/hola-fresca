@@ -1,0 +1,116 @@
+{
+ "allowedActions": {
+  "mealSwap": true,
+  "updateDeliveryAddress": true,
+  "updateDeliveryWeekday": true,
+  "pause": true,
+  "oneOffChange": true,
+  "updatePaymentMethod": true,
+  "donate": false
+ },
+ "id": "2026-W44",
+ "deliveryDate": "2026-10-26T12:00:00+0000",
+ "cutoffDate": "2026-10-21T23:59:59+0100",
+ "status": "PAUSED",
+ "subStatus": "NULL",
+ "actionable": true,
+ "prepaid": false,
+ "holidayDelivery": null,
+ "holidayMessage": null,
+ "isHolidayShiftVisible": null,
+ "product": {
+  "handle": "GB-CBU-3-4-0",
+  "specs": {
+   "meals": 3,
+   "size": 4,
+   "recurrency": 0
+  },
+  "family": {
+   "handle": "classic-box-unified",
+   "tags": [
+    "is_mealbox",
+    "is_quick",
+    "is_bestseller",
+    "is_unified"
+   ],
+   "name": "Classic Plan"
+  },
+  "productName": "Classic - 3 meals per week for 4 persons",
+  "shippingPrice": 0,
+  "specialFee": 499,
+  "price": 5388
+ },
+ "deliveryOption": {
+  "handle": "GB-1-0800-2100",
+  "deliveryName": "Monday: 08:00 - 21:00",
+  "type": "PLAN",
+  "deliveryDay": 1,
+  "deliveryFrom": "08:00",
+  "deliveryTo": "21:00",
+  "price": 0,
+  "priceInCents": 0
+ },
+ "subscriptionId": 1234567,
+ "availableOneOffOptions": [
+  {
+   "handle": "GB-6-0800-2100",
+   "deliveryDate": "2026-10-24"
+  },
+  {
+   "handle": "GB-1-0800-1200-FEES-AM",
+   "deliveryDate": "2026-10-26"
+  },
+  {
+   "handle": "GB-1-0800-2100",
+   "deliveryDate": "2026-10-26"
+  },
+  {
+   "handle": "GB-2-0800-1200-FEES-AM",
+   "deliveryDate": "2026-10-27"
+  },
+  {
+   "handle": "GB-2-0800-2100",
+   "deliveryDate": "2026-10-27"
+  },
+  {
+   "handle": "GB-3-0800-1200-FEES-AM",
+   "deliveryDate": "2026-10-28"
+  },
+  {
+   "handle": "GB-3-0800-2100",
+   "deliveryDate": "2026-10-28"
+  },
+  {
+   "handle": "GB-4-0800-1200-FEES-AM",
+   "deliveryDate": "2026-10-29"
+  },
+  {
+   "handle": "GB-4-0800-2100",
+   "deliveryDate": "2026-10-29"
+  },
+  {
+   "handle": "GB-5-0800-1200-FEES-AM",
+   "deliveryDate": "2026-10-30"
+  },
+  {
+   "handle": "GB-5-0800-2100",
+   "deliveryDate": "2026-10-30"
+  },
+  {
+   "handle": "GB-6-0800-1200-FEES-AM",
+   "deliveryDate": "2026-10-24"
+  },
+  {
+   "handle": "GB-7-0800-1200-FEES-AM",
+   "deliveryDate": "2026-10-25"
+  },
+  {
+   "handle": "GB-7-0800-2100",
+   "deliveryDate": "2026-10-25"
+  }
+ ],
+ "tracking": null,
+ "orderId": null,
+ "deliveryBlocked": false,
+ "state": "PAUSED"
+}

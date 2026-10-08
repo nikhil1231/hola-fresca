@@ -1,0 +1,26 @@
+[
+ {
+  "id": "00000000-0000-4000-8000-000000000001",
+  "customerId": "c",
+  "eligibilityStatus": "eligible",
+  "brand": "hellofresh",
+  "regionCode": "GB",
+  "planType": "mealkit",
+  "finalDeliveryWeek": "",
+  "planItems": [
+   {
+    "priceSetId": "p",
+    "productHandle": "GB-CBU-3-4-0"
+   }
+  ],
+  "cancellationOptions": {
+   "excludeFromReactivation": false,
+   "excludeFromNotification": false,
+   "cancelOrders": false
+  },
+  "reactivatedAt": "2026-09-30T11:23:14.571856Z",
+  "createdAt": "2022-02-14T18:42:37.916748Z",
+  "updatedAt": "2026-09-30T11:23:14.57186Z",
+  "legacySubscriptionId": 1234567
+ }
+]

@@ -374,3 +374,28 @@ def test_access_unconfigured_changes_nothing(monkeypatch, factory):
         }
     finally:
         main.app.dependency_overrides.clear()
+
+
+def service_token(signing_key, common_name: str) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode({"common_name": common_name, "aud": AUD, "iss": f"https://{TEAM}", "iat": now,
+                       "exp": now + timedelta(hours=1), "sub": "", "type": "app"}, signing_key, algorithm="RS256")
+
+
+def test_a_listed_service_token_acts_for_its_person(configured, signing_key, monkeypatch):
+    monkeypatch.setattr("app.config.ACCESS_SERVICES", {"noodle.access": OWNER})
+    monkeypatch.setattr("app.config.NOODLE_FEED_TOKEN", None)
+    client = TestClient(main.app)
+    token = service_token(signing_key, "noodle.access")
+    assert get(client, host=HOSTNAME, token=token).status_code == 200
+    with configured() as session:
+        assert session.scalar(select(User).where(User.email == OWNER)) is not None  # the owner's row, claimed
+    headers = {"Host": HOSTNAME, "Cf-Access-Jwt-Assertion": token}
+    # the feed needs no token of its own...
+    assert client.get("/api/noodle/feed", headers=headers).status_code == 200
+    # ...but a shop's sign-in is the person's
+    assert client.post("/api/hellofresh/login", json={"email": "a@b.c", "password": "x"},
+                       headers=headers).status_code == 403
+    assert client.post("/api/cart/ocado/logout", headers=headers).status_code == 403
+    # an unlisted token is refused even though Access let it through
+    assert get(client, host=HOSTNAME, token=service_token(signing_key, "stranger.access")).status_code == 403

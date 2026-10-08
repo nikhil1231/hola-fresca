@@ -8,6 +8,10 @@ no other shop has an equivalent of:
 * **delivery slots.** Sainsbury's has a slot API too, but nothing in the app
   talks to it yet, and inventing a retailer-neutral slot endpoint that only one
   shop can answer would be a worse lie than this module's name.
+* **search and the trolley by hand.** ``/search``, ``/basket`` and
+  ``/basket/items`` are for a person (or Noodle, on their behalf) shopping
+  directly, outside the meal plan. A line set here is the person's own as far as
+  the push ledger is concerned, exactly as if they'd added it on ocado.com.
 * **the auth-event log.** It measures how long Ocado's browser-driven sessions
   survive, which is a question about that ladder specifically. Sainsbury's
   answers it with a refresh token and has nothing to count.
@@ -20,6 +24,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -34,7 +39,11 @@ from app.api.schemas import (
     OcadoSlotsOut,
 )
 from app.db import retailer_accounts
-from app.db.models import OcadoAuthEvent, User
+from app.api.cart import _push_lock
+from app.db.models import OcadoAuthEvent, Product, User
+from app.ocado import orders as ocado_orders
+from app.ocado import shop
+from app.ocado.availability import fetch_statuses
 from app.ocado.client import OcadoClient
 from app.ocado.session import get_shared_session
 
@@ -155,6 +164,80 @@ def slots(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Ocado slot fetch failed: {exc}") from exc
     return OcadoSlotsOut(items=[OcadoSlotOut(**asdict(slot)) for slot in items])
+
+
+@router.get("/orders")
+def orders(pending: bool = False, client: OcadoClient = Depends(get_ocado_client)) -> dict:
+    """The caller's orders, newest first: when each arrives, until when it can be
+    edited, what it costs. ``pending`` keeps only those still to come."""
+    try:
+        raw = client.orders(pending=pending)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Ocado orders fetch failed: {exc}") from exc
+    return {"orders": [asdict(ocado_orders.summarise(o)) for o in raw]}
+
+
+class BasketLineIn(BaseModel):
+    sku: str
+    #: Absolute: 0 takes the line out. Absolute rather than a delta so a retried
+    #: request can't add the same thing twice.
+    quantity: int = Field(ge=0, le=50)
+
+
+class BasketChangeIn(BaseModel):
+    items: list[BasketLineIn] = Field(min_length=1, max_length=100)
+
+
+@router.get("/search")
+def search(q: str, limit: int = 20, client: OcadoClient = Depends(get_ocado_client)) -> dict:
+    """Ocado's own search, priced for the caller's delivery region."""
+    q = q.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Search for something")
+    limit = max(1, min(limit, 50))
+    try:
+        payload = client.search(q, size=limit)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Ocado search failed: {exc}") from exc
+    return {"query": q, "products": [asdict(p) for p in shop.search_results(payload, limit)]}
+
+
+def _basket_out(client: OcadoClient, session: Session, payload: dict | None = None) -> dict:
+    def names(skus: list[str]) -> dict[str, str]:
+        known = dict(session.execute(
+            select(Product.sku, Product.name).where(Product.retailer == "ocado", Product.sku.in_(skus))).all())
+        missing = [sku for sku in skus if sku not in known]
+        if missing:
+            try:
+                known |= {sku: s.name for sku, s in fetch_statuses(missing, session=client.session).items() if s.name}
+            except Exception as exc:  # noqa: BLE001 - a nameless line still says what it costs
+                log.info("ocado basket: naming %d unknown skus failed: %s", len(missing), exc)
+        return known
+
+    try:
+        payload = payload or client.cart_view()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Ocado basket fetch failed: {exc}") from exc
+    return asdict(shop.basket(payload, names))
+
+
+@router.get("/basket")
+def basket(client: OcadoClient = Depends(get_ocado_client), session: Session = Depends(get_session)) -> dict:
+    """The live trolley: named lines, total, and whether Ocado will let it check out."""
+    return _basket_out(client, session)
+
+
+@router.post("/basket/items")
+def set_basket_items(body: BasketChangeIn, client: OcadoClient = Depends(get_ocado_client),
+                     session: Session = Depends(get_session)) -> dict:
+    """Set lines to absolute quantities; ``quantity: 0`` removes one."""
+    wanted = {line.sku: line.quantity for line in body.items}
+    with _push_lock("ocado"):  # not alongside a plan push reading the same cart
+        try:
+            client.set_quantities(wanted)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Ocado basket change failed: {exc}") from exc
+    return _basket_out(client, session)
 
 
 @router.post("/slots/reserve", response_model=OcadoReserveOut)

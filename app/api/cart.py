@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import schedule as sched
+from app.api.access import require_person
 from app.api.deps import (
     get_current_user,
     get_planner_csv_path,
@@ -159,7 +160,7 @@ def status(
     return _login_out(adapter.status(account.key), account)
 
 
-@router.post("/login", response_model=CartLoginOut)
+@router.post("/login", response_model=CartLoginOut, dependencies=[Depends(require_person)])
 def login(
     body: CartLoginIn,
     session: Session = Depends(get_session),
@@ -220,7 +221,7 @@ def refresh_session(
     return _login_out(auth, account)
 
 
-@router.post("/otp", response_model=CartLoginOut)
+@router.post("/otp", response_model=CartLoginOut, dependencies=[Depends(require_person)])
 def otp(
     body: CartOtpIn,
     session: Session = Depends(get_session),
@@ -240,7 +241,7 @@ def otp(
     return _login_out(auth, account)
 
 
-@router.post("/logout", response_model=CartLoginOut)
+@router.post("/logout", response_model=CartLoginOut, dependencies=[Depends(require_person)])
 def logout(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),

@@ -54,6 +54,24 @@ ACCESS_OWNER_EMAIL = os.environ.get("HOLAFRESCA_ACCESS_OWNER_EMAIL")
 # It is never used to select or create a User row and is never trusted for
 # authorization; get_current_user keeps resolving the bootstrap account.
 LOCAL_USER_NAME = os.environ.get("HOLAFRESCA_LOCAL_USER_NAME", "Local User").strip() or "Local User"
+
+#: Bearer token for ``GET /api/noodle/feed``, the read-only summary Noodle (the
+#: owner's organiser) pulls over the LAN. Unset: only an Access service (below)
+#: can read it.
+NOODLE_FEED_TOKEN = os.environ.get("HOLAFRESCA_NOODLE_FEED_TOKEN") or None
+
+#: Machines allowed in through Access with a service token, each acting as one
+#: person: ``<client id>=<email>``, comma-separated. A service-token assertion
+#: names the token (``common_name``, its client id) instead of an email, so this
+#: is where it is given one. A token not listed here is refused even though
+#: Access let it through.
+ACCESS_SERVICES = {
+    client_id.strip(): email.strip()
+    for client_id, _, email in (
+        part.partition("=") for part in os.environ.get("HOLAFRESCA_ACCESS_SERVICES", "").split(",")
+    )
+    if client_id.strip() and email.strip()
+}
 LOCAL_USER_EMAIL = (
     os.environ.get("HOLAFRESCA_LOCAL_USER_EMAIL")
     or ACCESS_OWNER_EMAIL

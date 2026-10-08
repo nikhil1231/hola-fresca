@@ -13,6 +13,9 @@ being authentication and being decoration:
   answers on the LAN — so a header is a claim, not a proof. Only the JWT is
   trusted, and only once its signature, audience, issuer and expiry check out
   against the team's published keys.
+* A service token (a machine, not a person: Noodle) is let in only if its
+  client id is listed in ``HOLAFRESCA_ACCESS_SERVICES`` against the person it
+  acts for, and it can't touch a shop's credentials (:func:`require_person`).
 * A request that asks for the public hostname without a valid assertion is
   refused rather than falling back. That is the case that matters if the tunnel
   is ever reachable with the Access policy switched off or misconfigured: the
@@ -73,6 +76,8 @@ class Identity:
 
     email: str
     name: str | None = None
+    #: The service token's client id when a machine is acting for ``email``.
+    service: str | None = None
 
 
 def local_identity() -> Identity:
@@ -167,8 +172,12 @@ def authenticated_identity(request: Request) -> Identity | None:
     email = (claims.get("email") or "").strip()
     if not email:
         # A service-token assertion authenticates a machine, not a person, and
-        # carries common_name instead. Nothing here is machine-facing.
-        log.warning("Access assertion carried no email; refusing")
+        # carries common_name (the token's client id) instead.
+        service = (claims.get("common_name") or "").strip()
+        acting_for = config.ACCESS_SERVICES.get(service) if service else None
+        if acting_for:
+            return Identity(email=acting_for, service=service)
+        log.warning("Access assertion carried no email and an unlisted service %r; refusing", service)
         raise HTTPException(status_code=403, detail="Access token is not a user identity")
     # ``name`` is not normally part of the compact application token, but it
     # can be configured as a custom OIDC claim. Accept it when present; the
@@ -177,6 +186,18 @@ def authenticated_identity(request: Request) -> Identity | None:
     raw_name = claims.get("name") or custom.get("name")
     name = raw_name.strip() or None if isinstance(raw_name, str) else None
     return Identity(email=email, name=name)
+
+
+def require_person(request: Request) -> None:
+    """For a shop's credentials (signing in, codes, signing out): a person only.
+
+    A service acting for someone may read and shop for them, but a password or
+    an emailed code is theirs to hand over, and disconnecting an account is not
+    something a machine should do on their behalf.
+    """
+    identity = authenticated_identity(request)
+    if identity is not None and identity.service:
+        raise HTTPException(status_code=403, detail="A service can't manage a shop's sign-in")
 
 
 def authenticated_email(request: Request) -> str | None:

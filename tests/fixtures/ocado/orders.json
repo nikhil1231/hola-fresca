@@ -1,0 +1,10 @@
+{"entities": {"order": {
+  "1001": {"orderId": "1001", "orderReference": "1001", "status": "FUTURE", "editStatus": "EDITABLE", "cancelable": true,
+           "totalItems": 35, "orderTotals": {"finalPrice": {"amount": "92.34", "currency": "GBP"}},
+           "dates": {"deliveryStartDate": "2030-10-20T10:00:00+01:00", "deliveryEndDate": "2030-10-20T11:00:00+01:00",
+                     "confirmOrderChangesBy": "2030-10-19T17:25:00+01:00"},
+           "addressNickName": "Home", "recurringShoppingDefinition": {"name": "Ocado Reserved Order"}},
+  "1000": {"orderId": "1000", "status": "CANCELLED", "editStatus": "NOT_EDITABLE", "cancelable": false, "totalItems": 3,
+           "orderTotals": {"finalPrice": {"amount": "9.00", "currency": "GBP"}},
+           "dates": {"deliveryStartDate": "2030-10-13T10:00:00+01:00", "deliveryEndDate": "2030-10-13T11:00:00+01:00"}}
+}}, "result": ["1001", "1000"], "retentionPeriod": "P3Y", "nextPageToken": null}

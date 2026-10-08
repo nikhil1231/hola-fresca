@@ -22,9 +22,11 @@ WRITE_DECORATORS = {"post", "put", "patch", "delete"}
 
 #: Dependencies that establish who is asking. ``require_admin`` and
 #: ``get_active_retailer`` both depend on ``get_current_user`` themselves, and
-#: ``get_cart_adapter``/``get_ocado_client`` are resolved through the endpoint's
-#: own user lookup, so they are listed as the transitive gates they are.
-USER_GATES = {"require_admin", "get_current_user", "get_active_retailer", "get_ocado_client"}
+#: ``get_cart_adapter``/``get_ocado_client``/``get_hellofresh_client`` are resolved
+#: through the endpoint's own user lookup, so they are listed as the transitive
+#: gates they are.
+USER_GATES = {"require_admin", "get_current_user", "get_active_retailer", "get_ocado_client",
+              "get_hellofresh_client"}
 
 #: Writes that deliberately answer anyone. Empty, and the burden is on anything
 #: that wants to join it: a write nobody is answerable for is how a household

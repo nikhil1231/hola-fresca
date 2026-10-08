@@ -1,0 +1,55 @@
+{
+ "count": 1,
+ "items": [
+  {
+   "product": {
+    "sku": "GB-CBU-3-4-0",
+    "unitPrice": 5388,
+    "maintainedUnitPrice": 0,
+    "link": null,
+    "id": "0"
+   },
+   "deliveryWeekday": 1,
+   "deliveryInterval": 1,
+   "deliveryTime": "GB-1-0800-2100",
+   "canceledAt": null,
+   "pausedAt": null,
+   "isActive": true,
+   "nextDelivery": "2026-10-12T00:00:00+0100",
+   "nextDeliveryWeek": "2026-W42",
+   "nextCutoffDate": "2026-10-07T23:59:59+0100",
+   "nextModifiableDeliveryWeek": "2026-W43",
+   "preset": "chefschoice",
+   "customerPlanId": "00000000-0000-4000-8000-000000000001",
+   "id": "1234567",
+   "deliveryOption": {
+    "handle": "GB-1-0800-2100",
+    "deliveryDay": 1,
+    "packingDay": 7,
+    "deliveryFrom": "08:00",
+    "deliveryTo": "21:00",
+    "trackingCutoff": "-21 hours",
+    "deliveryName": "Monday: 08:00 - 21:00",
+    "cutoff": "-4 days",
+    "sort": null,
+    "type": "PLAN",
+    "isDefault": false,
+    "price": null,
+    "priceInCents": null,
+    "availableOnCheckout": false,
+    "riskFactor": 0,
+    "utilizationFactor": null,
+    "varianceFactor": null,
+    "link": null,
+    "id": "68282453-0296-4970-bf07-2b7dc3dc1070",
+    "country": "GB",
+    "createdAt": null,
+    "updatedAt": null,
+    "shipper": "unknown"
+   },
+   "shippingAddress": {
+    "postcode": "SW1A1AA"
+   }
+  }
+ ]
+}

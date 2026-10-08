@@ -23,6 +23,14 @@ CHECKOUT_WALK_PATH = "/api/cart/v1/carts/active/checkout-walk"
 DELIVERY_ADDRESSES_PATH = "/api/ecomdeliverydestinations/v4/delivery-addresses"
 SLOTS_PATH = "/api/ecomslots/v2/slots"
 RESERVATION_PATH = "/api/ecomslots/v1/slots/reservation"
+#: Order history (three years of it) and the orders still to come. Taken from the
+#: web client's ``web_order_ws`` service; both answer the same normalised shape,
+#: ``{"result": [ids], "entities": {"order": {id: order}}, "nextPageToken"}``.
+ORDERS_PATH = "/api/order/v6/orders"
+PENDING_ORDERS_PATH = "/api/order/v6/orders/pending"
+#: The same search the scraper makes, asked with the account's own session so the
+#: prices and stock are for its delivery region.
+SEARCH_PATH = "/api/webproductpagews/v6/product-pages/search"
 
 #: Ocado's own web client sends this for a standard home-delivery basket.
 DEFAULT_SHIPPING_GROUP = "default home delivery"
@@ -70,6 +78,28 @@ class OcadoClient:
             APPLY_QUANTITY_PATH,
             params={"cartProductSorting": "CATEGORIES"},
             json=_delta_payload(deltas),
+        )
+
+    def set_quantities(self, wanted: dict[str, int]) -> dict[str, Any]:
+        """Bring each SKU in ``wanted`` to that absolute quantity (0 removes it).
+
+        apply-quantity only takes deltas, so the live cart is read first; a SKU
+        already at its quantity sends nothing.
+        """
+        from app.ocado.sync import cart_quantities
+
+        have = cart_quantities(self.cart_view())
+        deltas = {sku: max(qty, 0) - have.get(sku, 0) for sku, qty in wanted.items()}
+        if not any(deltas.values()):
+            return {}
+        return self.apply_quantity(deltas)
+
+    def search(self, term: str, *, size: int = 20) -> dict[str, Any]:
+        return self._json(
+            "GET",
+            SEARCH_PATH,
+            params={"q": term, "maxPageSize": str(size), "maxProductsToDecorate": str(size),
+                    "includeAdditionalPageInfo": "true", "tag": "web"},
         )
 
     def checkout_walk(self) -> dict[str, Any]:
@@ -134,6 +164,12 @@ class OcadoClient:
             RESERVATION_PATH,
             json={"regionId": region, "slotId": slot_id, "deliveryDestinationId": ddid},
         )
+
+    def orders(self, *, pending: bool = False) -> list[dict[str, Any]]:
+        """Orders newest first, as Ocado sends them; ``pending`` keeps only those not yet delivered."""
+        payload = self._json("GET", PENDING_ORDERS_PATH if pending else ORDERS_PATH)
+        entities = (payload.get("entities") or {}).get("order") or {}
+        return [entities[order_id] for order_id in payload.get("result") or [] if order_id in entities]
 
     def _json(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self.session.request(method, path, **kwargs)

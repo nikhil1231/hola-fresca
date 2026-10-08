@@ -247,6 +247,77 @@ and that anything built on top of it needs rethinking.
 
 Off unless `HOLAFRESCA_OCADO_HEARTBEAT=1` — see `.env.example`.
 
+## HelloFresh (your subscription)
+
+HelloFresh is a connection, not a shop: nothing is priced or pushed there, so it
+is not in `app/retailers.py`. Its account sits in `retailer_accounts` under
+`retailer="hellofresh"`, under the same rule as the shops (the password crosses one
+request; what's kept is the session). There is no browser in the loop: the site's
+gateway (`https://www.hellofresh.co.uk/gw`) takes a username/password POST and
+returns an access/refresh token pair, saved at
+`DATA_DIR/hellofresh/accounts/<key>/session.json`. A rejected token is refreshed once;
+after that the person signs in again.
+
+Endpoints and request bodies were read off the site's own JavaScript, not guessed.
+The reads (subscriptions, plans, deliveries, a week, its menu) have since been
+confirmed against a real account and the answers kept, trimmed and anonymised, in
+`tests/fixtures/hellofresh/`; the gateway answered a bearer token from httpx with
+no Cloudflare cookies. Not yet seen live: the writes (skip/un-skip's `PATCH`,
+cancel) and `/login` itself. Meals aren't in the deliveries list; each coming
+box's are read from `/my-deliveries/menu`. Whether a week can still be skipped is
+HelloFresh's own `allowedActions.pause`. Weeks are ISO weeks (`2030-W42`).
+
+| Route (`/api/hellofresh/...`) | Upstream (`/gw/...`) |
+|---|---|
+| `POST login` `{email, password}`, `POST logout`, `GET status` | `/login`, `/refresh`, `/logout` |
+| `GET boxes?weeks=4` (summary: week, date, cutoff, skipped, meals) | `GET /api/customers/me/deliveries?rangeStart&rangeEnd` |
+| `POST weeks/{week-or-date}/skip` / `unskip` `{subscription_id?}` | resolves the one live subscription, refuses a week past its cutoff, then the `PATCH` below |
+| `POST cancel` `{plan_id?, reason?}` | resolves the one live plan, then `POST /api/plans/{id}/cancel` |
+| `GET subscriptions`, `GET subscriptions/{id}` | `/api/customers/me/subscriptions`, `/api/subscriptions/{id}` |
+| `GET subscriptions/{id}/weeks/{week}` | `GET /api/subscriptions/{id}/delivery_dates/{week}` |
+| `POST subscriptions/{id}/weeks/{week}/skip` / `unskip` | `PATCH` same, `status: PAUSED` / `RUNNING` |
+| `GET subscriptions/{id}/product-options`, `POST plans/{id}/product` | `/api/subscriptions/{id}/product_options`, `PATCH /api/plans/{id}` `{productHandle}` |
+| `GET plans`, `GET plans/{id}`, `POST plans/{id}/cancel` `{reason?}` | `/api/plans`, `POST /api/plans/{id}/cancel` + `/cancellation/reason` |
+| `GET orders`, `GET menu/{week}`, `GET raw/customer`, `GET raw/deliveries` | `/api/customers/me/orders`, `/menus-service/menus`, `/api/customers/me` |
+
+Everything that changes the subscription needs `{"confirm": true}` in the body.
+Not mapped yet: choosing the week's meals (it goes through a separate carts
+service whose calls weren't readable from the bundles), reactivation, and payment.
+
+## Ocado orders, search and the trolley
+
+`GET /api/ocado/orders?pending=true` lists the caller's orders from
+`/api/order/v6/orders[/pending]`, reduced by `app/ocado/orders.py` to delivery
+window, edit cutoff (`confirmOrderChangesBy`), total, item count and whether it's
+a recurring order.
+
+For shopping by hand, outside the plan (`app/ocado/shop.py`):
+
+| Route (`/api/ocado/...`) | What |
+|---|---|
+| `GET search?q=&limit=20` | Ocado's search with the account's session (its region's prices and stock) |
+| `GET basket` | the live trolley: named lines, total, `can_checkout` and Ocado's `restrictions` (`MISSING_SLOT`, `NOT_REACHED_THRESHOLD`) |
+| `POST basket/items` `{items: [{sku, quantity}]}` | absolute quantities, `0` removes; held under the plan push's lock |
+| `GET slots`, `POST slots/reserve` | the slot grid, and booking one for the trolley |
+
+Lines set here count as the person's own to the push ledger, as if added on
+ocado.com.
+
+## Feed for Noodle
+
+`GET /api/noodle/feed` (bearer `HOLAFRESCA_NOODLE_FEED_TOKEN`; unset turns it off)
+is the read-only summary Noodle pulls, covering every connected Ocado and
+HelloFresh account in the household:
+
+```json
+{"context": "plain text for answering questions",
+ "upcoming": [{"title": "Ocado delivery (35 items, £92.34)", "at": "2030-10-20T10:00:00+01:00", "kind": "delivery"},
+              {"title": "Ocado order: last chance to edit", "at": "2030-10-19T17:25:00+01:00", "kind": "deadline"}]}
+```
+
+The same contract is meant for every system that feeds Noodle. An account whose
+session has died is reported in `context` and skipped.
+
 ## Migrations
 
 The schema is evolved with alembic, and `init_db` runs it on start-up — a fresh
