@@ -1,7 +1,8 @@
-"""The owner's HelloFresh login kept in the env file: used when there's no working session, never for anyone else."""
+"""HelloFresh logins kept in the env file, one per person, and the household managing each other's."""
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 from app import config
 from app.api import hellofresh
@@ -14,8 +15,8 @@ class FakeClient:
     logins: list = []
     refuse = False
 
-    def __init__(self, state="logged_out"):
-        self.state = state
+    def __init__(self):
+        self.state = "logged_out"
 
     def status(self):
         return self.state
@@ -31,41 +32,56 @@ class FakeClient:
 
 
 @pytest.fixture
-def owner(factory, monkeypatch):
+def household(factory, monkeypatch):
     FakeClient.logins, FakeClient.refuse = [], False
-    hellofresh._login_failed_at = None
-    monkeypatch.setattr(config, "ACCESS_OWNER_EMAIL", "owner@x.com")
-    monkeypatch.setattr(config, "HELLOFRESH_EMAIL", "box@x.com")
-    monkeypatch.setattr(config, "HELLOFRESH_PASSWORD", "secret")
+    hellofresh._login_failed_at.clear()
+    monkeypatch.setattr(config, "HOUSEHOLD", {"me@x.com", "partner@x.com"})
+    monkeypatch.setattr(config, "HELLOFRESH_LOGINS", {"me@x.com": ("box@x.com", "pw1"),
+                                                      "partner@x.com": ("box2@x.com", "pw2")})
     clients = {}
     monkeypatch.setattr(hellofresh, "client_for", lambda account: clients.setdefault(account.key, FakeClient()))
     with factory() as session:
-        user = session.query(User).order_by(User.id).first()
-        user.email = "owner@x.com"
+        me = session.query(User).order_by(User.id).first()
+        me.email = "me@x.com"
+        partner, friend = User(email="partner@x.com", name="P"), User(email="friend@x.com", name="F")
+        session.add_all([partner, friend])
         session.commit()
-        yield session, user
+        yield session, me, partner, friend
 
 
-def test_the_owner_is_signed_in_from_the_env_file(owner):
-    session, user = owner
-    account = hellofresh.configured_login(session, user)
-    assert account is not None and FakeClient.logins == ["box@x.com"]
-    assert retailer_accounts.find(session, user.id, "hellofresh").status == "connected"
-    hellofresh.configured_login(session, user)
-    assert FakeClient.logins == ["box@x.com"]  # still signed in: no second login
+def test_each_person_is_signed_in_with_their_own_login(household):
+    session, me, partner, _ = household
+    assert hellofresh.configured_login(session, me).email == "box@x.com"
+    assert hellofresh.configured_login(session, partner).email == "box2@x.com"
+    assert FakeClient.logins == ["box@x.com", "box2@x.com"]
+    hellofresh.configured_login(session, me)
+    assert len(FakeClient.logins) == 2  # still signed in: no second login
+    assert retailer_accounts.find(session, me.id, "hellofresh").status == "connected"
 
 
-def test_nobody_else_gets_the_owners_login(owner):
-    session, _ = owner
-    friend = User(email="friend@x.com", name="F")
-    session.add(friend)
-    session.commit()
-    assert hellofresh.configured_login(session, friend) is None and FakeClient.logins == []
+def test_a_household_member_can_act_on_the_others_subscription(household):
+    session, me, _, friend = household
+    assert [a.email for a in hellofresh.household_accounts(session, me)] == ["box@x.com", "box2@x.com"]
+    assert hellofresh._account(session, me, "BOX2@x.com").email == "box2@x.com"
+    assert hellofresh._account(session, me).email == "box@x.com"
+    with pytest.raises(HTTPException):
+        hellofresh._account(session, friend, "box2@x.com")  # outside the household
+    assert hellofresh.configured_login(session, friend) is None  # and has no login of their own
 
 
-def test_a_refused_password_isnt_retried_on_every_request(owner):
-    session, user = owner
+def test_a_refused_password_isnt_retried_on_every_request(household):
+    session, me, _, _ = household
     FakeClient.refuse = True
-    assert hellofresh.configured_login(session, user) is None
-    assert hellofresh.configured_login(session, user) is None
+    assert hellofresh.configured_login(session, me) is None
+    assert hellofresh.configured_login(session, me) is None
     assert FakeClient.logins == ["box@x.com"]
+
+
+def test_logins_are_read_per_person_from_the_env(monkeypatch):
+    for key, value in {"HOLAFRESCA_HELLOFRESH_EMAIL": "box@x.com", "HOLAFRESCA_HELLOFRESH_PASSWORD": "a|b,c",
+                       "HOLAFRESCA_HELLOFRESH_2_FOR": "Partner@x.com", "HOLAFRESCA_HELLOFRESH_2_EMAIL": "box2@x.com",
+                       "HOLAFRESCA_HELLOFRESH_2_PASSWORD": "pw2", "HOLAFRESCA_HELLOFRESH_3_EMAIL": "no-for@x.com",
+                       "HOLAFRESCA_HELLOFRESH_3_PASSWORD": "x"}.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(config, "ACCESS_OWNER_EMAIL", "Me@x.com")
+    assert config._hellofresh_logins() == {"me@x.com": ("box@x.com", "a|b,c"), "partner@x.com": ("box2@x.com", "pw2")}

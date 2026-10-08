@@ -72,13 +72,30 @@ ACCESS_SERVICES = {
     )
     if client_id.strip() and email.strip()
 }
-#: A HelloFresh login kept in the env file instead of typed into Settings. It is
-#: the owner's: whenever their HelloFresh session is missing or has lapsed past
-#: refreshing, the next HelloFresh call signs in with it. The password then lives
-#: at rest in the env file, next to the other secrets, which is the trade made for
-#: never having to sign in by hand.
-HELLOFRESH_EMAIL = os.environ.get("HOLAFRESCA_HELLOFRESH_EMAIL") or None
-HELLOFRESH_PASSWORD = os.environ.get("HOLAFRESCA_HELLOFRESH_PASSWORD") or None
+#: HelloFresh logins kept in the env file instead of typed into Settings, one per
+#: person: whenever that person's HelloFresh session is missing or has lapsed past
+#: refreshing, the next HelloFresh call for them signs in with it. The password
+#: then lives at rest in the env file, next to the other secrets, which is the trade
+#: made for never having to sign in by hand. Separate variables per person, not one
+#: list, so a password can hold any character:
+#:
+#:   HOLAFRESCA_HELLOFRESH_EMAIL / _PASSWORD            the owner's
+#:   HOLAFRESCA_HELLOFRESH_2_FOR / _2_EMAIL / _2_PASSWORD  someone else's (FOR is
+#:   their HolaFresca sign-in email), and _3_..., up to _9_.
+#:
+#: Maps a HolaFresca sign-in email (lowercase) to (HelloFresh email, password).
+def _hellofresh_logins() -> dict[str, tuple[str, str]]:
+    logins = {}
+    for prefix, default_for in [("HOLAFRESCA_HELLOFRESH_", ACCESS_OWNER_EMAIL)] + [
+            (f"HOLAFRESCA_HELLOFRESH_{n}_", None) for n in range(2, 10)]:
+        who = (os.environ.get(prefix + "FOR") or default_for or "").strip().lower()
+        email, password = os.environ.get(prefix + "EMAIL"), os.environ.get(prefix + "PASSWORD")
+        if who and email and password:
+            logins[who] = (email.strip(), password)
+    return logins
+
+
+HELLOFRESH_LOGINS = _hellofresh_logins()
 
 #: The people (their HolaFresca sign-in emails, comma-separated) who share one
 #: household's shopping. Noodle's feed covers their accounts and nobody else's, and

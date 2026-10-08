@@ -23,9 +23,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, SecretStr
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config
+from app import config, household
 from app.api.access import require_person
 from app.api.deps import get_current_user, get_session
 from app.db import retailer_accounts
@@ -77,25 +78,22 @@ def client_for(account: RetailerAccount) -> HelloFreshClient:
     return HelloFreshClient(TokenStore(token_path(account.key)).load())
 
 
-def _is_owner(user: User) -> bool:
-    owner = (config.ACCESS_OWNER_EMAIL or "").lower()
-    return bool(owner) and (user.email or "").lower() == owner
-
-
-#: When the configured login last failed: a wrong password isn't retried on every request.
-_login_failed_at: float | None = None
+#: When each configured login last failed: a wrong password isn't retried on every request.
+_login_failed_at: dict[str, float] = {}
 LOGIN_RETRY_S = 30 * 60
 
 
 def configured_login(session: Session, user: User) -> RetailerAccount | None:
-    """The owner's account, signed in with the env-file login (:data:`config.HELLOFRESH_EMAIL`)
-    if its session is missing or can't be refreshed. None when there is no such login,
-    it isn't the owner asking, or it was refused within the last half hour."""
-    global _login_failed_at
-    if not (config.HELLOFRESH_EMAIL and config.HELLOFRESH_PASSWORD and _is_owner(user)):
+    """``user``'s HelloFresh account, signed in with their env-file login
+    (:data:`config.HELLOFRESH_LOGINS`) if its session is missing or can't be refreshed.
+    None when they have no such login, or it was refused within the last half hour."""
+    who = (user.email or "").lower()
+    login = config.HELLOFRESH_LOGINS.get(who)
+    if login is None:
         return None
+    email, password = login
     account = retailer_accounts.find(session, user.id, RETAILER) or retailer_accounts.connect(
-        session, user.id, RETAILER, email=config.HELLOFRESH_EMAIL)
+        session, user.id, RETAILER, email=email)
     client = client_for(account)
     if client.status() == "ready":
         return account
@@ -105,21 +103,39 @@ def configured_login(session: Session, user: User) -> RetailerAccount | None:
             return account
         except (NeedsLogin, HelloFreshError):
             pass
-    if _login_failed_at and time.monotonic() - _login_failed_at < LOGIN_RETRY_S:
+    if who in _login_failed_at and time.monotonic() - _login_failed_at[who] < LOGIN_RETRY_S:
         return None
     try:
-        client.login(config.HELLOFRESH_EMAIL, config.HELLOFRESH_PASSWORD)
+        client.login(email, password)
     except HelloFreshError as exc:
-        _login_failed_at = time.monotonic()
-        log.warning("hellofresh: the configured login was refused: %s", exc)
+        _login_failed_at[who] = time.monotonic()
+        log.warning("hellofresh: the configured login for %s was refused: %s", who, exc)
         return None
-    _login_failed_at = None
-    retailer_accounts.record_status(session, account, "ready", email=config.HELLOFRESH_EMAIL, after_login=True)
-    log.info("hellofresh: signed in with the configured login")
+    _login_failed_at.pop(who, None)
+    retailer_accounts.record_status(session, account, "ready", email=email, after_login=True)
+    log.info("hellofresh: signed %s in with the configured login", who)
     return account
 
 
-def _account(session: Session, user: User) -> RetailerAccount:
+def household_accounts(session: Session, user: User) -> list[RetailerAccount]:
+    """The HelloFresh accounts ``user`` may act on (their own first, then the
+    household's: :mod:`app.household`), each signed in from the env file if it can be."""
+    members = (session.scalars(select(User).where(User.id.in_(household.member_ids(session)))).all()
+               if household.is_member(user) else [user])
+    for member in members:
+        configured_login(session, member)
+    return household.accounts(session, user, RETAILER)
+
+
+def _account(session: Session, user: User, which: str | None = None) -> RetailerAccount:
+    """The account a request acts on: the caller's own, or with ``which`` (a HelloFresh
+    email) another in their household."""
+    if which:
+        wanted = which.strip().lower()
+        account = next((a for a in household_accounts(session, user) if (a.email or "").lower() == wanted), None)
+        if account is None:
+            raise HTTPException(status_code=404, detail=f"No HelloFresh account {which} that you can manage")
+        return account
     account = retailer_accounts.find(session, user.id, RETAILER)
     if account is None or client_for(account).status() == "logged_out":
         account = configured_login(session, user) or account
@@ -128,8 +144,11 @@ def _account(session: Session, user: User) -> RetailerAccount:
     return account
 
 
-def get_hellofresh_client(session: Session = Depends(get_session), user: User = Depends(get_current_user)) -> HelloFreshClient:
-    return client_for(_account(session, user))
+def get_hellofresh_client(account: str | None = None, session: Session = Depends(get_session),
+                          user: User = Depends(get_current_user)) -> HelloFreshClient:
+    """Every HelloFresh route takes ``?account=<HelloFresh email>`` to act on another
+    household member's subscription; without it, the caller's own."""
+    return client_for(_account(session, user, account))
 
 
 def _call(fn, *args: Any, **kwargs: Any) -> Any:
@@ -205,6 +224,20 @@ def coming_boxes(client: HelloFreshClient, start: str, end: str) -> list[boxes.B
             continue
         meals[delivery["id"]] = boxes.chosen_meals(menu)
     return boxes.summarise(payload, meals)
+
+
+@router.get("/household/boxes")
+def household_boxes(weeks: int = 4, session: Session = Depends(get_session),
+                    user: User = Depends(get_current_user)) -> dict:
+    """The coming boxes on every HelloFresh account the caller may manage, each with whose it is."""
+    start, end = boxes.week_range(date.today(), min(max(weeks, 1), 12))
+    out = []
+    for account in household_accounts(session, user):
+        try:
+            out.append({"account": account.email, "boxes": [asdict(b) for b in coming_boxes(client_for(account), start, end)]})
+        except (HelloFreshError, NeedsLogin) as exc:
+            out.append({"account": account.email, "boxes": [], "error": str(exc)})
+    return {"range": [start, end], "accounts": out}
 
 
 @router.get("/subscriptions")
