@@ -74,24 +74,30 @@ ACCESS_SERVICES = {
 }
 #: HelloFresh logins kept in the env file instead of typed into Settings, one per
 #: person: whenever that person's HelloFresh session is missing or has lapsed past
-#: refreshing, the next HelloFresh call for them signs in with it. The password
-#: then lives at rest in the env file, next to the other secrets, which is the trade
-#: made for never having to sign in by hand. Separate variables per person, not one
-#: list, so a password can hold any character:
+#: refreshing, the next HelloFresh call for them restores it. Separate variables
+#: per person, not one list, so a value can hold any character:
 #:
-#:   HOLAFRESCA_HELLOFRESH_EMAIL / _PASSWORD            the owner's
-#:   HOLAFRESCA_HELLOFRESH_2_FOR / _2_EMAIL / _2_PASSWORD  someone else's (FOR is
-#:   their HolaFresca sign-in email), and _3_..., up to _9_.
+#:   HOLAFRESCA_HELLOFRESH_EMAIL, _PASSWORD, _REFRESH_TOKEN     the owner's
+#:   HOLAFRESCA_HELLOFRESH_2_FOR, _2_EMAIL, _2_PASSWORD, _2_REFRESH_TOKEN
+#:       someone else's (FOR is their HolaFresca sign-in email), and _3_..., up to _9_.
 #:
-#: Maps a HolaFresca sign-in email (lowercase) to (HelloFresh email, password).
-def _hellofresh_logins() -> dict[str, tuple[str, str]]:
+#: Either secret will do. A refresh token (copied from a browser that signed in to
+#: hellofresh.co.uk) is the one that works from a server: HelloFresh puts its login
+#: behind a Cloudflare challenge for scripts, but not its token refresh, and the
+#: session then keeps itself going. A password is tried only when there's no
+#: working token, and lives at rest in the env file next to the other secrets.
+#:
+#: Maps a HolaFresca sign-in email (lowercase) to (HelloFresh email, password, refresh token).
+def _hellofresh_logins() -> dict[str, tuple[str, str | None, str | None]]:
     logins = {}
     for prefix, default_for in [("HOLAFRESCA_HELLOFRESH_", ACCESS_OWNER_EMAIL)] + [
             (f"HOLAFRESCA_HELLOFRESH_{n}_", None) for n in range(2, 10)]:
         who = (os.environ.get(prefix + "FOR") or default_for or "").strip().lower()
-        email, password = os.environ.get(prefix + "EMAIL"), os.environ.get(prefix + "PASSWORD")
-        if who and email and password:
-            logins[who] = (email.strip(), password)
+        email = (os.environ.get(prefix + "EMAIL") or "").strip()
+        password = os.environ.get(prefix + "PASSWORD") or None
+        refresh = (os.environ.get(prefix + "REFRESH_TOKEN") or "").strip() or None
+        if who and email and (password or refresh):
+            logins[who] = (email, password, refresh)
     return logins
 
 

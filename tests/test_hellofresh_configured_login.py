@@ -11,18 +11,31 @@ from app.db.models import User
 from app.hellofresh.client import HelloFreshError
 
 
+class FakeTokens:
+    def __init__(self):
+        self.refresh_token = None
+
+    def save(self, token):
+        self.refresh_token = token.get("refresh_token") or self.refresh_token
+
+
 class FakeClient:
     logins: list = []
     refuse = False
+    good_refresh = {"browser-token"}
 
     def __init__(self):
-        self.state = "logged_out"
+        self.state, self.tokens = "logged_out", FakeTokens()
 
     def status(self):
-        return self.state
+        if self.state == "ready":
+            return "ready"
+        return "expired" if self.tokens.refresh_token else "logged_out"
 
     def refresh(self):
-        raise hellofresh.NeedsLogin("expired")
+        if self.tokens.refresh_token not in FakeClient.good_refresh:
+            raise hellofresh.NeedsLogin("expired")
+        self.state = "ready"
 
     def login(self, email, password):
         FakeClient.logins.append(email)
@@ -36,8 +49,8 @@ def household(factory, monkeypatch):
     FakeClient.logins, FakeClient.refuse = [], False
     hellofresh._login_failed_at.clear()
     monkeypatch.setattr(config, "HOUSEHOLD", {"me@x.com", "partner@x.com"})
-    monkeypatch.setattr(config, "HELLOFRESH_LOGINS", {"me@x.com": ("box@x.com", "pw1"),
-                                                      "partner@x.com": ("box2@x.com", "pw2")})
+    monkeypatch.setattr(config, "HELLOFRESH_LOGINS", {"me@x.com": ("box@x.com", "pw1", None),
+                                                      "partner@x.com": ("box2@x.com", "pw2", None)})
     clients = {}
     monkeypatch.setattr(hellofresh, "client_for", lambda account: clients.setdefault(account.key, FakeClient()))
     with factory() as session:
@@ -84,4 +97,18 @@ def test_logins_are_read_per_person_from_the_env(monkeypatch):
                        "HOLAFRESCA_HELLOFRESH_3_PASSWORD": "x"}.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(config, "ACCESS_OWNER_EMAIL", "Me@x.com")
-    assert config._hellofresh_logins() == {"me@x.com": ("box@x.com", "a|b,c"), "partner@x.com": ("box2@x.com", "pw2")}
+    monkeypatch.setenv("HOLAFRESCA_HELLOFRESH_4_FOR", "token@x.com")
+    monkeypatch.setenv("HOLAFRESCA_HELLOFRESH_4_EMAIL", "box4@x.com")
+    monkeypatch.setenv("HOLAFRESCA_HELLOFRESH_4_REFRESH_TOKEN", " rt ")
+    assert config._hellofresh_logins() == {"me@x.com": ("box@x.com", "a|b,c", None),
+                                           "partner@x.com": ("box2@x.com", "pw2", None),
+                                           "token@x.com": ("box4@x.com", None, "rt")}
+
+
+def test_a_refresh_token_from_the_browser_restores_the_session_without_the_login(household, monkeypatch):
+    session, me, _, _ = household
+    FakeClient.refuse = True  # the login is behind Cloudflare's challenge
+    monkeypatch.setitem(config.HELLOFRESH_LOGINS, "me@x.com", ("box@x.com", None, "browser-token"))
+    account = hellofresh.configured_login(session, me)
+    assert account is not None and FakeClient.logins == []
+    assert retailer_accounts.find(session, me.id, "hellofresh").status == "connected"

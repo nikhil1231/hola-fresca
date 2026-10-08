@@ -84,32 +84,45 @@ LOGIN_RETRY_S = 30 * 60
 
 
 def configured_login(session: Session, user: User) -> RetailerAccount | None:
-    """``user``'s HelloFresh account, signed in with their env-file login
-    (:data:`config.HELLOFRESH_LOGINS`) if its session is missing or can't be refreshed.
-    None when they have no such login, or it was refused within the last half hour."""
+    """``user``'s HelloFresh account, its session restored from their env-file login
+    (:data:`config.HELLOFRESH_LOGINS`) if it's missing or can't be refreshed: first by
+    refreshing, then from the configured refresh token, then (rarely possible from a
+    server: HelloFresh's login is behind a Cloudflare challenge) with the password.
+    None when they have no such login or nothing worked; a refused password isn't
+    tried again for half an hour."""
     who = (user.email or "").lower()
     login = config.HELLOFRESH_LOGINS.get(who)
     if login is None:
         return None
-    email, password = login
+    email, password, seed = login
     account = retailer_accounts.find(session, user.id, RETAILER) or retailer_accounts.connect(
         session, user.id, RETAILER, email=email)
     client = client_for(account)
     if client.status() == "ready":
         return account
-    if client.status() == "expired":
+
+    def refreshed() -> bool:
         try:
             client.refresh()
-            return account
         except (NeedsLogin, HelloFreshError):
-            pass
-    if who in _login_failed_at and time.monotonic() - _login_failed_at[who] < LOGIN_RETRY_S:
+            return False
+        retailer_accounts.record_status(session, account, "ready", email=email)
+        return True
+
+    if client.status() == "expired" and refreshed():
+        return account
+    if seed and client.tokens.refresh_token != seed:  # a new token from the env file
+        client.tokens.save({"refresh_token": seed})
+        if refreshed():
+            log.info("hellofresh: %s's session restored from the configured refresh token", who)
+            return account
+    if not password or (who in _login_failed_at and time.monotonic() - _login_failed_at[who] < LOGIN_RETRY_S):
         return None
     try:
         client.login(email, password)
     except HelloFreshError as exc:
         _login_failed_at[who] = time.monotonic()
-        log.warning("hellofresh: the configured login for %s was refused: %s", who, exc)
+        log.warning("hellofresh: the configured login for %s was refused: %s", who, str(exc)[:120])
         return None
     _login_failed_at.pop(who, None)
     retailer_accounts.record_status(session, account, "ready", email=email, after_login=True)
