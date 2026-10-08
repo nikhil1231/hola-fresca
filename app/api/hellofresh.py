@@ -15,6 +15,7 @@ untouched, for anything the summaries don't cover yet.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
@@ -76,8 +77,52 @@ def client_for(account: RetailerAccount) -> HelloFreshClient:
     return HelloFreshClient(TokenStore(token_path(account.key)).load())
 
 
+def _is_owner(user: User) -> bool:
+    owner = (config.ACCESS_OWNER_EMAIL or "").lower()
+    return bool(owner) and (user.email or "").lower() == owner
+
+
+#: When the configured login last failed: a wrong password isn't retried on every request.
+_login_failed_at: float | None = None
+LOGIN_RETRY_S = 30 * 60
+
+
+def configured_login(session: Session, user: User) -> RetailerAccount | None:
+    """The owner's account, signed in with the env-file login (:data:`config.HELLOFRESH_EMAIL`)
+    if its session is missing or can't be refreshed. None when there is no such login,
+    it isn't the owner asking, or it was refused within the last half hour."""
+    global _login_failed_at
+    if not (config.HELLOFRESH_EMAIL and config.HELLOFRESH_PASSWORD and _is_owner(user)):
+        return None
+    account = retailer_accounts.find(session, user.id, RETAILER) or retailer_accounts.connect(
+        session, user.id, RETAILER, email=config.HELLOFRESH_EMAIL)
+    client = client_for(account)
+    if client.status() == "ready":
+        return account
+    if client.status() == "expired":
+        try:
+            client.refresh()
+            return account
+        except (NeedsLogin, HelloFreshError):
+            pass
+    if _login_failed_at and time.monotonic() - _login_failed_at < LOGIN_RETRY_S:
+        return None
+    try:
+        client.login(config.HELLOFRESH_EMAIL, config.HELLOFRESH_PASSWORD)
+    except HelloFreshError as exc:
+        _login_failed_at = time.monotonic()
+        log.warning("hellofresh: the configured login was refused: %s", exc)
+        return None
+    _login_failed_at = None
+    retailer_accounts.record_status(session, account, "ready", email=config.HELLOFRESH_EMAIL, after_login=True)
+    log.info("hellofresh: signed in with the configured login")
+    return account
+
+
 def _account(session: Session, user: User) -> RetailerAccount:
     account = retailer_accounts.find(session, user.id, RETAILER)
+    if account is None or client_for(account).status() == "logged_out":
+        account = configured_login(session, user) or account
     if account is None:
         raise HTTPException(status_code=404, detail="No HelloFresh account is connected: sign in first")
     return account
@@ -104,7 +149,7 @@ def _confirmed(body: ConfirmIn) -> None:
 # ---- session -----------------------------------------------------------------
 @router.get("/status", response_model=StatusOut)
 def status(session: Session = Depends(get_session), user: User = Depends(get_current_user)) -> StatusOut:
-    account = retailer_accounts.find(session, user.id, RETAILER)
+    account = configured_login(session, user) or retailer_accounts.find(session, user.id, RETAILER)
     if account is None:
         return StatusOut(status="logged_out")
     return StatusOut(status=client_for(account).status(), email=account.email)

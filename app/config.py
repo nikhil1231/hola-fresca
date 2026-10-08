@@ -72,6 +72,14 @@ ACCESS_SERVICES = {
     )
     if client_id.strip() and email.strip()
 }
+#: A HelloFresh login kept in the env file instead of typed into Settings. It is
+#: the owner's: whenever their HelloFresh session is missing or has lapsed past
+#: refreshing, the next HelloFresh call signs in with it. The password then lives
+#: at rest in the env file, next to the other secrets, which is the trade made for
+#: never having to sign in by hand.
+HELLOFRESH_EMAIL = os.environ.get("HOLAFRESCA_HELLOFRESH_EMAIL") or None
+HELLOFRESH_PASSWORD = os.environ.get("HOLAFRESCA_HELLOFRESH_PASSWORD") or None
+
 #: The people (their HolaFresca sign-in emails, comma-separated) who share one
 #: household's shopping. Noodle's feed covers their accounts and nobody else's, and
 #: any of them may manage an order on another's account, since one person's Ocado
