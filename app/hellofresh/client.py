@@ -125,8 +125,10 @@ class HelloFreshClient:
 
     # ---- session --------------------------------------------------------------
     def login(self, email: str, password: str) -> dict[str, Any]:
-        response = self.http.post(LOGIN_PATH, params={"country": COUNTRY},
-                                  json={"username": email, "password": password})
+        response = self.http.post(LOGIN_PATH, params={"country": COUNTRY, "locale": LOCALE},
+                                  json={"username": email, "password": password},
+                                  headers={"Origin": BASE_URL.removesuffix("/gw"),
+                                           "Referer": BASE_URL.removesuffix("/gw") + "/login"})
         if response.status_code == 403 and (
             response.headers.get("cf-mitigated") == "challenge"
             or "text/html" in response.headers.get("content-type", "")

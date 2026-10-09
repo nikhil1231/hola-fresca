@@ -254,12 +254,18 @@ is not in `app/retailers.py`. Its account sits in `retailer_accounts` under
 `retailer="hellofresh"`, under the same rule as the shops (the password crosses one
 request; what's kept is the session). Login first sends an HTTP request to the
 site's gateway (`https://www.hellofresh.co.uk/gw`). If Cloudflare challenges that
-request, a temporary Playwright Chromium browser submits the site's login form
-and captures its access/refresh token pair. Refreshing and account operations
+request, a temporary Playwright Chromium browser runs the site's Cloudflare
+verification script, waits for its `cf_clearance` cookie, then submits the same
+JSON login request as the site's account page. This avoids rendering the large
+account interface while retaining browser verification and cookies. Refreshing and account operations
 always use HTTP. Tokens are saved at
 `DATA_DIR/hellofresh/accounts/<key>/session.json`. A rejected token is refreshed once;
 after that configured credentials restore an expired session on the next call.
 Install the fallback browser with `.venv/bin/python -m playwright install chromium`.
+On servers, install `xvfb` as well so verification uses a normal browser on a
+temporary virtual display. Both Chromium and Xvfb are included in the production
+image. Displays and browser contexts are closed after login; only account tokens
+are saved.
 A challenge that requires human verification still needs a browser sign-in and
 a configured refresh token.
 To obtain one, open your browser's developer tools before signing in to

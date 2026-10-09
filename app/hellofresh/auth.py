@@ -1,75 +1,117 @@
-"""Browser fallback for a challenged HTTP login; account requests stay on httpx."""
+"""Complete Cloudflare's browser verification before submitting the login JSON.
+
+The account UI is large and unnecessary for login. Serve the gateway's own
+verification script on a small page, retain its cookies in Chromium, then send
+exactly the same password request as HelloFresh's account page.
+"""
 from __future__ import annotations
 
+import os
+import re
+import select
+import shutil
+import subprocess
+from contextlib import contextmanager
 from typing import Any
-from urllib.parse import urlparse
+
+
+def verification_document(html: str) -> str:
+    scripts = [script for script in re.findall(r"<script\b[^>]*>(.*?)</script>", html, re.S)
+               if "/cdn-cgi/challenge-platform/" in script and "__CF$cv$params" in script]
+    return ("<html><head></head><body></body>"
+            + "".join(f"<script>{script}</script>" for script in scripts) + "</html>")
+
+
+@contextmanager
+def display_options():
+    """Use a normal browser in Docker's Xvfb without changing process-wide DISPLAY."""
+    from app.hellofresh.client import HelloFreshError
+
+    environment = os.environ.copy()
+    if environment.get("DISPLAY"):
+        yield {"headless": False, "env": environment}
+        return
+    executable = shutil.which("Xvfb")
+    if not executable:
+        yield {"headless": True}
+        return
+    display = subprocess.Popen(
+        [executable, "-displayfd", "1", "-screen", "0", "1280x800x24", "-nolisten", "tcp"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    try:
+        if not select.select([display.stdout], [], [], 20)[0]:
+            raise HelloFreshError("HelloFresh's verification display did not start")
+        number = display.stdout.readline().strip()
+        if not number.isdecimal():
+            raise HelloFreshError("HelloFresh's verification display could not start")
+        environment["DISPLAY"] = f":{number}"
+        yield {"headless": False, "env": environment}
+    finally:
+        display.terminate()
+        try:
+            display.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            display.kill()
+            display.wait(timeout=5)
+        display.stdout.close()
 
 
 def browser_login(email: str, password: str) -> dict[str, Any]:
-    # Imported only on escalation. Each call owns its browser on the API worker
-    # thread; no browser objects or passwords survive the login.
     from playwright.sync_api import Error, sync_playwright
+    from app.hellofresh.client import BASE_URL, COUNTRY, LOCALE, HelloFreshError
 
-    from app.hellofresh.client import HelloFreshError
-
-    tokens: list[dict[str, Any]] = []
-    rejected: int | None = None
-
-    def received(response):
-        nonlocal rejected
-        url = urlparse(response.url)
-        if (url.hostname != "www.hellofresh.co.uk" or url.path != "/gw/login"
-                or response.request.method != "POST"):
-            return
-        if response.status in (400, 401, 403):
-            rejected = response.status
-        if response.status == 200:
-            try:
-                token = response.json()
-            except (ValueError, Error):
-                return
-            if isinstance(token, dict) and token.get("access_token"):
-                tokens.append(token)
-
+    origin = BASE_URL.removesuffix("/gw")
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+        with display_options() as options, sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                **options, ignore_default_args=["--enable-automation"],
+                args=["--disable-blink-features=AutomationControlled", "--disable-gpu"],
+            )
             try:
-                context = browser.new_context(locale="en-GB")
+                context = browser.new_context(locale=LOCALE, timezone_id="Europe/London")
                 page = context.new_page()
-                page.set_default_timeout(15_000)
-                page.on("response", received)
-                page.goto("https://www.hellofresh.co.uk/login", wait_until="domcontentloaded")
-                consent = page.locator("#onetrust-accept-btn-handler")
-                if consent.is_visible():
-                    consent.click()
-                page.locator('input[name="username"], input[name="email"], input[type="email"]').first.fill(email)
-                page.locator('input[name="password"]').fill(password)
-                page.locator('button[type="submit"]').first.click()
-                # Pump events until the site's own login produces a token. Never
-                # persist a browser profile, trace, or page screenshot containing credentials.
-                for _ in range(120):
-                    if tokens or rejected:
+                page.set_default_timeout(20_000)
+
+                def load_verification(route):
+                    response = route.fetch(timeout=20_000)
+                    route.fulfill(response=response, content_type="text/html",
+                                  body=verification_document(response.text()))
+
+                page.route(f"{origin}/login", load_verification)
+                page.goto(f"{origin}/login", wait_until="domcontentloaded", timeout=30_000)
+                for _ in range(40):
+                    if any(cookie["name"] == "cf_clearance" for cookie in context.cookies()):
                         break
-                    page.wait_for_timeout(250)
+                    page.wait_for_timeout(500)
+                # Credentials cross one same-origin JSON request. No browser
+                # profile, trace, screenshot or cookies are persisted.
+                result = page.evaluate("""async ([country, locale, email, password]) => {
+                    const query = new URLSearchParams({country, locale});
+                    const response = await fetch('/gw/login?' + query, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json',
+                                  'Accept': 'application/json, text/plain, */*'},
+                        body: JSON.stringify({username: email, password}),
+                        signal: AbortSignal.timeout(20000)
+                    });
+                    return {status: response.status, token: await response.json().catch(() => null)};
+                }""", [COUNTRY, LOCALE, email, password])
             finally:
                 browser.close()
     except Error as exc:
-        # Playwright errors may embed DOM contents; keep secrets out of API errors.
+        # Browser errors can include request contents; do not expose them.
         raise HelloFreshError(
-            "HelloFresh browser login could not complete. Install Chromium with "
-            "`.venv/bin/python -m playwright install chromium`, or configure a "
-            "HelloFresh refresh token from a signed-in browser."
+            "HelloFresh browser verification could not complete. Install Chromium "
+            "with `.venv/bin/python -m playwright install chromium` and Xvfb for "
+            "server login (both are included in the production image)."
         ) from exc
-    if not tokens and rejected == 403:
+    if result["status"] == 403:
         raise HelloFreshError(
-            "HelloFresh blocked the browser login (403). Sign in normally and "
-            "configure the refresh token from the /gw/login response."
+            "HelloFresh blocked the browser login (403) after verification. "
+            "Sign in normally and configure a refresh token."
         )
-    if not tokens:
-        raise HelloFreshError(
-            "HelloFresh browser login did not return a session. Check the credentials; "
-            "if the site requires a challenge or verification, sign in on HelloFresh "
-            "and configure its refresh token."
-        )
-    return tokens[-1]
+    token = result.get("token")
+    if result["status"] != 200 or not isinstance(token, dict) or not token.get("access_token"):
+        raise HelloFreshError(f"HelloFresh browser login returned no session ({result['status']})")
+    return token
