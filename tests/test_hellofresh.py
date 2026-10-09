@@ -55,7 +55,7 @@ def test_login_saves_tokens_and_never_the_password(gw, tmp_path):
     client.login("me@x.com", "right")
     saved = (tmp_path / "s.json").read_text()
     assert "a1" in saved and "right" not in saved
-    assert gateway.calls[0][2] == {"country": "GB"}
+    assert gateway.calls[0][2] == {"country": "GB", "locale": "en-GB"}
     assert client.status() == "ready"
     with pytest.raises(Exception, match="refused"):
         client.login("me@x.com", "wrong")
