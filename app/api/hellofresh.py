@@ -21,6 +21,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, SecretStr
 from sqlalchemy import select
@@ -83,11 +84,11 @@ _login_failed_at: dict[str, float] = {}
 LOGIN_RETRY_S = 30 * 60
 
 
-def configured_login(session: Session, user: User) -> RetailerAccount | None:
+def configured_login(session: Session, user: User, *, force_refresh: bool = False) -> RetailerAccount | None:
     """``user``'s HelloFresh account, its session restored from their env-file login
     (:data:`config.HELLOFRESH_LOGINS`) if it's missing or can't be refreshed: first by
-    refreshing, then from the configured refresh token, then (rarely possible from a
-    server: HelloFresh's login is behind a Cloudflare challenge) with the password.
+    refreshing, then from the configured refresh token, then with the password
+    (HTTP first, with a browser fallback if Cloudflare challenges the login).
     None when they have no such login or nothing worked; a refused password isn't
     tried again for half an hour."""
     who = (user.email or "").lower()
@@ -98,18 +99,18 @@ def configured_login(session: Session, user: User) -> RetailerAccount | None:
     account = retailer_accounts.find(session, user.id, RETAILER) or retailer_accounts.connect(
         session, user.id, RETAILER, email=email)
     client = client_for(account)
-    if client.status() == "ready":
+    if client.status() == "ready" and not force_refresh:
         return account
 
     def refreshed() -> bool:
         try:
             client.refresh()
-        except (NeedsLogin, HelloFreshError):
+        except (HelloFreshError, httpx.HTTPError):
             return False
         retailer_accounts.record_status(session, account, "ready", email=email)
         return True
 
-    if client.status() == "expired" and refreshed():
+    if (client.status() == "expired" or force_refresh) and refreshed():
         return account
     if seed and client.tokens.refresh_token != seed:  # a new token from the env file
         client.tokens.save({"refresh_token": seed})
@@ -120,9 +121,9 @@ def configured_login(session: Session, user: User) -> RetailerAccount | None:
         return None
     try:
         client.login(email, password)
-    except HelloFreshError as exc:
+    except (HelloFreshError, httpx.HTTPError):
         _login_failed_at[who] = time.monotonic()
-        log.warning("hellofresh: the configured login for %s was refused: %s", who, str(exc)[:120])
+        log.warning("hellofresh: the configured login for %s could not complete", who)
         return None
     _login_failed_at.pop(who, None)
     retailer_accounts.record_status(session, account, "ready", email=email, after_login=True)
@@ -150,7 +151,7 @@ def _account(session: Session, user: User, which: str | None = None) -> Retailer
             raise HTTPException(status_code=404, detail=f"No HelloFresh account {which} that you can manage")
         return account
     account = retailer_accounts.find(session, user.id, RETAILER)
-    if account is None or client_for(account).status() == "logged_out":
+    if account is None or client_for(account).status() != "ready":
         account = configured_login(session, user) or account
     if account is None:
         raise HTTPException(status_code=404, detail="No HelloFresh account is connected: sign in first")
@@ -161,7 +162,12 @@ def get_hellofresh_client(account: str | None = None, session: Session = Depends
                           user: User = Depends(get_current_user)) -> HelloFreshClient:
     """Every HelloFresh route takes ``?account=<HelloFresh email>`` to act on another
     household member's subscription; without it, the caller's own."""
-    return client_for(_account(session, user, account))
+    selected = _account(session, user, account)
+    client = client_for(selected)
+    owner = session.get(User, selected.user_id)
+    if owner is not None:
+        client.restore_session = lambda: configured_login(session, owner, force_refresh=True) is not None
+    return client
 
 
 def _call(fn, *args: Any, **kwargs: Any) -> Any:
@@ -171,6 +177,8 @@ def _call(fn, *args: Any, **kwargs: Any) -> Any:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except HelloFreshError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="HelloFresh could not be reached; try again later") from exc
 
 
 def _confirmed(body: ConfirmIn) -> None:
