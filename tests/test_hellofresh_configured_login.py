@@ -90,6 +90,40 @@ def test_a_refused_password_isnt_retried_on_every_request(household):
     assert FakeClient.logins == ["box@x.com"]
 
 
+def test_expired_session_restores_from_password_on_an_account_request(household):
+    session, me, _, _ = household
+    account = hellofresh.configured_login(session, me)
+    client = hellofresh.client_for(account)
+    client.state = "expired"
+    client.tokens.refresh_token = "revoked"
+    assert hellofresh._account(session, me).key == account.key
+    assert client.status() == "ready"
+    assert FakeClient.logins == ["box@x.com", "box@x.com"]
+
+
+def test_network_failure_during_configured_login_is_throttled(household, monkeypatch):
+    import httpx
+    session, me, _, _ = household
+    calls = []
+
+    def timeout(*args):
+        calls.append(True)
+        raise httpx.ConnectTimeout("unreachable")
+
+    monkeypatch.setattr(FakeClient, "login", timeout)
+    assert hellofresh.configured_login(session, me) is None
+    assert hellofresh.configured_login(session, me) is None
+    assert len(calls) == 1
+
+
+def test_session_recovery_uses_the_selected_accounts_owner(household):
+    session, me, _, _ = household
+    client = hellofresh.get_hellofresh_client("box2@x.com", session, me)
+    FakeClient.logins.clear()
+    assert client.restore_session()
+    assert FakeClient.logins == ["box2@x.com"]
+
+
 def test_logins_are_read_per_person_from_the_env(monkeypatch):
     for key, value in {"HOLAFRESCA_HELLOFRESH_EMAIL": "box@x.com", "HOLAFRESCA_HELLOFRESH_PASSWORD": "a|b,c",
                        "HOLAFRESCA_HELLOFRESH_2_FOR": "Partner@x.com", "HOLAFRESCA_HELLOFRESH_2_EMAIL": "box2@x.com",

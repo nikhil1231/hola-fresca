@@ -1,10 +1,8 @@
 """HelloFresh account API: the endpoints behind hellofresh.co.uk's own account pages.
 
-Unlike Ocado there is no browser in the loop. The site's gateway (``/gw``) takes a
-plain username/password POST and answers with an OAuth-style token pair, so the
-whole ladder is: a saved access token, else the refresh token, else ask the person
-for their password again. The token pair is the session; it is saved per account
-under the data dir, and the password is never written anywhere.
+The gateway (``/gw``) returns an OAuth-style token pair. Login tries HTTP first;
+a Cloudflare challenge escalates that login to a temporary browser. Refresh and
+all account operations use HTTP. Tokens are saved per account under the data dir.
 
 Paths, methods and bodies are read off the site's JavaScript (the Next.js chunks
 for the account, deliveries and cancellation pages), not guessed. What that
@@ -22,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -122,17 +121,26 @@ class HelloFreshClient:
         self.tokens = tokens
         self.http = http or httpx.Client(base_url=BASE_URL, timeout=20,
                                          headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+        self.restore_session: Callable[[], bool] | None = None
 
     # ---- session --------------------------------------------------------------
     def login(self, email: str, password: str) -> dict[str, Any]:
         response = self.http.post(LOGIN_PATH, params={"country": COUNTRY},
                                   json={"username": email, "password": password})
+        if response.status_code == 403 and (
+            response.headers.get("cf-mitigated") == "challenge"
+            or "text/html" in response.headers.get("content-type", "")
+        ):
+            from app.hellofresh.auth import browser_login
+            token = browser_login(email, password)
+            self.tokens.save(token)
+            return token
         if response.status_code in (400, 401, 403):
             raise HelloFreshError(f"HelloFresh refused the login ({response.status_code}): {_detail(response)}")
         response.raise_for_status()
         token = response.json()
-        if not token.get("access_token"):
-            raise HelloFreshError(f"HelloFresh login answered without a token: {str(token)[:200]}")
+        if not isinstance(token, dict) or not token.get("access_token"):
+            raise HelloFreshError("HelloFresh login answered without an access token")
         self.tokens.save(token)
         return token
 
@@ -143,7 +151,10 @@ class HelloFreshClient:
                                   json={"refresh_token": self.tokens.refresh_token})
         if response.status_code >= 400:
             raise NeedsLogin(f"HelloFresh session expired ({response.status_code}): sign in again")
-        self.tokens.save(response.json())
+        token = response.json()
+        if not isinstance(token, dict) or not token.get("access_token"):
+            raise NeedsLogin("HelloFresh refresh returned no access token: sign in again")
+        self.tokens.save(token)
 
     def logout(self) -> None:
         if self.tokens.refresh_token:
@@ -167,6 +178,18 @@ class HelloFreshClient:
     def request(self, method: str, path: str, *, params: dict[str, Any] | None = None,
                 json_body: Any = None) -> Any:
         """One authenticated call, refreshing the token once if it's been rejected."""
+        try:
+            return self._request(method, path, params=params, json_body=json_body)
+        except NeedsLogin:
+            if self.restore_session is None or not self.restore_session():
+                raise
+            # Only retry after an authentication rejection; never retry a write
+            # on a network error, where the upstream result could be unknown.
+            self.tokens.load()
+            return self._request(method, path, params=params, json_body=json_body)
+
+    def _request(self, method: str, path: str, *, params: dict[str, Any] | None = None,
+                 json_body: Any = None) -> Any:
         self.ensure_ready()
         query = {"country": COUNTRY, "locale": LOCALE, **(params or {})}
         for attempt in range(2):

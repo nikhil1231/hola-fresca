@@ -252,11 +252,42 @@ Off unless `HOLAFRESCA_OCADO_HEARTBEAT=1` — see `.env.example`.
 HelloFresh is a connection, not a shop: nothing is priced or pushed there, so it
 is not in `app/retailers.py`. Its account sits in `retailer_accounts` under
 `retailer="hellofresh"`, under the same rule as the shops (the password crosses one
-request; what's kept is the session). There is no browser in the loop: the site's
-gateway (`https://www.hellofresh.co.uk/gw`) takes a username/password POST and
-returns an access/refresh token pair, saved at
+request; what's kept is the session). Login first sends an HTTP request to the
+site's gateway (`https://www.hellofresh.co.uk/gw`). If Cloudflare challenges that
+request, a temporary Playwright Chromium browser submits the site's login form
+and captures its access/refresh token pair. Refreshing and account operations
+always use HTTP. Tokens are saved at
 `DATA_DIR/hellofresh/accounts/<key>/session.json`. A rejected token is refreshed once;
-after that the person signs in again.
+after that configured credentials restore an expired session on the next call.
+Install the fallback browser with `.venv/bin/python -m playwright install chromium`.
+A challenge that requires human verification still needs a browser sign-in and
+a configured refresh token.
+To obtain one, open your browser's developer tools before signing in to
+HelloFresh, select Network, then find the `/gw/login` response and copy its
+`refresh_token` into the appropriate env variable. Treat it as a password;
+do not include it in logs, screenshots, or chat.
+
+For local runs, credentials belong in the repository-root `.env` (gitignored).
+The production infrastructure in `~/infra/stacks/holafresca/compose.yaml` reads
+`~/secrets/holafresca.env` instead. After editing production secrets, recreate the
+container with `docker compose up -d --force-recreate` from that stack directory;
+a container restart alone does not reload its environment. Restart the API
+after editing the local file. The first account uses `HOLAFRESCA_HELLOFRESH_EMAIL` and
+`HOLAFRESCA_HELLOFRESH_PASSWORD`, with `HOLAFRESCA_HELLOFRESH_FOR` set to its
+HolaFresca user's sign-in email (defaults to `HOLAFRESCA_ACCESS_OWNER_EMAIL`).
+Add a second account using:
+
+```dotenv
+HOLAFRESCA_HELLOFRESH_2_FOR=partner@example.com
+HOLAFRESCA_HELLOFRESH_2_EMAIL=partners-hellofresh@example.com
+HOLAFRESCA_HELLOFRESH_2_PASSWORD=...
+```
+
+Alternatively set `HOLAFRESCA_HELLOFRESH_2_REFRESH_TOKEN`. Slots 2 through 9 are
+supported, one account per HolaFresca user. To manage each other's accounts, set
+`HOLAFRESCA_HOUSEHOLD` to both HolaFresca sign-in emails, separated by commas.
+Account routes accept `?account=<HelloFresh email>`; `GET household/boxes` lists
+upcoming boxes across the household.
 
 Endpoints and request bodies were read off the site's own JavaScript, not guessed.
 The reads (subscriptions, plans, deliveries, a week, its menu) have since been

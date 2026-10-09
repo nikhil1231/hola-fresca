@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 import main
 from app.api import hellofresh as api
 from app.hellofresh import boxes
-from app.hellofresh.client import HelloFreshClient, NeedsLogin, TokenStore
+from app.hellofresh.client import HelloFreshClient, HelloFreshError, NeedsLogin, TokenStore
 
 
 class Gateway:
@@ -69,6 +69,86 @@ def test_a_rejected_token_is_refreshed_once(gw):
     assert client.subscriptions() == {"ok": True}
     assert [c[1] for c in gateway.calls][-3:] == ["/gw/api/customers/me/subscriptions", "/gw/refresh",
                                                   "/gw/api/customers/me/subscriptions"]
+
+
+@pytest.mark.parametrize("status,headers,escalates", [
+    (403, {"cf-mitigated": "challenge"}, True),
+    (403, {"content-type": "text/html"}, True),
+    (403, {}, False),
+    (401, {}, False),
+])
+def test_only_a_challenged_login_uses_the_browser(tmp_path, monkeypatch, status, headers, escalates):
+    from app.hellofresh import auth
+    calls = []
+
+    def browser(email, password):
+        calls.append((email, password))
+        return {"access_token": "browser-access", "refresh_token": "browser-refresh", "expires_in": 3600}
+
+    monkeypatch.setattr(auth, "browser_login", browser)
+    http = httpx.Client(base_url="https://www.hellofresh.co.uk/gw", transport=httpx.MockTransport(
+        lambda request: httpx.Response(status, headers=headers, json={"message": "refused"})))
+    client = HelloFreshClient(TokenStore(tmp_path / "session.json"), http=http)
+    if escalates:
+        client.login("me@example.com", "secret-password")
+        assert calls == [("me@example.com", "secret-password")]
+        assert client.status() == "ready"
+        assert "secret-password" not in client.tokens.path.read_text()
+    else:
+        with pytest.raises(HelloFreshError):
+            client.login("me@example.com", "secret-password")
+        assert calls == []
+
+
+def test_refresh_without_an_access_token_preserves_existing_session(tmp_path):
+    tokens = TokenStore(tmp_path / "session.json")
+    tokens.save({"access_token": "old", "refresh_token": "refresh"})
+    http = httpx.Client(base_url="https://www.hellofresh.co.uk/gw", transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"message": "unexpected response"})))
+    with pytest.raises(NeedsLogin, match="no access token"):
+        HelloFreshClient(tokens, http=http).refresh()
+    assert tokens.access_token == "old" and tokens.refresh_token == "refresh"
+
+
+def test_revoked_tokens_restore_configured_session_once(gw):
+    gateway, client = gw
+    client.login("me@x.com", "right")
+    gateway.access = "new"
+    original = gateway.__call__
+
+    def revoked(request):
+        if request.url.path == "/gw/refresh":
+            return httpx.Response(401, json={"message": "revoked"})
+        return original(request)
+
+    client.http = httpx.Client(base_url="https://www.hellofresh.co.uk/gw", transport=httpx.MockTransport(revoked))
+    restores = []
+
+    def restore():
+        restores.append(True)
+        # The API restores with a separate client sharing the account token file.
+        HelloFreshClient(TokenStore(client.tokens.path), http=client.http).login("me@x.com", "right")
+        return True
+
+    client.restore_session = restore
+    assert client.subscriptions() == {"ok": True}
+    assert restores == [True]
+
+
+def test_a_network_error_never_replays_a_subscription_write(gw):
+    gateway, client = gw
+    client.login("me@x.com", "right")
+    calls = []
+
+    def unavailable(request):
+        calls.append(request.method)
+        raise httpx.ReadTimeout("unknown result")
+
+    client.http = httpx.Client(base_url="https://www.hellofresh.co.uk/gw", transport=httpx.MockTransport(unavailable))
+    client.restore_session = lambda: pytest.fail("Must not restore or retry after a network error")
+    with pytest.raises(httpx.ReadTimeout):
+        client.cancel_plan("p9")
+    assert calls == ["POST"]
 
 
 def test_no_session_means_sign_in_again(tmp_path):

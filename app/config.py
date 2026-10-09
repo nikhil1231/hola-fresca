@@ -81,11 +81,10 @@ ACCESS_SERVICES = {
 #:   HOLAFRESCA_HELLOFRESH_2_FOR, _2_EMAIL, _2_PASSWORD, _2_REFRESH_TOKEN
 #:       someone else's (FOR is their HolaFresca sign-in email), and _3_..., up to _9_.
 #:
-#: Either secret will do. A refresh token (copied from a browser that signed in to
-#: hellofresh.co.uk) is the one that works from a server: HelloFresh puts its login
-#: behind a Cloudflare challenge for scripts, but not its token refresh, and the
-#: session then keeps itself going. A password is tried only when there's no
-#: working token, and lives at rest in the env file next to the other secrets.
+#: Either secret will do. Password login tries HTTP and falls back to Chromium
+#: when challenged; refresh tokens avoid the login page entirely. A password is
+#: tried only when there's no working token, and lives at rest in the env file
+#: next to the other secrets.
 #:
 #: Maps a HolaFresca sign-in email (lowercase) to (HelloFresh email, password, refresh token).
 def _hellofresh_logins() -> dict[str, tuple[str, str | None, str | None]]:
