@@ -19,6 +19,8 @@ MONDAY = {"deliveryStartDate": "2026-10-12T10:30:00+01:00", "deliveryEndDate": "
 class FakeOcado:
     def __init__(self, checkout_type="checkout-result-response", fail_on=None):
         self.calls, self.order = [], dict(ORDER)
+        self.quantities = {"sku": 2}
+        self.saved_quantities = dict(self.quantities)
         self.checkout_type, self.fail_on, self.checkout_body = checkout_type, fail_on, None
 
     def _log(self, name, *args):
@@ -44,6 +46,20 @@ class FakeOcado:
 
     def cancel_order_edit(self, order_id, region):
         self._log("cancel")
+        self.quantities = dict(self.saved_quantities)
+
+    def set_quantities(self, quantities):
+        self._log("quantities")
+        self.quantities.update(quantities)
+
+    def get_order(self, order_id):
+        return {**self.order, "items": [{"product": sku, "quantity": qty}
+                                      for sku, qty in self.saved_quantities.items() if qty]}
+
+    def cancel_order(self, order_id):
+        self._log("cancel_order")
+        self.order = {**self.order, "status": "CANCELLED"}
+        return {"success": True}
 
     def reserve(self, slot_id, ddid=None, region=None):
         self._log("reserve")
@@ -54,12 +70,15 @@ class FakeOcado:
 
     def checkout_summary(self):
         self._log("summary")
+        return {}
 
     def checkout(self, body):
         self._log("checkout")
         self.checkout_body = body
         if self.checkout_type == "checkout-result-response":
-            self.order = {**self.order, "slotId": self.reserved, "dates": MONDAY}
+            self.saved_quantities = dict(self.quantities)
+            if hasattr(self, "reserved"):
+                self.order = {**self.order, "slotId": self.reserved, "dates": MONDAY}
         return {"type": self.checkout_type}
 
     def slots(self, ddid=None, region=None, days=7):
@@ -98,6 +117,138 @@ def test_an_order_past_its_cutoff_isnt_touched():
     with pytest.raises(amend.OrderChangeError):
         amend.move_slot(fake, "1629420692934", "mon-1030")
     assert fake.calls == []
+
+
+def test_basket_edits_are_checked_out_and_saved_on_the_order():
+    fake = FakeOcado()
+    after = amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 0, "added": 3})
+    assert fake.calls == ["start", "quantities", "checkout_start", "summary", "checkout"]
+    assert after["items"] == [{"product": "added", "quantity": 3}]
+    assert after["slotId"] == ORDER["slotId"]
+
+
+def test_combined_basket_and_slot_change_uses_one_checkout():
+    fake = FakeOcado()
+    after = amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 1}, slot_id="mon-1030")
+    assert after["slotId"] == "mon-1030"
+    assert fake.calls.count("checkout") == 1
+
+
+def test_failed_basket_checkout_discards_quantities():
+    fake = FakeOcado(checkout_type="payment-session-response")
+    with pytest.raises(amend.OrderChangeError):
+        amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 0})
+    assert fake.calls[-1] == "cancel"
+    assert fake.quantities == {"sku": 2}
+
+
+def test_original_funding_instrument_is_used_even_if_another_card_is_first():
+    fake = FakeOcado()
+    fake.order_payments = lambda _: {"payments": [{"paymentMethod": {"type": "CARDS", "group": "PAY_NOW"},
+                                                  "fundingInstrument": {"fundingInstrumentId": "original"}}]}
+    fake.wallet_items = lambda: [{"walletItemId": "other-card", "paymentMethodType": "CARDS", "fundingInstrumentId": "other"},
+                                {"walletItemId": "right-card", "paymentMethodType": "CARDS", "fundingInstrumentId": "original"}]
+    assert amend.payment_method(fake, str(ORDER["orderId"]))["walletItemId"] == "right-card"
+    fake.wallet_items = lambda: [{"walletItemId": "other-card", "paymentMethodType": "CARDS", "fundingInstrumentId": "other"}]
+    with pytest.raises(amend.OrderChangeError):
+        amend.move_slot(fake, str(ORDER["orderId"]), "mon-1030")
+    assert fake.calls == []
+
+
+def test_cancel_verifies_saved_status():
+    fake = FakeOcado()
+    fake.order["cancelable"] = True
+    assert amend.cancel_order(fake, str(ORDER["orderId"]))["status"] == "CANCELLED"
+    assert fake.calls == ["cancel_order"]
+
+
+def test_refused_cancellation_does_not_report_success():
+    fake = FakeOcado()
+    fake.order["cancelable"] = True
+    fake.cancel_order = lambda _: {"success": False, "failureReason": "TOO_LATE"}
+    with pytest.raises(amend.OrderChangeError, match="TOO_LATE"):
+        amend.cancel_order(fake, str(ORDER["orderId"]))
+
+
+def test_unverified_basket_is_not_reported_as_success():
+    fake = FakeOcado()
+    fake.get_order = lambda _: {"slotId": ORDER["slotId"], "items": [{"product": "sku", "quantity": 2}]}
+    # Keep the pending-order lookup independent of the decorated-order read.
+    fake.orders = lambda pending=False: [dict(ORDER)]
+    fake.checkout = lambda body: {"type": "checkout-result-response"}
+    with pytest.raises(amend.OrderChangeError, match="differs"):
+        amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 0})
+
+
+def test_minimum_basket_failure_discards_edit_before_checkout():
+    fake = FakeOcado()
+    fake.checkout_summary = lambda: {"activeCheckoutGroup": {"canCheckout": False,
+                                                            "checkoutRestrictions": ["NOT_REACHED_THRESHOLD"]}}
+    with pytest.raises(amend.OrderChangeError, match="NOT_REACHED_THRESHOLD"):
+        amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 0})
+    assert fake.calls[-1] == "cancel"
+    assert "checkout" not in fake.calls
+
+
+@pytest.fixture
+def order_api(factory, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.api import deps, ocado
+    import main
+
+    fake = FakeOcado()
+    fake.order["cancelable"] = True
+    fake.order["status"] = "FUTURE"
+    with factory() as session:
+        owner = session.query(User).order_by(User.id).first()
+        owner.email = "owner@example.com"
+        stranger = User(email="stranger@example.com", name="Stranger")
+        session.add(stranger)
+        session.commit()
+        retailer_accounts.connect(session, owner.id, "ocado", email="owner@shop.example")
+        owner_id, stranger_id = owner.id, stranger.id
+    monkeypatch.setattr(config, "HOUSEHOLD", {"owner@example.com"})
+    monkeypatch.setattr(ocado, "get_shared_session", lambda key: fake)
+    monkeypatch.setattr(ocado, "OcadoClient", lambda session: session)
+
+    def db_session():
+        with factory() as session:
+            yield session
+
+    def current_user():
+        with factory() as session:
+            return session.get(User, current_user.user_id)
+
+    current_user.user_id = owner_id
+    main.app.dependency_overrides[deps.get_session] = db_session
+    main.app.dependency_overrides[deps.get_current_user] = current_user
+    try:
+        yield TestClient(main.app), fake, current_user, stranger_id
+    finally:
+        main.app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("path,body", [("items", {"items": [{"sku": "sku", "quantity": 0}]}),
+                                      ("cancel", {}), ("slot", {"slot_id": "mon-1030"})])
+def test_order_writes_require_confirmation_and_account_access(order_api, path, body):
+    api, fake, current_user, stranger_id = order_api
+    url = f'/api/ocado/orders/{ORDER["orderId"]}/{path}'
+    assert api.post(url, json=body).status_code == 400
+    assert fake.calls == []
+    current_user.user_id = stranger_id
+    assert api.post(url, json={**body, "confirm": True}).status_code == 404
+    assert fake.calls == []
+
+
+def test_order_api_confirms_basket_then_cancels_delivery(order_api):
+    api, fake, _, _ = order_api
+    url = f'/api/ocado/orders/{ORDER["orderId"]}'
+    response = api.post(f"{url}/items", json={"confirm": True, "items": [{"sku": "sku", "quantity": 0}]})
+    assert response.status_code == 200
+    assert fake.saved_quantities["sku"] == 0
+    response = api.post(f"{url}/cancel", json={"confirm": True})
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
 
 
 def test_slots_are_asked_inside_an_edit_that_is_then_dropped():

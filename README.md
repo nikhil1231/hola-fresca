@@ -303,6 +303,26 @@ For shopping by hand, outside the plan (`app/ocado/shop.py`):
 Lines set here count as the person's own to the push ledger, as if added on
 ocado.com.
 
+Existing deliveries are managed through the following routes. They resolve the
+order only across accounts the signed-in user may manage (their own and the
+configured household), and writes share the basket push lock.
+
+| Route (`/api/ocado/...`) | Behaviour |
+|---|---|
+| `GET household/orders` | Upcoming orders grouped by connected account |
+| `GET orders/{order_id}/slots?days=14` | Available slots for the order; discards the temporary edit session afterwards |
+| `POST orders/{order_id}/slot` | `{slot_id, confirm: true}` moves the delivery and re-checks out |
+| `POST orders/{order_id}/items` | `{items: [{sku, quantity}], confirm: true}` edits absolute quantities and re-checks out; optional `slot_id` combines both changes |
+| `POST orders/{order_id}/cancel` | `{confirm: true}` cancels this delivery and verifies its saved `CANCELLED` status |
+
+Re-checkout preserves the order's original saved card and changes only this
+delivery of a recurring order. It checks checkout restrictions and verifies
+saved quantities and delivery dates after confirmation. Unconfirmed failures
+discard the edit; a failure to verify an accepted checkout asks the caller to
+check Ocado before retrying. If Ocado requires payment authentication in a
+browser, the API discards the edit and returns HTTP 409 directing the customer
+to ocado.com.
+
 ## Feed for Noodle
 
 `GET /api/noodle/feed` (bearer `HOLAFRESCA_NOODLE_FEED_TOKEN`; unset turns it off)

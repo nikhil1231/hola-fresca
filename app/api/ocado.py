@@ -264,6 +264,15 @@ class MoveSlotIn(BaseModel):
     confirm: bool = False
 
 
+class OrderChangeIn(BasketChangeIn):
+    slot_id: str | None = None
+    confirm: bool = False
+
+
+class CancelOrderIn(BaseModel):
+    confirm: bool = False
+
+
 def _household_clients(session: Session, user: User) -> list[tuple[RetailerAccount, OcadoClient]]:
     return [(account, OcadoClient(get_shared_session(account.key)))
             for account in household.accounts(session, user, "ocado")]
@@ -307,11 +316,43 @@ def order_slots(order_id: str, days: int = 7, session: Session = Depends(get_ses
     return OcadoSlotsOut(items=[OcadoSlotOut(**asdict(slot)) for slot in items])
 
 
+@router.post("/orders/{order_id}/items")
+def change_order_items(order_id: str, body: OrderChangeIn, session: Session = Depends(get_session),
+                       user: User = Depends(get_current_user)) -> dict:
+    """Set order quantities and confirm checkout, optionally moving its delivery."""
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail='Changing an order needs {"confirm": true}')
+    client, _order = _order_client(session, user, order_id)
+    with _push_lock("ocado"):
+        try:
+            order = amend.change_order(client, order_id,
+                                       quantities={line.sku: line.quantity for line in body.items},
+                                       slot_id=body.slot_id)
+        except amend.OrderChangeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return asdict(ocado_orders.summarise(order))
+
+
+@router.post("/orders/{order_id}/cancel")
+def cancel_order(order_id: str, body: CancelOrderIn, session: Session = Depends(get_session),
+                 user: User = Depends(get_current_user)) -> dict:
+    """Cancel a single delivery on an account the caller may manage."""
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail='Cancelling a delivery needs {"confirm": true}')
+    client, _order = _order_client(session, user, order_id)
+    with _push_lock("ocado"):
+        try:
+            order = amend.cancel_order(client, order_id)
+        except amend.OrderChangeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return asdict(ocado_orders.summarise(order))
+
+
 @router.post("/orders/{order_id}/slot")
 def move_order_slot(order_id: str, body: MoveSlotIn, session: Session = Depends(get_session),
                     user: User = Depends(get_current_user)) -> dict:
     """Move a coming order to another slot (this delivery only, for a recurring
-    order). On any failure the order is left exactly as it was."""
+    order). Unconfirmed edits are discarded on failure."""
     if not body.confirm:
         raise HTTPException(status_code=400, detail='Moving a delivery needs {"confirm": true}')
     client, _order = _order_client(session, user, order_id)

@@ -1,16 +1,18 @@
-"""Moving an existing Ocado order to another delivery slot.
+"""Change and re-check out an existing Ocado order, or cancel its delivery.
 
 This is ocado.com's "Edit order" followed by "Change slot" and "Confirm changes",
 in the calls the site itself makes:
 
 1. open an order-edit session, which makes the order the active cart;
-2. reserve the new slot, as for any cart;
+2. change quantities and/or reserve the new slot, as for any cart;
 3. check out, which for an edited order confirms its changes. The order keeps its
    payment (the saved card it was placed with, charged at delivery) and, if it's
    a recurring order, the change is to this delivery only.
 
-Ocado keeps the original order until changes are confirmed, so every failure
-cancels the edit session and the order is exactly as it was. That includes
+Ocado keeps the original order until changes are confirmed. Failures before
+confirmation cancel the edit session. An ambiguous network failure or a failed
+read after confirmation must be checked on Ocado rather than assumed reverted.
+Unconfirmed failures include
 Ocado asking for the payment to be authenticated (a card check run in a
 browser): that is the customer's to do on ocado.com, never something to get
 round, so it is reported, not attempted.
@@ -30,7 +32,7 @@ REDIRECT_URL = "https://www.ocado.com/checkout/3ds/end"
 
 
 class OrderChangeError(RuntimeError):
-    """The order couldn't be changed; it is as it was."""
+    """The change failed or its final state could not be verified."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,10 +49,18 @@ def find_order(client: OcadoClient, order_id: str) -> dict[str, Any] | None:
 
 def payment_method(client: OcadoClient, order_id: str) -> dict[str, Any]:
     """The order's own payment method, pointed at the saved card it uses."""
-    payments = (client.order_payments(order_id).get("payments") or [{}])
-    method = payments[0].get("paymentMethod") or {}
-    group, kind = method.get("group") or "PAY_NOW", method.get("type") or "CARDS"
+    payments = client.order_payments(order_id).get("payments") or []
+    payment = next((p for p in payments if (p.get("paymentMethod") or {}).get("type") == "CARDS"), None)
+    if payment is None:
+        raise OrderChangeError("The order has no saved card payment to reuse")
+    method = payment["paymentMethod"]
+    group, kind = method.get("group") or "PAY_NOW", method["type"]
     wallet = [w for w in client.wallet_items() if not w.get("expired") and w.get("paymentMethodType") == kind]
+    instrument_id = (payment.get("fundingInstrument") or {}).get("fundingInstrumentId")
+    if instrument_id:
+        wallet = [w for w in wallet if w.get("fundingInstrumentId") == instrument_id]
+    elif len(wallet) > 1:
+        raise OrderChangeError("Cannot identify the order's original saved card")
     if not wallet:
         raise OrderChangeError(f"No saved {kind.lower()} on the account to keep paying with")
     return {"group": group, "type": kind, "toSave": False, "walletItemId": wallet[0]["walletItemId"]}
@@ -78,37 +88,83 @@ def slots_for(client: OcadoClient, order: dict[str, Any], days: int = 7) -> list
 
 
 def move_slot(client: OcadoClient, order_id: str, slot_id: str) -> Moved:
+    after = change_order(client, order_id, slot_id=slot_id)
+    dates = after.get("dates") or {}
+    return Moved(order_id, slot_id, dates.get("deliveryStartDate", ""), dates.get("deliveryEndDate", ""))
+
+
+def change_order(client: OcadoClient, order_id: str, *,
+                 quantities: dict[str, int] | None = None, slot_id: str | None = None) -> dict[str, Any]:
+    """Edit basket lines and/or a slot, then re-check out the same order."""
+    if not quantities and not slot_id:
+        raise OrderChangeError("Supply basket quantities or a delivery slot")
+    if quantities and any(isinstance(q, bool) or not isinstance(q, int) or q < 0 for q in quantities.values()):
+        raise OrderChangeError("Basket quantities must be non-negative integers")
     order = find_order(client, order_id)
     if order is None:
         raise OrderChangeError(f"Order {order_id} isn't one of the coming orders")
     if order.get("editStatus") != "EDITABLE":
         raise OrderChangeError(f"Order {order_id} can't be changed any more ({order.get('editStatus')})")
-    if order.get("slotId") == slot_id:
-        dates = order.get("dates") or {}
-        return Moved(order_id, slot_id, dates.get("deliveryStartDate", ""), dates.get("deliveryEndDate", ""))
+    if not quantities and order.get("slotId") == slot_id:
+        return order
     region, ddid = order["regionId"], order["deliveryDestinationId"]
     body = checkout_body(client, order)  # before touching anything: a missing card stops it here
 
     client.start_order_edit(order_id, region)
     try:
-        client.reserve(slot_id, ddid=ddid, region=region)
+        if quantities:
+            client.set_quantities(quantities)
+        if slot_id and slot_id != order.get("slotId"):
+            client.reserve(slot_id, ddid=ddid, region=region)
         client.checkout_start()
-        client.checkout_summary()
+        summary = client.checkout_summary()
+        group = summary.get("activeCheckoutGroup") or {}
+        restrictions = group.get("checkoutRestrictions") or []
+        if restrictions or group.get("canCheckout") is False:
+            raise OrderChangeError(f"Ocado cannot check out these changes: {', '.join(restrictions) or 'basket not ready'}")
         result = client.checkout(body)
         if result.get("type") != CHECKOUT_DONE:
             raise OrderChangeError("Ocado wants the payment confirmed on ocado.com before it'll take the change")
+        if str(result.get("orderId", order_id)) != str(order_id):
+            raise OrderChangeError("Ocado returned a different order while confirming changes; check ocado.com")
     except OrderChangeError:
         _cancel(client, order_id, region)
         raise
     except Exception as exc:
         _cancel(client, order_id, region)
-        raise OrderChangeError(f"Ocado refused the change: {exc}") from exc
+        raise OrderChangeError("Ocado could not confirm the change; the edit was discarded where possible. "
+                               "Check the order on ocado.com before retrying") from exc
 
-    after = find_order(client, order_id) or {}
-    dates = after.get("dates") or {}
-    if after.get("slotId") != slot_id:
-        raise OrderChangeError(f"Ocado accepted the change but order {order_id} still shows its old slot")
-    return Moved(order_id, slot_id, dates.get("deliveryStartDate", ""), dates.get("deliveryEndDate", ""))
+    try:
+        after = client.get_order(order_id) if quantities else find_order(client, order_id)
+    except Exception as exc:
+        raise OrderChangeError("Checkout completed but the saved order could not be read; check ocado.com") from exc
+    if not after or (slot_id and after.get("slotId") != slot_id):
+        raise OrderChangeError(f"Checkout completed but order {order_id}'s delivery could not be verified; check ocado.com")
+    if quantities:
+        actual = {str(item["product"]): item["quantity"] for item in after.get("items") or []}
+        if any(actual.get(sku, 0) != qty for sku, qty in quantities.items()):
+            raise OrderChangeError("Checkout completed but the order's basket differs from the requested quantities; check ocado.com")
+    return after
+
+
+def cancel_order(client: OcadoClient, order_id: str) -> dict[str, Any]:
+    order = find_order(client, order_id)
+    if order is None or not order.get("cancelable"):
+        raise OrderChangeError(f"Order {order_id} isn't a cancellable coming order")
+    try:
+        result = client.cancel_order(order_id)
+    except Exception as exc:
+        raise OrderChangeError("Cancellation could not be confirmed; check the order on ocado.com before retrying") from exc
+    if not result.get("success"):
+        raise OrderChangeError(f"Ocado refused cancellation: {result.get('failureReason') or 'unknown reason'}")
+    try:
+        after = client.get_order(order_id)
+    except Exception as exc:
+        raise OrderChangeError("Cancellation accepted but the saved order could not be read; check ocado.com") from exc
+    if after.get("status") != "CANCELLED":
+        raise OrderChangeError("Cancellation requested but the order's cancelled status could not be verified; check ocado.com")
+    return after
 
 
 def _cancel(client: OcadoClient, order_id: str, region: str) -> None:

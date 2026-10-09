@@ -184,6 +184,22 @@ class OcadoClient:
         return [entities[order_id] for order_id in payload.get("result") or [] if order_id in entities]
 
     # -- changing an existing order ------------------------------------------
+    def get_order(self, order_id: str) -> dict[str, Any]:
+        payload = self._json("GET", f"{ORDERS_PATH}/{order_id}/decorated")
+        return ((payload.get("entities") or {}).get("order") or {}).get(str(order_id), {})
+
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
+        """Cancel this delivery using the mutation used by Ocado's web client."""
+        payload = self._json("POST", "/graphql", json={
+            "operationName": "CancelOrder",
+            "query": "mutation CancelOrder($cancelOrderInput: CancelOrderInput!) { "
+                     "cancelOrder(cancelOrderInput: $cancelOrderInput) { success failureReason } }",
+            "variables": {"cancelOrderInput": {"orderId": str(order_id)}},
+        })
+        if payload.get("errors"):
+            raise RuntimeError("Ocado rejected the order cancellation")
+        return (payload.get("data") or {}).get("cancelOrder") or {}
+
     def start_order_edit(self, order_id: str, region: str) -> dict[str, Any]:
         return self._json("POST", ORDER_EDIT_PATH, json={"orderId": order_id, "regionId": region})
 
