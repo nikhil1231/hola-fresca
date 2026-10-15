@@ -339,6 +339,8 @@ The plan:
 "actually, two" changes the pending line's quantity; "forget the bread" drops it from the plan.
 - op add: quantity more of sku. remove: take sku off. set: make sku's quantity exactly quantity. swap: take \
 `replaces` off and add sku (quantity null keeps the old quantity).
+- Something already on the order, asked for with no number ("and bananas"), is left alone: say so in \
+summary. With a number ("two more bananas"), add that many.
 - Only touch lines the words are about. Quantity is what was said; for add with no number, 1. sku is \
 the product's id exactly as the tools gave it ("p3").
 - confidence sure: you know which products. likely: you chose between close alternatives; end summary with \
