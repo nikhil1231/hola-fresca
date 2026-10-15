@@ -1,5 +1,6 @@
 """``GET /api/noodle/feed``: what Noodle, the owner's organiser, can see of the household's
-shopping. Read-only. Noodle reaches it through the tunnel with a Cloudflare Access
+shopping; and ``POST /api/noodle/shopping``: "add oat milk to the shopping", which puts
+it on the next Ocado order and confirms the change (:mod:`app.ocado.top_up`). Noodle reaches it through the tunnel with a Cloudflare Access
 service token (listed in ``HOLAFRESCA_ACCESS_SERVICES``), or over the LAN with
 ``HOLAFRESCA_NOODLE_FEED_TOKEN``.
 
@@ -22,16 +23,19 @@ from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import config, household
 from app.api import access
-from app.api.deps import get_session
+from app.api.cart import _push_lock
+from app.api.deps import get_current_user, get_session
 from app.api.hellofresh import client_for as hellofresh_client
 from app.api.hellofresh import coming_boxes
 from app.db.models import RetailerAccount, User
 from app.hellofresh import boxes
+from app.ocado import amend, top_up
 from app.ocado import orders as ocado_orders
 from app.ocado.client import OcadoClient
 from app.ocado.session import get_shared_session
@@ -115,6 +119,59 @@ def feed(session: Session = Depends(get_session)) -> dict[str, Any]:
         upcoming += more_upcoming
     upcoming.sort(key=lambda u: u["at"])
     return {"context": "\n".join(lines) or "No shopping accounts connected.", "upcoming": upcoming}
+
+
+class ShoppingItemIn(BaseModel):
+    text: str = Field(min_length=1, max_length=120)
+    #: Leave out when no number was said: then something already on the order is left alone.
+    quantity: int | None = Field(default=None, ge=1, le=top_up.MAX_QUANTITY)
+
+
+class ShoppingIn(BaseModel):
+    items: list[ShoppingItemIn] = Field(min_length=1, max_length=20)
+
+
+class TakeBackIn(BaseModel):
+    order_id: str
+    #: sku → how many were added, as ``/shopping`` reported them.
+    lines: dict[str, int] = Field(min_length=1)
+
+
+def _ocado_accounts(session: Session, user: User) -> list[tuple[RetailerAccount, OcadoClient]]:
+    accounts = household.accounts(session, user, "ocado")
+    if not accounts:
+        raise HTTPException(status_code=404, detail="No Ocado account is connected")
+    return [(account, OcadoClient(get_shared_session(account.key))) for account in accounts]
+
+
+@router.post("/shopping", dependencies=[Depends(require_feed_token)])
+def add_to_shopping(body: ShoppingIn, session: Session = Depends(get_session),
+                    user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """Put each item on the next editable Ocado order and confirm the change.
+
+    Items it can't place come back under ``skipped`` with the reason; the request
+    only fails when the order itself can't be changed.
+    """
+    accounts = _ocado_accounts(session, user)
+    wants = [top_up.Want(item.text.strip(), item.quantity) for item in body.items]
+    with _push_lock("ocado"):  # the edit session takes over the cart for a moment
+        try:
+            return top_up.add(session, user.id, wants, accounts, completer=top_up.default_completer(),
+                              stock=top_up.live_stock(accounts[0][1]))
+        except (top_up.NoOrder, amend.OrderChangeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/shopping/undo", dependencies=[Depends(require_feed_token)])
+def undo_shopping(body: TakeBackIn, session: Session = Depends(get_session),
+                  user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """Take what ``/shopping`` added back off the order."""
+    accounts = _ocado_accounts(session, user)
+    with _push_lock("ocado"):
+        try:
+            return top_up.take_back(body.order_id, body.lines, accounts)
+        except (top_up.NoOrder, amend.OrderChangeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _when(value: str | None) -> str:
