@@ -30,12 +30,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -109,6 +110,7 @@ class Context:
     #: The model sees short ids ("p3"), not SKUs: copying a 36-character UUID is where it slips.
     refs: dict[str, str] = field(default_factory=dict)
     _order: Order | None = None
+    available_slots: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def ref(self, sku: str) -> str:
         if sku not in self.refs:
@@ -272,6 +274,43 @@ TOOLS: dict[str, tuple[Callable[..., dict[str, Any]], str, dict[str, Any]]] = {
 }
 
 
+def tool_slots(ctx: Context, day: str | None = None) -> dict[str, Any]:
+    """Show a bounded set of slots so the model sees complete, relevant choices."""
+    order = ctx.order()
+    slots = amend.slots_for(order.client, order.raw, days=14)
+    current = datetime.fromisoformat(order.about()["delivery_start"])
+    groups: dict[str, list] = {}
+    for slot in slots:
+        if not slot.available or not slot.start or not slot.end:
+            continue
+        start = datetime.fromisoformat(slot.start)
+        if not ctx.today <= start.date() <= ctx.today + timedelta(days=14):
+            continue
+        key = start.date().isoformat()
+        groups.setdefault(key, []).append(slot)
+    shown = []
+    for key, choices in sorted(groups.items()):
+        if day and key != day:
+            continue
+        # Near the existing time first, then prefer a shorter delivery window.
+        choices.sort(key=lambda slot: (
+            abs((datetime.fromisoformat(slot.start).hour * 60 + datetime.fromisoformat(slot.start).minute)
+                - (current.hour * 60 + current.minute)),
+            datetime.fromisoformat(slot.end) - datetime.fromisoformat(slot.start)))
+        for slot in choices[:12 if day else 2]:
+            value = {"slot_id": slot.slot_id, "start": slot.start, "end": slot.end}
+            ctx.available_slots[slot.slot_id] = value
+            shown.append(value)
+    return {"slots": shown, "available_by_day": {key: len(value) for key, value in sorted(groups.items())},
+            "current_delivery": order.about()}
+
+
+TOOLS["delivery_slots"] = (tool_slots, "Available delivery slots for this order over the next 14 days, "
+                            "nearest its current time first. Give day as YYYY-MM-DD for a specific date, "
+                            "or null for an overview. Pick only a returned slot_id.",
+                            {"day": {"type": ["string", "null"]}})
+
+
 def tool_specs() -> list[dict[str, Any]]:
     return [{"type": "function", "function": {
         "name": name, "description": doc, "strict": True,
@@ -309,15 +348,17 @@ PLAN_SCHEMA = {
     "type": "object",
     "properties": {
         "changes": {"type": "array", "items": _CHANGE},
+        "slot_id": {"type": ["string", "null"], "description": "New delivery slot from delivery_slots, or null"},
         "confidence": {"type": "string", "enum": list(CONFIDENCE)},
         "summary": {"type": "string"},
         "question": {"type": ["string", "null"]},
         "options": {"type": "array", "items": {
             "type": "object",
-            "properties": {"label": {"type": "string"}, "changes": {"type": "array", "items": _CHANGE}},
-            "required": ["label", "changes"], "additionalProperties": False}},
+            "properties": {"label": {"type": "string"}, "changes": {"type": "array", "items": _CHANGE},
+                           "slot_id": {"type": ["string", "null"]}},
+            "required": ["label", "changes", "slot_id"], "additionalProperties": False}},
     },
-    "required": ["changes", "confidence", "summary", "question", "options"],
+    "required": ["changes", "slot_id", "confidence", "summary", "question", "options"],
     "additionalProperties": False,
 }
 
@@ -335,6 +376,13 @@ pack size, price and brand among the X they buy, or the mapping's products.
 - search is the last resort, for something never bought and not in a mapping.
 
 The plan:
+- Delivery changes: call delivery_slots, then put the chosen slot_id in the plan alongside product changes.
+  For "Monday instead of Tuesday around the same time", use the Monday before the current delivery,
+  nearest its current start time. Use exact dates and times from the tool. If no suitable slot exists,
+  return confidence unsure and explain/ask; never silently drop a delivery request.
+  Keep a pending delivery change unless the user changes/cancels it; call delivery_slots to validate it.
+  slot_id null keeps an existing pending delivery change, or means no delivery change when none is pending.
+  Options may include slot_id as well as changes.
 - changes is the whole plan, including pending changes that still stand (see order). Merge, don't repeat: \
 "actually, two" changes the pending line's quantity; "forget the bread" drops it from the plan.
 - op add: quantity more of sku. remove: take sku off. set: make sku's quantity exactly quantity. swap: take \
@@ -506,38 +554,64 @@ def said(lines: list[dict[str, Any]]) -> str:
 
 def plan(db: Session, user_id: int, accounts: list[tuple[RetailerAccount, OcadoClient]], instructions: list[str], *,
          pending: list[dict[str, Any]] | None = None, model: ToolModel | None = None,
-         today: date | None = None) -> dict[str, Any]:
+         today: date | None = None, pending_delivery: dict[str, Any] | None = None) -> dict[str, Any]:
     """A proposed change to the coming order for ``instructions`` (oldest first, the last one new),
     merged with ``pending``. Writes nothing to Ocado."""
     ctx = Context(db, user_id, accounts, pending=[dict(c) for c in pending or []], today=today or date.today())
     ctx.names([c["sku"] for c in ctx.pending] + [c["replaces"] for c in ctx.pending if c.get("replaces")])
     order = ctx.order()  # no editable order is worth saying before asking the model anything
+    if pending_delivery:
+        instructions = [f"Pending delivery change: {json.dumps(pending_delivery)}", *instructions]
     answer = ask_model(ctx, instructions, model or default_model())
+    delivery = pending_delivery
+    slot_id = answer.get("slot_id")
+    latest = instructions[-1].lower()
+    move_requested = bool(re.search(r"\b(move|reschedule|shift|bring forward|postpone)\b", latest)
+                          and re.search(r"\b(delivery|order|shopping|slot)\b", latest))
+    if move_requested and not slot_id and answer.get("confidence") != "unsure":
+        answer["confidence"] = "unsure"
+        answer["question"] = "I couldn't find a matching delivery slot. Which day and time would you like?"
+    if slot_id:
+        delivery = ctx.available_slots.get(slot_id)
+        if delivery is None:
+            answer["confidence"] = "unsure"
+            answer["question"] = "That delivery slot could not be verified. Which day and time would you like?"
     confidence = answer.get("confidence") if answer.get("confidence") in CONFIDENCE else "unsure"
     changes, refused = check(ctx, ctx.unshown(answer.get("changes") or []), instructions)
     question = answer.get("question")
     options = []
     for option in answer.get("options") or []:
         allowed, no = check(ctx, ctx.unshown(option.get("changes") or []), instructions + [option.get("label") or ""])
-        if not no:
+        option_slot = option.get("slot_id")
+        option_delivery = ctx.available_slots.get(option_slot) if option_slot else None
+        if not no and (not option_slot or option_delivery):
             options.append({"label": option.get("label") or said(describe(ctx, allowed)),
-                            "changes": describe(ctx, allowed)})
+                            "changes": describe(ctx, allowed), "delivery": option_delivery})
     if refused:
         confidence = "unsure"
         question = question or f"I wasn't sure about {'; '.join(refused)}. Can you say it another way?"
     if confidence == "unsure":
         changes = ctx.pending  # nothing changes until they answer
+        delivery = pending_delivery
         if not question:
             question = "Which did you mean?"
     else:
         options = []
         question = None
     lines = describe(ctx, changes)
-    return {"order": order.about(), "changes": lines, "said": said(lines), "confidence": confidence,
+    return {"order": order.about(), "changes": lines, "delivery": delivery,
+            "said": ", ".join(filter(None, [said(lines), delivery_said(delivery)])), "confidence": confidence,
             "summary": answer.get("summary") or "", "question": question, "options": options, "refused": refused}
 
 
 # --- doing it ----------------------------------------------------------------
+
+
+def delivery_said(delivery: dict[str, Any] | None) -> str:
+    if not delivery:
+        return ""
+    start, end = (datetime.fromisoformat(delivery[k]) for k in ("start", "end"))
+    return f"delivery → {start:%a %-d %b %H:%M}–{end:%H:%M}"
 
 
 def targets(changes: list[dict[str, Any]], have: dict[str, int]) -> dict[str, int]:
@@ -563,10 +637,11 @@ def targets(changes: list[dict[str, Any]], have: dict[str, int]) -> dict[str, in
 
 
 def apply(db: Session, accounts: list[tuple[RetailerAccount, OcadoClient]], changes: list[dict[str, Any]], *,
-          order_id: str | None = None) -> dict[str, Any]:
+          order_id: str | None = None, delivery: dict[str, Any] | None = None) -> dict[str, Any]:
     """Make ``changes`` to the coming order in one checkout. ``order_id``, if it's still
-    editable, is the order the plan was made against; otherwise the next editable one."""
-    if not changes:
+    editable, is the order the plan was made against; product-only plans can use the next editable one.
+    Delivery changes stay tied to their original order."""
+    if not changes and not delivery:
         raise ValueError("there's nothing to change")
     if len(changes) > MAX_LINES:
         raise ValueError(f"at most {MAX_LINES} changes at once")
@@ -575,17 +650,25 @@ def apply(db: Session, accounts: list[tuple[RetailerAccount, OcadoClient]], chan
             raise ValueError(f"not a change: {c}")
     account, client, raw = _the_order(accounts, order_id)
     oid = str(raw["orderId"])
+    if delivery and order_id and oid != str(order_id):
+        raise top_up.NoOrder("The order selected for the delivery change is no longer editable")
     have = top_up.order_quantities(client, oid)
     target = targets(changes, have)
     names = dict(db.execute(select(Product.sku, Product.name).where(
         Product.retailer == RETAILER, Product.sku.in_(list(target) + [c["sku"] for c in changes]))).all())
     names.update({c["sku"]: c["name"] for c in changes if c.get("name") and c["sku"] not in names})
-    if target:
-        amend.change_order(client, oid, quantities=target)
+    slot_id = delivery.get("slot_id") if delivery else None
+    if delivery and not slot_id:
+        raise ValueError("a delivery change needs a slot_id")
+    moved = bool(slot_id and slot_id != raw.get("slotId"))
+    before_slot = raw.get("slotId")
+    if target or moved:
+        raw = amend.change_order(client, oid, quantities=target, slot_id=slot_id)
     dates = raw.get("dates") or {}
     return {
         "order": {"order_id": oid, "account": account.email, "delivery_start": dates.get("deliveryStartDate"),
                   "delivery_end": dates.get("deliveryEndDate")},
+        "delivery_changed": moved, "previous_slot_id": before_slot if moved else None,
         "applied": [{"sku": sku, "name": names.get(sku, sku), "before": have.get(sku, 0), "after": q}
                     for sku, q in target.items()],
     }

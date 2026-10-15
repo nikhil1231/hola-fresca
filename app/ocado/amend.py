@@ -5,8 +5,8 @@ in the calls the site itself makes:
 
 1. open an order-edit session, which makes the order the active cart;
 2. change quantities and/or reserve the new slot, as for any cart;
-3. check out, which for an edited order confirms its changes. The order keeps its
-   payment (the saved card it was placed with, charged at delivery) and, if it's
+3. check out, which for an edited order confirms its changes. The order uses an available
+   saved card (the account default when available) and, if it's
    a recurring order, the change is to this delivery only.
 
 Ocado keeps the original order until changes are confirmed. Failures before
@@ -48,22 +48,14 @@ def find_order(client: OcadoClient, order_id: str) -> dict[str, Any] | None:
 
 
 def payment_method(client: OcadoClient, order_id: str) -> dict[str, Any]:
-    """The order's own payment method, pointed at the saved card it uses."""
-    payments = client.order_payments(order_id).get("payments") or []
-    payment = next((p for p in payments if (p.get("paymentMethod") or {}).get("type") == "CARDS"), None)
-    if payment is None:
-        raise OrderChangeError("The order has no saved card payment to reuse")
-    method = payment["paymentMethod"]
-    group, kind = method.get("group") or "PAY_NOW", method["type"]
-    wallet = [w for w in client.wallet_items() if not w.get("expired") and w.get("paymentMethodType") == kind]
-    instrument_id = (payment.get("fundingInstrument") or {}).get("fundingInstrumentId")
-    if instrument_id:
-        wallet = [w for w in wallet if w.get("fundingInstrumentId") == instrument_id]
-    elif len(wallet) > 1:
-        raise OrderChangeError("Cannot identify the order's original saved card")
+    """Use the account's default usable saved card, or its first usable card."""
+    wallet = [w for w in client.wallet_items()
+              if not w.get("expired") and w.get("paymentMethodType") == "CARDS" and w.get("walletItemId")]
     if not wallet:
-        raise OrderChangeError(f"No saved {kind.lower()} on the account to keep paying with")
-    return {"group": group, "type": kind, "toSave": False, "walletItemId": wallet[0]["walletItemId"]}
+        raise OrderChangeError("No unexpired saved card is available on the account")
+    card = next((w for w in wallet if w.get("defaultWalletItem")), wallet[0])
+    return {"group": card.get("paymentMethodGroup") or "PAY_NOW", "type": "CARDS",
+            "toSave": False, "walletItemId": card["walletItemId"]}
 
 
 def checkout_body(client: OcadoClient, order: dict[str, Any]) -> dict[str, Any]:

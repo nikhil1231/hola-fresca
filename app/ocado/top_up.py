@@ -322,7 +322,7 @@ def add(session: Session, user_id: int, wants: list[Want], accounts: list[tuple[
     }
 
 
-def take_back(order_id: str, lines: dict[str, int], accounts: list[tuple[RetailerAccount, OcadoClient]]) -> dict[str, Any]:
+def take_back(order_id: str, lines: dict[str, int], accounts: list[tuple[RetailerAccount, OcadoClient]], *, slot_id: str | None = None) -> dict[str, Any]:
     """Undo an :func:`add` (or a resolver plan): take ``lines`` (sku → how many were added;
     negative for how many were taken off) back off the order, or put them back.
 
@@ -341,8 +341,8 @@ def take_back(order_id: str, lines: dict[str, int], accounts: list[tuple[Retaile
         target = {sku: max(0, min(have.get(sku, 0) - qty, MAX_QUANTITY * 2)) for sku, qty in lines.items()
                   if qty and (have.get(sku) or qty < 0)}
         target = {sku: q for sku, q in target.items() if q != have.get(sku, 0)}
-        if target:
-            amend.change_order(client, order_id, quantities=target)
+        if target or slot_id:
+            amend.change_order(client, order_id, quantities=target, **({"slot_id": slot_id} if slot_id else {}))
         return {"order_id": order_id, "removed": {sku: have.get(sku, 0) - qty for sku, qty in target.items()}}
     raise NoOrder(f"Order {order_id} isn't a coming order any more")
 

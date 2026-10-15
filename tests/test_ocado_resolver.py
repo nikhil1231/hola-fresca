@@ -1,6 +1,8 @@
 """From what was said to a planned change, and the rules the code holds the model to. Ocado and the model are faked."""
 from __future__ import annotations
 
+from datetime import date
+
 import json
 
 import pytest
@@ -185,7 +187,7 @@ def test_apply_makes_the_whole_plan_in_one_checkout(db, monkeypatch):
 def test_undo_puts_back_what_was_taken_off(monkeypatch):
     client = FakeOcado({MILK: 3})
     monkeypatch.setattr(amend, "find_order", lambda c, order_id: c.orders()[0])
-    monkeypatch.setattr(amend, "change_order", lambda c, oid, quantities=None: c.changes.append(quantities))
+    monkeypatch.setattr(amend, "change_order", lambda c, oid, quantities=None, slot_id=None: c.changes.append(quantities))
     top_up.take_back("o9", {MILK: 2, BANANAS: -1}, [(RetailerAccount(key="a"), client)])
     assert client.changes == [{MILK: 1, BANANAS: 1}]
 
@@ -206,3 +208,112 @@ def test_endpoints(monkeypatch):
         assert response.status_code == 409 and "no coming Ocado order" in response.json()["detail"]
         bad = {"changes": [{"op": "eat", "sku": "x"}]}
         assert client.post("/api/noodle/shopping/apply", json=bad, headers=auth).status_code == 422
+
+
+DELIVERY = {"slot_id": "mon-10", "start": "2030-10-14T10:00:00+01:00", "end": "2030-10-14T11:00:00+01:00"}
+
+
+def test_delivery_plan_uses_available_slots_and_keeps_product_changes(db, monkeypatch):
+    from app.ocado.client import Slot
+    monkeypatch.setattr(amend, "slots_for", lambda *a, **kw: [
+        Slot(DELIVERY["slot_id"], DELIVERY["start"], DELIVERY["end"], available=True),
+        Slot("unavailable", DELIVERY["start"], DELIVERY["end"], available=False)])
+    model = scripted({"tool": "delivery_slots"},
+                     {"changes": [change("add", MILK, 1)], "slot_id": "mon-10", "confidence": "sure"})
+    out = resolver.plan(db, user_id(db), accounts(db), ["add milk", "move delivery to Monday at the same time"],
+                        pending=[change("add", MILK, 1)], model=model, today=date(2030, 10, 10))
+    assert out["delivery"] == DELIVERY
+    assert out["changes"][0]["sku"] == MILK
+    assert "Mon 14 Oct 10:00" in out["said"]
+    assert len(json.loads(model.turns[1][-1]["content"])["slots"]) == 1
+
+
+def test_invented_slot_is_held_for_clarification(db):
+    model = scripted({"changes": [], "slot_id": "invented", "confidence": "sure"})
+    out = resolver.plan(db, user_id(db), accounts(db), ["move delivery to Monday"], model=model)
+    assert out["confidence"] == "unsure" and out["delivery"] is None
+    assert "verified" in out["question"]
+
+
+@pytest.mark.parametrize("changes", [[], [change("add", MILK, 1)]])
+def test_delivery_and_products_use_one_checkout_and_report_saved_delivery(db, monkeypatch, changes):
+    calls = []
+    accts = accounts(db)
+    raw = {**accts[0][1].orders()[0], "slotId": "old-slot"}
+    monkeypatch.setattr(amend, "find_order", lambda *a: raw)
+    def change_order(client, oid, quantities=None, slot_id=None):
+        calls.append((quantities, slot_id))
+        return {**raw, "slotId": slot_id, "dates": {"deliveryStartDate": DELIVERY["start"],
+                                                    "deliveryEndDate": DELIVERY["end"]}}
+    monkeypatch.setattr(amend, "change_order", change_order)
+    out = resolver.apply(db, accts, changes, order_id="o9", delivery=DELIVERY)
+    assert calls == [({MILK: 2} if changes else {}, "mon-10")]
+    assert out["delivery_changed"] and out["previous_slot_id"] == "old-slot"
+    assert out["order"]["delivery_start"] == DELIVERY["start"]
+
+
+def test_delivery_undo_can_restore_slot_without_product_changes(monkeypatch):
+    client = FakeOcado({MILK: 1})
+    monkeypatch.setattr(amend, "find_order", lambda c, oid: c.orders()[0])
+    calls = []
+    monkeypatch.setattr(amend, "change_order", lambda c, oid, **kw: calls.append(kw))
+    top_up.take_back("o9", {}, [(RetailerAccount(key="a"), client)], slot_id="old-slot")
+    assert calls == [{"quantities": {}, "slot_id": "old-slot"}]
+
+
+def test_delivery_request_cannot_silently_become_product_only(db):
+    model = scripted({"changes": [change("add", MILK, 1)], "confidence": "sure"})
+    out = resolver.plan(db, user_id(db), accounts(db), ["move that shopping order to Monday instead of Tuesday"],
+                        pending=[change("add", MILK, 1)], model=model)
+    assert out["confidence"] == "unsure"
+    assert "delivery slot" in out["question"]
+
+
+def test_product_followup_does_not_drop_pending_delivery(db):
+    model = scripted({"changes": [change("add", MILK, 1)], "confidence": "sure"})
+    out = resolver.plan(db, user_id(db), accounts(db), ["and add milk"], model=model, pending_delivery=DELIVERY)
+    assert out["delivery"] == DELIVERY
+
+
+def test_slot_overview_is_bounded_and_keeps_requested_day_visible(db, monkeypatch):
+    from app.ocado.client import Slot
+    slots = [Slot(f'{day}-{hour}', f'2030-10-{day:02d}T{hour:02d}:00:00+01:00',
+                  f'2030-10-{day:02d}T{hour+1:02d}:00:00+01:00', available=True)
+             for day in range(11, 25) for hour in range(6, 23)]
+    monkeypatch.setattr(amend, 'slots_for', lambda *a, **kw: list(reversed(slots)))
+    ctx = resolver.Context(db, user_id(db), accounts(db), today=date(2030, 10, 10))
+    overview = resolver.tool_slots(ctx)
+    assert len(json.dumps(overview)) < 12000
+    assert len(overview['slots']) == 28
+    assert any(s['start'].startswith('2030-10-14') for s in overview['slots'])
+    monday = resolver.tool_slots(ctx, day='2030-10-14')
+    assert len(monday['slots']) == 12
+    assert all(s['start'].startswith('2030-10-14') for s in monday['slots'])
+    assert monday['slots'][0]['start'] == '2030-10-14T10:00:00+01:00'
+
+
+def test_delivery_only_payload_reaches_plan_apply_and_undo(monkeypatch):
+    monkeypatch.setattr(config, 'NOODLE_FEED_TOKEN', 'tok')
+    monkeypatch.setattr(noodle_feed, '_ocado_accounts', lambda *a: [])
+    seen = []
+    def plan(*args, **kwargs):
+        seen.append(('plan', kwargs['pending_delivery']))
+        return {'delivery': kwargs['pending_delivery']}
+    def apply(*args, **kwargs):
+        seen.append(('apply', kwargs['delivery']))
+        return {'delivery_changed': True}
+    def undo(*args, **kwargs):
+        seen.append(('undo', kwargs['slot_id']))
+        return {'order_id': 'o9'}
+    monkeypatch.setattr(resolver, 'plan', plan)
+    monkeypatch.setattr(resolver, 'apply', apply)
+    monkeypatch.setattr(top_up, 'take_back', undo)
+    headers = {'Authorization': 'Bearer tok'}
+    with TestClient(main.app) as client:
+        for endpoint, body in [
+            ('plan', {'instructions': ['and bread'], 'pending_delivery': DELIVERY}),
+            ('apply', {'order_id': 'o9', 'delivery': DELIVERY}),
+            ('undo', {'order_id': 'o9', 'slot_id': 'old-slot'})]:
+            response = client.post('/api/noodle/shopping/' + endpoint, json=body, headers=headers)
+            assert response.status_code == 200, response.text
+    assert seen == [('plan', DELIVERY), ('apply', DELIVERY), ('undo', 'old-slot')]
