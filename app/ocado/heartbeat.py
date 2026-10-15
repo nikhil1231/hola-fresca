@@ -209,6 +209,19 @@ class Heartbeat:
             return
         log.info("ocado heartbeat: %s -> %s", account_id, state)
         self._record(account_id, state)
+        if str(state) == "ready":
+            self._read_purchases(account_id)
+
+    @staticmethod
+    def _read_purchases(account_id: str) -> None:
+        """While the session is known good, read any orders delivered since the last
+        check into the purchase history: about a day after each delivery, no extra timer."""
+        from app.ocado import purchases
+
+        try:
+            purchases.sync_account(account_id)
+        except Exception:  # noqa: BLE001 - the history catches up next time
+            log.warning("ocado heartbeat: purchases not read for %s", account_id, exc_info=True)
 
     @staticmethod
     def _record(account_id: str, state: object) -> None:

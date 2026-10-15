@@ -20,7 +20,8 @@ from __future__ import annotations
 import hmac
 import logging
 from datetime import date, datetime
-from typing import Any
+import threading
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -35,7 +36,7 @@ from app.api.hellofresh import client_for as hellofresh_client
 from app.api.hellofresh import coming_boxes
 from app.db.models import RetailerAccount, User
 from app.hellofresh import boxes
-from app.ocado import amend, top_up
+from app.ocado import amend, purchases, resolver, top_up
 from app.ocado import orders as ocado_orders
 from app.ocado.client import OcadoClient
 from app.ocado.session import get_shared_session
@@ -133,8 +134,29 @@ class ShoppingIn(BaseModel):
 
 class TakeBackIn(BaseModel):
     order_id: str
-    #: sku → how many were added, as ``/shopping`` reported them.
+    #: sku → how many were added, as ``/shopping`` reported them (negative: how many were taken off).
     lines: dict[str, int] = Field(min_length=1)
+
+
+class ChangeIn(BaseModel):
+    op: Literal["add", "remove", "set", "swap"]
+    sku: str = Field(min_length=1, max_length=128)
+    quantity: int | None = Field(default=None, ge=0, le=top_up.MAX_QUANTITY)
+    replaces: str | None = Field(default=None, max_length=128)
+    #: The product's name, as the plan gave it: kept so the reply can say it.
+    name: str | None = Field(default=None, max_length=300)
+    replaces_name: str | None = Field(default=None, max_length=300)
+
+
+class PlanIn(BaseModel):
+    #: What was said, oldest first; the last is new. Earlier ones are what the pending plan came from.
+    instructions: list[str] = Field(min_length=1, max_length=12)
+    pending: list[ChangeIn] = Field(default_factory=list, max_length=resolver.MAX_LINES)
+
+
+class ApplyIn(BaseModel):
+    order_id: str | None = None
+    changes: list[ChangeIn] = Field(min_length=1, max_length=resolver.MAX_LINES)
 
 
 def _ocado_accounts(session: Session, user: User) -> list[tuple[RetailerAccount, OcadoClient]]:
@@ -172,6 +194,59 @@ def undo_shopping(body: TakeBackIn, session: Session = Depends(get_session),
             return top_up.take_back(body.order_id, body.lines, accounts)
         except (top_up.NoOrder, amend.OrderChangeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/shopping/plan", dependencies=[Depends(require_feed_token)])
+def plan_shopping(body: PlanIn, session: Session = Depends(get_session),
+                  user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """What was said, turned into a proposed change to the coming order (merged with
+    ``pending``). Changes nothing on Ocado: ``/shopping/apply`` does, later."""
+    accounts = _ocado_accounts(session, user)
+    try:
+        return resolver.plan(session, user.id, accounts, [text.strip()[:500] for text in body.instructions],
+                             pending=[c.model_dump(exclude={"name", "replaces_name"}) for c in body.pending])
+    except top_up.NoOrder as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except resolver.ResolveError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/shopping/apply", dependencies=[Depends(require_feed_token)])
+def apply_shopping(body: ApplyIn, session: Session = Depends(get_session),
+                   user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """Make a planned change in one checkout, against the order as it is now."""
+    accounts = _ocado_accounts(session, user)
+    with _push_lock("ocado"):
+        try:
+            return resolver.apply(session, accounts, [c.model_dump() for c in body.changes], order_id=body.order_id)
+        except (top_up.NoOrder, amend.OrderChangeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+_reading = threading.Lock()
+
+
+@router.post("/purchases/sync", dependencies=[Depends(require_feed_token)], status_code=202)
+def sync_purchases(session: Session = Depends(get_session), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """Read new delivered orders into the purchase history now, in the background (the
+    heartbeat does this daily; this is for the first backfill)."""
+    accounts = [(a.key, a.id) for a, _ in _ocado_accounts(session, user)]
+    if not _reading.acquire(blocking=False):
+        return {"started": False, "detail": "already reading"}
+
+    def run() -> None:
+        try:
+            for key, _ in accounts:
+                purchases.sync_account(key)
+        except Exception:  # noqa: BLE001
+            log.exception("purchases: sync failed")
+        finally:
+            _reading.release()
+
+    threading.Thread(target=run, name="purchases-sync", daemon=True).start()
+    return {"started": True}
 
 
 def _when(value: str | None) -> str:

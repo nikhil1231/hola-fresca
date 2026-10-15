@@ -1227,6 +1227,53 @@ class UserRetailerPriceRefresh(Base):
     last_refreshed_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class Purchase(Base):
+    """One line of a delivered order: what the household actually bought.
+
+    Personal, so it hangs off the account owner. Kept for good rather than read
+    once: "not the usual one, the other one" is a question about what was bought
+    and how often, and the answer is here, not in the catalogue. Filled by
+    :mod:`app.ocado.purchases` after each delivery; an order is either all here
+    or not at all, so ``order_id`` alone says whether it has been read.
+    """
+
+    __tablename__ = "purchases"
+    __table_args__ = (
+        UniqueConstraint("retailer", "order_id", "sku", name="uq_purchase_order_sku"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    account_key: Mapped[str] = mapped_column(String(64))
+    order_id: Mapped[str] = mapped_column(String(64), index=True)
+    sku: Mapped[str] = mapped_column(String(128), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    delivered_on: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+
+
+class ProductDescription(Base):
+    """What a product looks like, for "the one in the green packaging".
+
+    Catalogue, not personal: it describes the pack, and only products somebody
+    bought get one. Written once per product by a vision model reading its image.
+    """
+
+    __tablename__ = "product_descriptions"
+    __table_args__ = (
+        UniqueConstraint("retailer", "sku", name="uq_product_description_sku"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retailer: Mapped[str] = mapped_column(String(64), index=True)
+    sku: Mapped[str] = mapped_column(String(128), index=True)
+    packaging: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    described_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class IngredientMappingProduct(Base):
     """A candidate product for an ingredient mapping, with the accept decision."""
 

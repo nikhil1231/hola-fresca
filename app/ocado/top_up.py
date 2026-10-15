@@ -3,8 +3,9 @@
 Noodle hears the request and sends the item as words. Everything after that is
 here, because turning words into a product is the question the mappings already
 answer for recipes: which ingredient this is (following aliases), which of its
-accepted products to buy (the reviewed rank, a standing pack choice first, sold
-out ones skipped), and the order it goes on.
+accepted products to buy (a standing pack choice first, then the one the
+household has bought most, then the reviewed rank, sold out ones skipped), and
+the order it goes on.
 
 The mappings come from recipe ingredients, so "milk" and "chopped tomatoes" are
 in them and "toilet roll" is not. Something that isn't mapped is reported back
@@ -36,7 +37,7 @@ from app.db.models import (
 )
 from app.mapping import service
 from app.mapping.openai_client import Completer, OpenAIJSONClient
-from app.ocado import amend
+from app.ocado import amend, purchases
 from app.ocado.client import OcadoClient
 from app.planner.basket import MATCH_TYPE_PREFERENCE
 from app.planner.preferences import pack_preferences
@@ -192,8 +193,13 @@ def default_completer() -> Completer | None:
 # --- which product -----------------------------------------------------------
 
 
-def pick(session: Session, found: Match, user_id: int, *, stock: StockCheck | None = None) -> tuple[Product | None, frozenset[str]]:
-    """The product to buy for ``found``, and every product accepted for it."""
+def pick(session: Session, found: Match, user_id: int, *, stock: StockCheck | None = None,
+         household: Iterable[int] = ()) -> tuple[Product | None, frozenset[str]]:
+    """The product to buy for ``found``, and every product accepted for it.
+
+    A standing pack choice wins; then whatever ``household`` (user ids whose orders
+    count) has bought most often; then the reviewed rank.
+    """
     mapping = session.scalar(
         select(IngredientMapping).where(
             IngredientMapping.retailer == RETAILER, IngredientMapping.ingredient_key == found.key
@@ -209,9 +215,11 @@ def pick(session: Session, found: Match, user_id: int, *, stock: StockCheck | No
     skus = frozenset(link.sku for link, _ in rows)
     preferred = pack_preferences(session, user_id, retailer=RETAILER).get(found.key)
     tiers = {tier: i for i, tier in enumerate(MATCH_TYPE_PREFERENCE)}
+    times = {sku: b.orders for sku, b in purchases.bought(session, household, skus).items()} if household else {}
     ordered = sorted(
         ((link, product) for link, product in rows if product.in_stock != 0),
-        key=lambda pair: (pair[1].sku != preferred, tiers.get(pair[0].match_type, len(tiers)), pair[0].rank),
+        key=lambda pair: (pair[1].sku != preferred, -times.get(pair[1].sku, 0),
+                          tiers.get(pair[0].match_type, len(tiers)), pair[0].rank),
     )
     products = [product for _, product in ordered]
     if stock is not None and products:
@@ -225,6 +233,12 @@ def pick(session: Session, found: Match, user_id: int, *, stock: StockCheck | No
 
 
 # --- which order -------------------------------------------------------------
+
+
+def household_ids(accounts: Iterable[tuple[RetailerAccount, Any]]) -> list[int]:
+    """Whose orders count as "what we buy": the owners of the accounts being shopped on."""
+    return list(dict.fromkeys(account.user_id for account, _ in accounts))
+
 
 
 def next_order(accounts: list[tuple[RetailerAccount, OcadoClient]]) -> tuple[RetailerAccount, OcadoClient, dict[str, Any]]:
@@ -275,7 +289,7 @@ def add(session: Session, user_id: int, wants: list[Want], accounts: list[tuple[
             reason = (f"which one? {', '.join(found)}" if found else "not something HolaFresca knows how to buy")
             skipped.append({"text": want.text, "code": "ambiguous" if found else "unknown", "reason": reason})
             continue
-        product, skus = pick(session, found, user_id, stock=stock)
+        product, skus = pick(session, found, user_id, stock=stock, household=household_ids(accounts))
         if product is None:
             skipped.append({"text": want.text, "code": "sold_out", "reason": f"nothing for {found.name} is in stock"})
             continue
@@ -309,7 +323,8 @@ def add(session: Session, user_id: int, wants: list[Want], accounts: list[tuple[
 
 
 def take_back(order_id: str, lines: dict[str, int], accounts: list[tuple[RetailerAccount, OcadoClient]]) -> dict[str, Any]:
-    """Undo an :func:`add`: take ``lines`` (sku → how many were added) back off the order.
+    """Undo an :func:`add` (or a resolver plan): take ``lines`` (sku → how many were added;
+    negative for how many were taken off) back off the order, or put them back.
 
     Subtracts rather than restoring the old quantities, so anything changed on the
     order since stays changed.
@@ -323,10 +338,12 @@ def take_back(order_id: str, lines: dict[str, int], accounts: list[tuple[Retaile
         if order is None:
             continue
         have = order_quantities(client, order_id)
-        target = {sku: max(0, have.get(sku, 0) - qty) for sku, qty in lines.items() if have.get(sku)}
+        target = {sku: max(0, min(have.get(sku, 0) - qty, MAX_QUANTITY * 2)) for sku, qty in lines.items()
+                  if qty and (have.get(sku) or qty < 0)}
+        target = {sku: q for sku, q in target.items() if q != have.get(sku, 0)}
         if target:
             amend.change_order(client, order_id, quantities=target)
-        return {"order_id": order_id, "removed": {sku: have[sku] - qty for sku, qty in target.items()}}
+        return {"order_id": order_id, "removed": {sku: have.get(sku, 0) - qty for sku, qty in target.items()}}
     raise NoOrder(f"Order {order_id} isn't a coming order any more")
 
 

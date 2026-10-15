@@ -375,6 +375,37 @@ HelloFresh account in the household:
 The same contract is meant for every system that feeds Noodle. An account whose
 session has died is reported in `context` and skipped.
 
+## Shopping for Noodle
+
+Same credentials as the feed. Noodle sends what was said; nothing here parses
+it into items.
+
+- `POST /api/noodle/shopping/plan` `{"instructions": [...], "pending": [...]}`:
+  a model with read-only tools (purchase history, ingredient mappings, the
+  coming order, product details, and Ocado search as a capped last resort)
+  turns the words into `{"changes", "confidence", "said", "summary",
+  "question", "options", "order"}`. It writes nothing to Ocado. The code
+  refuses SKUs no tool showed, changes to lines the words didn't mention, more
+  than 8 lines and quantities outside 1 to 10; any refusal makes the plan
+  `unsure`. See `app/ocado/resolver.py`.
+- `POST /api/noodle/shopping/apply` `{"order_id", "changes"}`: makes the plan in
+  one checkout against the order as it is then.
+- `POST /api/noodle/shopping/undo` `{"order_id", "lines": {sku: added}}`: puts
+  it back (a negative count puts back what was taken off).
+- `POST /api/noodle/purchases/sync`: reads new delivered orders now, in the
+  server process (which owns the Ocado sessions; a second process writing the
+  same cookie jar would fight it).
+
+The purchase history (`purchases`, one row per line of each delivered order)
+is read by the Ocado heartbeat after each good check: one call lists an
+account's orders, one per order not yet read, with a pause between. Bought
+products missing from the catalogue are filled with the batched products call,
+and each gets a line about its packaging from a vision model
+(`product_descriptions`). The matcher behind `/shopping` prefers what was
+bought most, after any standing pack choice. `python -m app.ocado.resolver_eval --db <copy>` runs the
+test set in `tests/fixtures/shopping_cases.json` against a copy of the
+database with Ocado faked.
+
 ## Migrations
 
 The schema is evolved with alembic, and `init_db` runs it on start-up — a fresh
