@@ -86,7 +86,7 @@ class FakeOcado:
         return ["a slot"]
 
 
-def test_moving_confirms_the_change_for_this_delivery_only_with_the_same_card():
+def test_moving_confirms_the_change_for_this_delivery_only_with_a_saved_card():
     fake = FakeOcado()
     moved = amend.move_slot(fake, "1629420692934", "mon-1030")
     assert fake.calls == ["start", "reserve", "checkout_start", "summary", "checkout"]
@@ -142,15 +142,21 @@ def test_failed_basket_checkout_discards_quantities():
     assert fake.quantities == {"sku": 2}
 
 
-def test_original_funding_instrument_is_used_even_if_another_card_is_first():
+def test_default_saved_card_is_used_even_when_order_card_is_different():
     fake = FakeOcado()
-    fake.order_payments = lambda _: {"payments": [{"paymentMethod": {"type": "CARDS", "group": "PAY_NOW"},
-                                                  "fundingInstrument": {"fundingInstrumentId": "original"}}]}
-    fake.wallet_items = lambda: [{"walletItemId": "other-card", "paymentMethodType": "CARDS", "fundingInstrumentId": "other"},
-                                {"walletItemId": "right-card", "paymentMethodType": "CARDS", "fundingInstrumentId": "original"}]
-    assert amend.payment_method(fake, str(ORDER["orderId"]))["walletItemId"] == "right-card"
-    fake.wallet_items = lambda: [{"walletItemId": "other-card", "paymentMethodType": "CARDS", "fundingInstrumentId": "other"}]
-    with pytest.raises(amend.OrderChangeError):
+    fake.order_payments = lambda _: pytest.fail("Original payment is irrelevant")
+    fake.wallet_items = lambda: [
+        {"walletItemId": "expired", "paymentMethodType": "CARDS", "expired": True, "defaultWalletItem": True},
+        {"walletItemId": "first", "paymentMethodType": "CARDS"},
+        {"walletItemId": "default", "paymentMethodType": "CARDS", "defaultWalletItem": True}]
+    amend.move_slot(fake, str(ORDER["orderId"]), "mon-1030")
+    assert fake.checkout_body["paymentMethod"]["walletItemId"] == "default"
+
+
+def test_no_usable_saved_card_stops_before_editing():
+    fake = FakeOcado()
+    fake.wallet_items = lambda: [{"walletItemId": "old", "paymentMethodType": "CARDS", "expired": True}]
+    with pytest.raises(amend.OrderChangeError, match="No unexpired saved card"):
         amend.move_slot(fake, str(ORDER["orderId"]), "mon-1030")
     assert fake.calls == []
 

@@ -352,7 +352,7 @@ configured household), and writes share the basket push lock.
 | `POST orders/{order_id}/items` | `{items: [{sku, quantity}], confirm: true}` edits absolute quantities and re-checks out; optional `slot_id` combines both changes |
 | `POST orders/{order_id}/cancel` | `{confirm: true}` cancels this delivery and verifies its saved `CANCELLED` status |
 
-Re-checkout preserves the order's original saved card and changes only this
+Re-checkout uses the account's default unexpired saved card (or another usable saved card) and changes only this
 delivery of a recurring order. It checks checkout restrictions and verifies
 saved quantities and delivery dates after confirmation. Unconfirmed failures
 discard the edit; a failure to verify an accepted checkout asks the caller to
@@ -380,18 +380,19 @@ session has died is reported in `context` and skipped.
 Same credentials as the feed. Noodle sends what was said; nothing here parses
 it into items.
 
-- `POST /api/noodle/shopping/plan` `{"instructions": [...], "pending": [...]}`:
+- `POST /api/noodle/shopping/plan` `{"instructions": [...], "pending": [...], "pending_delivery": null}`:
   a model with read-only tools (purchase history, ingredient mappings, the
-  coming order, product details, and Ocado search as a capped last resort)
+  coming order, available delivery slots, product details, and Ocado search as a capped last resort)
   turns the words into `{"changes", "confidence", "said", "summary",
-  "question", "options", "order"}`. It writes nothing to Ocado. The code
+  "question", "options", "order", "delivery"}`. A delivery is `{slot_id, start, end}`;
+  unverified or unavailable slots become a clarification question. It writes nothing to Ocado. The code
   refuses SKUs no tool showed, changes to lines the words didn't mention, more
   than 8 lines and quantities outside 1 to 10; any refusal makes the plan
   `unsure`. See `app/ocado/resolver.py`.
-- `POST /api/noodle/shopping/apply` `{"order_id", "changes"}`: makes the plan in
+- `POST /api/noodle/shopping/apply` `{"order_id", "changes", "delivery"}`: makes product and/or delivery changes in
   one checkout against the order as it is then.
 - `POST /api/noodle/shopping/undo` `{"order_id", "lines": {sku: added}}`: puts
-  it back (a negative count puts back what was taken off).
+  it back (a negative count puts back what was taken off); optional `slot_id` restores the prior delivery slot.
 - `POST /api/noodle/purchases/sync`: reads new delivered orders now, in the
   server process (which owns the Ocado sessions; a second process writing the
   same cookie jar would fight it).

@@ -135,7 +135,8 @@ class ShoppingIn(BaseModel):
 class TakeBackIn(BaseModel):
     order_id: str
     #: sku → how many were added, as ``/shopping`` reported them (negative: how many were taken off).
-    lines: dict[str, int] = Field(min_length=1)
+    lines: dict[str, int] = Field(default_factory=dict)
+    slot_id: str | None = None
 
 
 class ChangeIn(BaseModel):
@@ -148,15 +149,23 @@ class ChangeIn(BaseModel):
     replaces_name: str | None = Field(default=None, max_length=300)
 
 
+class DeliveryIn(BaseModel):
+    slot_id: str = Field(min_length=1, max_length=128)
+    start: str
+    end: str
+
+
 class PlanIn(BaseModel):
+    pending_delivery: DeliveryIn | None = None
     #: What was said, oldest first; the last is new. Earlier ones are what the pending plan came from.
     instructions: list[str] = Field(min_length=1, max_length=12)
     pending: list[ChangeIn] = Field(default_factory=list, max_length=resolver.MAX_LINES)
 
 
 class ApplyIn(BaseModel):
+    delivery: DeliveryIn | None = None
     order_id: str | None = None
-    changes: list[ChangeIn] = Field(min_length=1, max_length=resolver.MAX_LINES)
+    changes: list[ChangeIn] = Field(default_factory=list, max_length=resolver.MAX_LINES)
 
 
 def _ocado_accounts(session: Session, user: User) -> list[tuple[RetailerAccount, OcadoClient]]:
@@ -191,7 +200,7 @@ def undo_shopping(body: TakeBackIn, session: Session = Depends(get_session),
     accounts = _ocado_accounts(session, user)
     with _push_lock("ocado"):
         try:
-            return top_up.take_back(body.order_id, body.lines, accounts)
+            return top_up.take_back(body.order_id, body.lines, accounts, slot_id=body.slot_id)
         except (top_up.NoOrder, amend.OrderChangeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -203,8 +212,10 @@ def plan_shopping(body: PlanIn, session: Session = Depends(get_session),
     ``pending``). Changes nothing on Ocado: ``/shopping/apply`` does, later."""
     accounts = _ocado_accounts(session, user)
     try:
-        return resolver.plan(session, user.id, accounts, [text.strip()[:500] for text in body.instructions],
-                             pending=[c.model_dump(exclude={"name", "replaces_name"}) for c in body.pending])
+        with _push_lock("ocado"):
+            return resolver.plan(session, user.id, accounts, [text.strip()[:500] for text in body.instructions],
+                                 pending=[c.model_dump(exclude={"name", "replaces_name"}) for c in body.pending],
+                                 pending_delivery=body.pending_delivery.model_dump() if body.pending_delivery else None)
     except top_up.NoOrder as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except resolver.ResolveError as exc:
@@ -218,7 +229,8 @@ def apply_shopping(body: ApplyIn, session: Session = Depends(get_session),
     accounts = _ocado_accounts(session, user)
     with _push_lock("ocado"):
         try:
-            return resolver.apply(session, accounts, [c.model_dump() for c in body.changes], order_id=body.order_id)
+            return resolver.apply(session, accounts, [c.model_dump() for c in body.changes], order_id=body.order_id,
+                                  delivery=body.delivery.model_dump() if body.delivery else None)
         except (top_up.NoOrder, amend.OrderChangeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
