@@ -81,6 +81,10 @@ class FakeOcado:
                 self.order = {**self.order, "slotId": self.reserved, "dates": MONDAY}
         return {"type": self.checkout_type}
 
+    def complete_checkout(self, result):
+        from app.ocado.payment import PaymentFlowError
+        raise PaymentFlowError("The payment form requires a verification code on ocado.com")
+
     def slots(self, ddid=None, region=None, days=7):
         self._log("slots")
         return ["a slot"]
@@ -106,7 +110,7 @@ def test_any_failure_cancels_the_edit_and_leaves_the_order(fake):
     assert fake.order["slotId"] == "tue-10"
 
 
-def test_a_card_check_is_left_to_the_customer():
+def test_unavailable_verification_input_reports_the_actual_blocker():
     with pytest.raises(amend.OrderChangeError, match="ocado.com"):
         amend.move_slot(FakeOcado(checkout_type="payment-session-response"), "1629420692934", "mon-1030")
 
@@ -277,3 +281,27 @@ def test_household_members_manage_each_others_accounts_and_nobody_else_does(fact
         assert mine == [owner.id, partner.id]  # own account first
         assert [a.user_id for a in household.accounts(session, friend, "ocado")] == [friend.id]
         assert household.member_ids(session) == [owner.id, partner.id]
+
+
+@pytest.mark.parametrize("response_type", ["checkout-form-response", "payment-session-response"])
+def test_checkout_handoffs_are_continued_and_verified(response_type):
+    fake = FakeOcado(checkout_type=response_type)
+    def finish(result):
+        assert result["type"] == response_type
+        fake._log("complete_payment")
+        fake.saved_quantities = dict(fake.quantities)
+        fake.order = {**fake.order, "slotId": fake.reserved, "dates": MONDAY}
+        return {"type": amend.CHECKOUT_DONE, "orderId": str(ORDER["orderId"])}
+    fake.complete_checkout = finish
+    after = amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 3}, slot_id="mon-1030")
+    assert after["slotId"] == "mon-1030"
+    assert after["items"] == [{"product": "sku", "quantity": 3}]
+    assert fake.calls.count("checkout") == 1 and "cancel" not in fake.calls
+
+
+def test_continued_checkout_cannot_report_success_for_another_order():
+    fake = FakeOcado(checkout_type="checkout-form-response")
+    fake.complete_checkout = lambda result: {"type": amend.CHECKOUT_DONE, "orderId": "different"}
+    with pytest.raises(amend.OrderChangeError, match="different order"):
+        amend.move_slot(fake, str(ORDER["orderId"]), "mon-1030")
+    assert fake.calls[-1] == "cancel"

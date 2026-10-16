@@ -357,8 +357,11 @@ delivery of a recurring order. It checks checkout restrictions and verifies
 saved quantities and delivery dates after confirmation. Unconfirmed failures
 discard the edit; a failure to verify an accepted checkout asks the caller to
 check Ocado before retrying. If Ocado requires payment authentication in a
-browser, the API discards the edit and returns HTTP 409 directing the customer
-to ocado.com.
+browser, the integration continues in Chromium using the existing Ocado session. It follows the
+payment form or SDK session, selects a saved payment option, presses ordinary confirmation controls,
+and validates the provider result. An unavailable security/verification code or password, a provider
+error, or a browser timeout is reported as the actual blocker; a payment handoff alone never means
+manual card confirmation is needed. The saved order is verified before success is reported.
 
 ## Feed for Noodle
 
