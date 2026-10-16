@@ -231,6 +231,13 @@ class OcadoClient:
         return self._json("POST", CHECKOUT_PATH, data=json.dumps(body),
                           headers={"Content-Type": CHECKOUT_CONTENT_TYPE})
 
+    def validate_checkout(self, result_token: str) -> dict[str, Any]:
+        return self._json("POST", "/api/orderpayment/v1/checkout/validate", json={"resultToken": result_token})
+
+    def complete_checkout(self, result: dict[str, Any]) -> dict[str, Any]:
+        from app.ocado.payment import complete
+        return complete(self, result)
+
     def _json(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self.session.request(method, path, **kwargs)
         response.raise_for_status()

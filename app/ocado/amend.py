@@ -12,10 +12,9 @@ in the calls the site itself makes:
 Ocado keeps the original order until changes are confirmed. Failures before
 confirmation cancel the edit session. An ambiguous network failure or a failed
 read after confirmation must be checked on Ocado rather than assumed reverted.
-Unconfirmed failures include
-Ocado asking for the payment to be authenticated (a card check run in a
-browser): that is the customer's to do on ocado.com, never something to get
-round, so it is reported, not attempted.
+Payment forms and SDK sessions are continued in the site's normal browser flow,
+including saved-card selection and confirmation controls. Only unavailable input,
+an unresolved bank action, or an actual technical failure stops continuation.
 """
 from __future__ import annotations
 
@@ -24,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.ocado.client import OcadoClient
+from app.ocado.payment import PaymentFlowError
 
 log = logging.getLogger(__name__)
 
@@ -116,9 +116,14 @@ def change_order(client: OcadoClient, order_id: str, *,
             raise OrderChangeError(f"Ocado cannot check out these changes: {', '.join(restrictions) or 'basket not ready'}")
         result = client.checkout(body)
         if result.get("type") != CHECKOUT_DONE:
-            raise OrderChangeError("Ocado wants the payment confirmed on ocado.com before it'll take the change")
+            result = client.complete_checkout(result)
+        if result.get("type") != CHECKOUT_DONE:
+            raise OrderChangeError(f"Ocado did not complete checkout ({result.get('type') or 'missing response type'})")
         if str(result.get("orderId", order_id)) != str(order_id):
             raise OrderChangeError("Ocado returned a different order while confirming changes; check ocado.com")
+    except PaymentFlowError as exc:
+        _cancel(client, order_id, region)
+        raise OrderChangeError(str(exc)) from exc
     except OrderChangeError:
         _cancel(client, order_id, region)
         raise
