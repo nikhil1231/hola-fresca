@@ -1,9 +1,8 @@
-"""Finish Ocado checkout in its web UI, including the provider's payment flow.
+"""Run Ocado's real checkout page, including its saved-card and provider flow.
 
-A payment form/session is a continuation, not evidence of a bank challenge.
-Open provider forms directly, or replay an SDK-session response into Ocado's UI.
-Continue its available controls and validate the result before verifying the order.
-Only one checkout is initiated for an attempted change.
+The merchant page must initialize checkout and own the provider handoff: opening a
+provider form in a synthetic parent can fail after card tokenization. Continue
+available controls and observe the merchant's validated result. Initiate once.
 """
 from __future__ import annotations
 
@@ -26,13 +25,10 @@ class PaymentFlowError(RuntimeError):
     """A concrete input/action or a technical failure prevented continuation."""
 
 
-def complete(client: Any, result: dict[str, Any]) -> dict[str, Any]:
-    if result.get("type") == DONE:
-        return result
-    if result.get("type") not in ("checkout-form-response", "payment-session-response"):
-        raise PaymentFlowError(f"Ocado returned an unsupported checkout response ({result.get('type') or 'missing type'})")
+def checkout(client: Any, body: dict[str, Any], order_id: str) -> dict[str, Any]:
+    """Start and finish checkout in the real merchant page and its provider iframe."""
     try:
-        return _browser_result(client, result)
+        return _browser_checkout(client, body, str(order_id))
     except PaymentFlowError:
         raise
     except Exception as exc:
@@ -57,7 +53,33 @@ def _cookies(client: Any) -> list[dict[str, Any]]:
     return cookies
 
 
-def _browser_result(client: Any, initial: dict[str, Any]) -> dict[str, Any]:
+def _checkout_request(route: Any, client: Any, body: dict, order_id: str,
+                      submitted: list, failures: list) -> None:
+    if route.request.method != "POST":
+        route.fallback()
+        return
+    if submitted:
+        failures.append("The payment page attempted to start checkout again; check the saved order before retrying")
+        route.abort()
+        return
+    # Verify the active cart immediately before submission: never place a new/different order.
+    summary = client.checkout_summary()
+    if str(summary.get("orderId")) != order_id:
+        failures.append("The active checkout is no longer the requested order; checkout was stopped")
+        route.abort()
+        return
+    native = route.request.post_data_json
+    native["paymentMethod"] = body["paymentMethod"]
+    if body.get("billingAddressId"):
+        native["billingAddressId"] = body["billingAddressId"]
+    if body.get("recurringOrder") or native.get("recurringOrder"):
+        native["recurringOrder"] = {"edit": {"replaceItems": False}}
+    submitted.append(True)
+    # Keep the real site's redirect URL, request headers and browser session.
+    route.fallback(post_data=json.dumps(native))
+
+
+def _browser_checkout(client: Any, body: dict, order_id: str) -> dict[str, Any]:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as playwright:
@@ -67,34 +89,20 @@ def _browser_result(client: Any, initial: dict[str, Any]) -> dict[str, Any]:
             context.add_cookies(_cookies(client))
             page = context.new_page()
             page.set_default_timeout(2000)
-            completed: list[dict[str, Any]] = []
-            failures: list[str] = []
-            replayed = False
-
-            def replay(route):
-                nonlocal replayed
-                if route.request.method != "POST":
-                    route.continue_()
-                elif not replayed:
-                    replayed = True
-                    route.fulfill(status=200, content_type="application/json", body=json.dumps(initial))
-                else:
-                    failures.append("The payment page attempted to start checkout again; check the saved order before retrying")
-                    route.abort()
-
-            def response(resp):
-                _completion_response(resp, completed, failures)
-
-            page.route("https://www.ocado.com/api/orderpayment/v2/checkout", replay)
-            page.on("response", response)
-            context.on("page", lambda popup: popup.on("response", response))
-            if initial.get("type") == "checkout-form-response":
-                _open_form(page, client, initial, completed, failures)
-            else:
-                page.goto("https://www.ocado.com/checkout", wait_until="domcontentloaded", timeout=30000)
-            return _drive(page, completed, failures)
+            return _native_checkout(page, client, body, order_id)
         finally:
             browser.close()
+
+
+def _native_checkout(page: Any, client: Any, body: dict, order_id: str) -> dict[str, Any]:
+    completed: list[dict[str, Any]] = []
+    failures: list[str] = []
+    submitted: list[bool] = []
+    page.route("https://www.ocado.com/api/orderpayment/v2/checkout",
+               lambda route: _checkout_request(route, client, body, order_id, submitted, failures))
+    page.context.on("response", lambda response: _completion_response(response, completed, failures))
+    page.goto("https://www.ocado.com/checkout/summary", wait_until="domcontentloaded", timeout=30000)
+    return _drive(page, completed, failures)
 
 
 def _completion_response(resp: Any, completed: list, failures: list) -> None:
@@ -118,53 +126,6 @@ def _completion_response(resp: Any, completed: list, failures: list) -> None:
         detail = f"; code {code}" if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code) else ""
         source = "The payment provider" if provider else "Ocado"
         failures.append(f"{source} rejected payment completion (HTTP {resp.status}{detail})")
-
-
-def _open_form(page: Any, client: Any, initial: dict, completed: list, failures: list) -> None:
-    url = initial.get("url") or ""
-    parsed = urlsplit(url)
-    if parsed.scheme != "https" or parsed.hostname != "pspweb.ocado.com":
-        raise PaymentFlowError("Ocado returned an unsupported payment form address")
-
-    def message(source, event):
-        if source["frame"] != page.main_frame or not isinstance(event, dict):
-            return
-        kind = event.get("type")
-        if kind == "CHECKOUT_RESULT_TOKEN" and isinstance(event.get("resultToken"), str) and event["resultToken"]:
-            if completed or failures:
-                return
-            try:
-                validated = client.validate_checkout(event["resultToken"])
-            except Exception as exc:
-                failures.append(f"Ocado could not validate the payment result ({type(exc).__name__}); check the saved order")
-                return
-            if validated.get("type") == DONE:
-                completed.append(validated)
-            else:
-                failures.append("Ocado did not confirm the validated payment result; check the saved order")
-        elif kind in ("CHECKOUT_ERROR", "CHECKOUT_CANCELLED"):
-            reason = event.get("reason")
-            codes = re.findall(r"pspweb-[0-9]+|\b[A-Z][A-Z0-9_]{2,64}\b", str(reason or ""))
-            detail = f" ({', '.join(dict.fromkeys(codes[:5]))})" if codes else ""
-            failures.append("The payment provider returned an error" + detail if kind == "CHECKOUT_ERROR"
-                            else "The payment provider cancelled checkout")
-
-    page.expose_binding("ocadoPaymentMessage", message)
-    # Use Ocado's normal parent origin and iframe message protocol, without restarting checkout.
-    parent = "https://www.ocado.com/checkout/3ds/end"
-    page.route(parent, lambda route: route.fulfill(content_type="text/html", body="<html><body></body></html>"))
-    page.goto(parent, wait_until="domcontentloaded", timeout=10000)
-    page.evaluate("""url => {
-        window.addEventListener('message', event => {
-            if (event.origin !== 'https://pspweb.ocado.com') return;
-            let value = event.data;
-            if (typeof value === 'string') { try { value = JSON.parse(value); } catch { return; } }
-            if (value && typeof value === 'object') window.ocadoPaymentMessage(value);
-        });
-        const frame = document.createElement('iframe');
-        frame.src = url; frame.style.width = '100%'; frame.style.height = '800px';
-        document.body.appendChild(frame);
-    }""", url)
 
 
 def _advance(page: Any, clicked: set[tuple]) -> bool:
