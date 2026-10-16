@@ -11,7 +11,6 @@ Every path and body here is taken from traffic captured off the live site (see
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -38,8 +37,6 @@ CHECKOUT_SUMMARY_PATH = "/api/cart/v2/carts/active/checkout-summary"
 DEFAULT_BILLING_ADDRESS_PATH = "/api/address/v1/billing-addresses/default"
 WALLET_ITEMS_PATH = "/api/walletservice/v3/wallet-items"
 ORDER_PAYMENTS_PATH = "/api/orderpayment/v1/order-payments/{order_id}"
-CHECKOUT_PATH = "/api/orderpayment/v2/checkout"
-CHECKOUT_CONTENT_TYPE = "application/vnd.ocado.orderpayment.customer-initiated-active-session-based+json"
 #: The same search the scraper makes, asked with the account's own session so the
 #: prices and stock are for its delivery region.
 SEARCH_PATH = "/api/webproductpagews/v6/product-pages/search"
@@ -226,17 +223,10 @@ class OcadoClient:
     def order_payments(self, order_id: str) -> dict[str, Any]:
         return self._json("GET", ORDER_PAYMENTS_PATH.format(order_id=order_id))
 
-    def checkout(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Place the active cart, which in an edit session confirms the order's changes."""
-        return self._json("POST", CHECKOUT_PATH, data=json.dumps(body),
-                          headers={"Content-Type": CHECKOUT_CONTENT_TYPE})
-
-    def validate_checkout(self, result_token: str) -> dict[str, Any]:
-        return self._json("POST", "/api/orderpayment/v1/checkout/validate", json={"resultToken": result_token})
-
-    def complete_checkout(self, result: dict[str, Any]) -> dict[str, Any]:
-        from app.ocado.payment import complete
-        return complete(self, result)
+    def checkout(self, body: dict[str, Any], *, order_id: str) -> dict[str, Any]:
+        """Confirm changes through the real checkout and payment-provider UI."""
+        from app.ocado.payment import checkout
+        return checkout(self, body, order_id)
 
     def _json(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self.session.request(method, path, **kwargs)

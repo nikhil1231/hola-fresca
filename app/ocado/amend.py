@@ -114,9 +114,7 @@ def change_order(client: OcadoClient, order_id: str, *,
         restrictions = group.get("checkoutRestrictions") or []
         if restrictions or group.get("canCheckout") is False:
             raise OrderChangeError(f"Ocado cannot check out these changes: {', '.join(restrictions) or 'basket not ready'}")
-        result = client.checkout(body)
-        if result.get("type") != CHECKOUT_DONE:
-            result = client.complete_checkout(result)
+        result = client.checkout(body, order_id=str(order_id))
         if result.get("type") != CHECKOUT_DONE:
             raise OrderChangeError(f"Ocado did not complete checkout ({result.get('type') or 'missing response type'})")
         if str(result.get("orderId", order_id)) != str(order_id):

@@ -72,18 +72,18 @@ class FakeOcado:
         self._log("summary")
         return {}
 
-    def checkout(self, body):
+    def checkout(self, body, *, order_id):
+        assert order_id == str(self.order["orderId"])
         self._log("checkout")
         self.checkout_body = body
         if self.checkout_type == "checkout-result-response":
             self.saved_quantities = dict(self.quantities)
             if hasattr(self, "reserved"):
                 self.order = {**self.order, "slotId": self.reserved, "dates": MONDAY}
+        if self.checkout_type != "checkout-result-response":
+            from app.ocado.payment import PaymentFlowError
+            raise PaymentFlowError("The payment form requires a verification code on ocado.com")
         return {"type": self.checkout_type}
-
-    def complete_checkout(self, result):
-        from app.ocado.payment import PaymentFlowError
-        raise PaymentFlowError("The payment form requires a verification code on ocado.com")
 
     def slots(self, ddid=None, region=None, days=7):
         self._log("slots")
@@ -185,7 +185,7 @@ def test_unverified_basket_is_not_reported_as_success():
     fake.get_order = lambda _: {"slotId": ORDER["slotId"], "items": [{"product": "sku", "quantity": 2}]}
     # Keep the pending-order lookup independent of the decorated-order read.
     fake.orders = lambda pending=False: [dict(ORDER)]
-    fake.checkout = lambda body: {"type": "checkout-result-response"}
+    fake.checkout = lambda body, **kwargs: {"type": "checkout-result-response"}
     with pytest.raises(amend.OrderChangeError, match="differs"):
         amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 0})
 
@@ -283,25 +283,9 @@ def test_household_members_manage_each_others_accounts_and_nobody_else_does(fact
         assert household.member_ids(session) == [owner.id, partner.id]
 
 
-@pytest.mark.parametrize("response_type", ["checkout-form-response", "payment-session-response"])
-def test_checkout_handoffs_are_continued_and_verified(response_type):
-    fake = FakeOcado(checkout_type=response_type)
-    def finish(result):
-        assert result["type"] == response_type
-        fake._log("complete_payment")
-        fake.saved_quantities = dict(fake.quantities)
-        fake.order = {**fake.order, "slotId": fake.reserved, "dates": MONDAY}
-        return {"type": amend.CHECKOUT_DONE, "orderId": str(ORDER["orderId"])}
-    fake.complete_checkout = finish
-    after = amend.change_order(fake, str(ORDER["orderId"]), quantities={"sku": 3}, slot_id="mon-1030")
-    assert after["slotId"] == "mon-1030"
-    assert after["items"] == [{"product": "sku", "quantity": 3}]
-    assert fake.calls.count("checkout") == 1 and "cancel" not in fake.calls
-
-
-def test_continued_checkout_cannot_report_success_for_another_order():
-    fake = FakeOcado(checkout_type="checkout-form-response")
-    fake.complete_checkout = lambda result: {"type": amend.CHECKOUT_DONE, "orderId": "different"}
+def test_checkout_cannot_report_success_for_another_order():
+    fake = FakeOcado()
+    fake.checkout = lambda body, **kwargs: {"type": amend.CHECKOUT_DONE, "orderId": "different"}
     with pytest.raises(amend.OrderChangeError, match="different order"):
         amend.move_slot(fake, str(ORDER["orderId"]), "mon-1030")
     assert fake.calls[-1] == "cancel"
