@@ -238,7 +238,7 @@ HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY=anuja
 ```
 
 Keep `HOLAFRESCA_ACCESS_TEAM_DOMAIN` configured for the same Cloudflare team.
-`anuja` is the default connection. The shop's Account page lists the registered
+`anuja` is the default connection. The shop's Settings page lists the registered
 Ocado connections and lets an authorised person choose one for the household.
 The choice is saved in SQLite and survives restarts; everyone sees the same
 selection. Switching is refused while any shared batch is pending, running or
@@ -246,8 +246,23 @@ failed. Clear or finish that batch first. Every write includes the selected
 account and its generation, so an older tab cannot submit changes to a newly
 selected account, even if both targets are named `cart`.
 
-With no matching default connection, sign in once on Account to create it, or
+With no matching default connection, sign in once on Settings to create it, or
 select an existing registered connection from the account picker.
+
+The shop opens directly on the basket, below a compact delivery banner. Delivery
+times expand by day, then morning/afternoon/evening. A booked order's pictures
+and line totals come from `groupedProducts.products`; its `prices.offered` is
+already the complete line price after discounts, including allocated multibuy
+savings. Never multiply it by quantity. “Was” prices compare that line with its
+stated retail price; they are not historical price tracking. Queued quantity
+changes keep pictures but show an unconfirmed price until Ocado applies them.
+
+Offer links read Ocado's promotion groups and list their qualifying products.
+Choosing a complete set adds extra packs to the existing basket in one database
+transaction and resets the usual three-minute timer. Each group must have the
+required quantity; unavailable products, stale account/target selections and
+concurrently changed quantities are rejected before anything is queued. Offer
+eligibility, limits and the final price remain Ocado's decision at checkout.
 
 Build/recreate the production container so its environment is reloaded:
 

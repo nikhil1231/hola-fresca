@@ -111,6 +111,22 @@ class OcadoClient:
                     "includeAdditionalPageInfo": "true", "tag": "web"},
         )
 
+    def promotion(self, promotion_id: str) -> dict[str, Any]:
+        # Ocado's web client's getPromotionDetails route; returns every group,
+        # including the required quantity for each part of a meal deal.
+        from uuid import UUID
+        identifier = str(UUID(promotion_id))
+        return self._json("GET", f"/api/webproductpagews/v4/promotion/{identifier}")
+
+    def products(self, skus: list[str]) -> list[dict[str, Any]]:
+        from app.ocado.availability import PRODUCTS_PATH, _is_product_id
+        wanted = [sku for sku in dict.fromkeys(skus) if _is_product_id(sku)]
+        result = []
+        for start in range(0, len(wanted), 50):
+            payload = self._json("PUT", PRODUCTS_PATH, json=wanted[start:start + 50])
+            result.extend(payload.get("products") or [])
+        return result
+
     def checkout_walk(self) -> dict[str, Any]:
         return self._json("GET", CHECKOUT_WALK_PATH)
 

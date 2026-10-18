@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 from typing import Annotated, Iterator, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -191,6 +192,7 @@ def state(session: Session = Depends(get_session), factory: sessionmaker[Session
         client, store = shared.make_client(account.key), QueueStore(factory)
         _, order, queue = _selection(client, store)
         basket = shared.project(shared.basket(client, session, order, retailer=retailer), queue["actions"])
+        basket = shared.decorate(basket, client, session, retailer=retailer)
         scope = _scope(session)
         return {**scope, "order": asdict(orders.summarise(order)) if order else None,
                 "basket": asdict(basket), "queue": {**queue, **scope}}
@@ -212,6 +214,13 @@ def slots(session: Session = Depends(get_session), factory: sessionmaker[Session
         client = shared.make_client(shared.require_account(session).key)
         _, order, _ = _selection(client, QueueStore(factory))
         return {**_scope(session), "items": shared.slots(client, order)}
+
+
+@router.get("/offers/{offer_id}")
+def offer(offer_id: UUID, session: Session = Depends(get_session)):
+    with _operation(session):
+        client = shared.make_client(shared.require_account(session).key)
+        return {**_scope(session), **shared.promotion(client, str(offer_id))}
 
 
 class _Action(SelectionIn):
@@ -239,6 +248,63 @@ class CheckoutAction(_Action):
 
 
 Action = Annotated[QuantityAction | SlotAction | CheckoutAction, Body(discriminator="kind")]
+
+
+class OfferItemIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sku: str = Field(min_length=1, max_length=128)
+    quantity: int = Field(ge=1, le=50, strict=True)
+    existing_quantity: int = Field(ge=0, le=50, strict=True)
+
+
+class OfferSelectionIn(_Action):
+    offer_id: UUID
+    items: list[OfferItemIn] = Field(min_length=1, max_length=50)
+
+
+@router.post("/offer-items", dependencies=[Depends(require_person)])
+def add_offer_items(body: OfferSelectionIn, user: User = Depends(get_current_user),
+                    session: Session = Depends(get_session),
+                    factory: sessionmaker[Session] = Depends(get_session_factory),
+                    retailer: str = Depends(get_active_retailer)):
+    with _operation(session, blocking=False):
+        _check_selection(session, body)
+        client = shared.make_client(shared.require_account(session).key)
+        store = QueueStore(factory)
+        current_target, order, queue = _selection(client, store)
+        if queue["status"] in {"running", "failed"}:
+            raise shared.SharedError("Wait for or clear the current batch before adding offer items")
+        promotion = shared.promotion(client, str(body.offer_id))
+        selected = {item.sku: item for item in body.items}
+        if len(selected) != len(body.items):
+            raise shared.SharedError("Choose each product once, using its quantity buttons")
+        membership = {}
+        for index, group in enumerate(promotion["groups"]):
+            quantity = group["quantity"]
+            if not isinstance(quantity, int) or not 1 <= quantity <= 50:
+                raise shared.SharedError("This offer cannot be added as a set; add its products individually")
+            for product in group["products"]:
+                sku = product["sku"]
+                if sku in membership:
+                    raise shared.SharedError("This offer has overlapping groups; add its products individually")
+                membership[sku] = (index, product)
+            if sum(item.quantity for sku, item in selected.items()
+                   if membership.get(sku, (None,))[0] == index) != quantity:
+                raise shared.SharedError("Choose the required number of items from each offer group")
+        if any(sku not in membership or membership[sku][1]["in_stock"] is False for sku in selected):
+            raise shared.SharedError("An item is no longer available in this offer; reopen the offer")
+        basket = shared.project(shared.basket(client, session, order, retailer=retailer), queue["actions"])
+        current = {line.sku: line.quantity for line in basket.lines}
+        additions = []
+        for sku, item in selected.items():
+            if current.get(sku, 0) != item.existing_quantity:
+                raise shared.SharedError("Someone changed these basket quantities; review the offer again")
+            quantity = item.existing_quantity + item.quantity
+            if quantity > 50:
+                raise shared.SharedError("A basket item cannot exceed 50 packs")
+            additions.append({"kind": "quantity", "sku": sku,
+                              "name": membership[sku][1]["name"], "quantity": quantity})
+        return {**store.enqueue_many(body.target_id, current_target, additions, user.id), **_scope(session)}
 
 
 @router.post("/actions", dependencies=[Depends(require_person)])

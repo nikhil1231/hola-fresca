@@ -102,6 +102,11 @@ class QueueStore:
 
     def enqueue(self, target_id: str, current_target: str, action: dict, user_id: int,
                 *, now: datetime | None = None) -> dict:
+        return self.enqueue_many(target_id, current_target, [action], user_id, now=now)
+
+    def enqueue_many(self, target_id: str, current_target: str, additions: list[dict], user_id: int,
+                     *, now: datetime | None = None) -> dict:
+        """Commit a reviewed offer selection together, with one shared timer."""
         now = now or utcnow()
         with self.factory() as db:
             account = shared.require_account(db)
@@ -116,11 +121,12 @@ class QueueStore:
             actions = json.loads(row.actions_json) if row is not None and row.status == "pending" else []
             # Absolute quantities and slot/checkout singletons: the most recent
             # person owns the retained action and extends the one global timer.
-            actions = [old for old in actions if not (
-                old["kind"] == action["kind"] and
-                (action["kind"] != "quantity" or old["sku"] == action["sku"])
-            )]
-            actions.append({**action, "id": uuid.uuid4().hex, "user_id": user_id})
+            for action in additions:
+                actions = [old for old in actions if not (
+                    old["kind"] == action["kind"] and
+                    (action["kind"] != "quantity" or old["sku"] == action["sku"])
+                )]
+                actions.append({**action, "id": uuid.uuid4().hex, "user_id": user_id})
             values = dict(target_id=target_id, status="pending", actions_json=json.dumps(actions),
                           due_at=now + DEBOUNCE, updated_at=now, error=None)
             if row is None:

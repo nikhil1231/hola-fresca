@@ -208,13 +208,17 @@ def basket(client: OcadoClient, session: Session, order: dict | None, *, retaile
     if not raw or str(raw.get("orderId", order["orderId"])) != str(order["orderId"]):
         raise SharedError("Ocado could not read this delivery's basket", 502)
     rows = raw.get("items") or []
+    decorated = {line.sku: line for line in shop.order_lines(raw)}
     skus = [str(row["product"]) for row in rows if row.get("product") is not None]
-    names = _names(client, session, skus, retailer)
+    names = _names(client, session, [sku for sku in skus if sku not in decorated], retailer)
     lines = []
     for row in rows:
         sku = str(row.get("product") or "")
         quantity = int(row.get("quantity") or 0)
         if sku and quantity > 0:
+            if sku in decorated and decorated[sku].quantity == quantity:
+                lines.append(decorated[sku])
+                continue
             price = row.get("totalPrice") or (row.get("totalPrices") or {}).get("finalPrice")
             lines.append(shop.Line(sku, names.get(sku) or row.get("name") or sku, quantity, _amount(price)))
     total = _amount((raw.get("orderTotals") or order.get("orderTotals") or {}).get("finalPrice"))
@@ -234,8 +238,49 @@ def project(basket: shop.Basket, actions: list[dict]) -> shop.Basket:
         # A changed line has no known live cost. In particular a new product is
         # never labelled free. Basket totals remain the upstream live estimate.
         cost = old.cost if old is not None and old.quantity == quantity else None
-        lines[sku] = shop.Line(sku, action.get("name") or (old.name if old else sku), quantity, cost)
+        lines[sku] = replace(old, quantity=quantity, cost=cost,
+                             original_cost=old.original_cost if old.quantity == quantity else None) if old else shop.Line(sku, action.get("name") or sku, quantity, cost)
     return replace(basket, lines=tuple(lines.values()))
+
+
+def decorate(basket: shop.Basket, client: OcadoClient, session: Session, *, retailer: str) -> shop.Basket:
+    """Pictures and offers for active-cart and newly queued lines; prices stay live totals."""
+    missing = [line.sku for line in basket.lines if not line.image_url]
+    if not missing:
+        return basket
+    known = {p.sku: p for p in session.scalars(select(Product).where(
+        Product.retailer == retailer, Product.sku.in_(missing)
+    ))}
+    found = {}
+    try:
+        found = {p.sku: p for p in shop.search_results({"products": client.products(missing)}, len(missing))}
+    except Exception as exc:
+        log.info("Shared basket decoration unavailable: %s", exc)
+    lines = []
+    for line in basket.lines:
+        product, cached = found.get(line.sku), known.get(line.sku)
+        if line.image_url:
+            lines.append(line)
+        elif product:
+            lines.append(replace(line, name=product.name, image_url=product.image_url,
+                                 pack=product.pack, offers=product.offers))
+        elif cached:
+            lines.append(replace(line, image_url=cached.image_url, pack=cached.pack_size_raw))
+        else:
+            lines.append(line)
+    return replace(basket, lines=tuple(lines))
+
+
+def promotion(client: OcadoClient, identifier: str) -> dict:
+    raw = client.promotion(identifier)
+    if str(raw.get("promoId")) != identifier:
+        raise SharedError("This offer is no longer available", 404)
+    groups = []
+    for group in raw.get("promotionGroups") or []:
+        products = shop.search_results({"products": group.get("products") or []}, 2000)
+        groups.append({"quantity": group.get("quantity"), "products": [asdict(p) for p in products]})
+    return {"id": identifier, "label": raw.get("description") or "Ocado offer",
+            "description": raw.get("longDescription"), "groups": groups}
 
 
 def slots(client: OcadoClient, order: dict | None) -> list[dict]:

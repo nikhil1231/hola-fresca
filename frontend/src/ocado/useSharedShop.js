@@ -207,9 +207,14 @@ export function useSharedShop() {
     if (ref.writing || ref.refreshing || !isReady(ref.auth)) return Promise.resolve(false)
     return mutate('/actions', { ...scope(auth), ...body, target_id: body.target_id ?? ref.state?.queue?.target_id })
   }
+  const addOffer = (body) => {
+    const ref = refs.current
+    if (ref.writing || ref.refreshing || !isReady(ref.auth)) return Promise.resolve(false)
+    return mutate('/offer-items', { ...scope(auth), ...body })
+  }
   const cancel = (selection = {}) => mutate('/queue/cancel', { ...scope(auth), ...selection, target_id: selection.target_id ?? refs.current.queue?.target_id })
   const authenticate = (path, body = {}) => mutate(path, { ...scope(auth), ...body }, true)
   const locked = busy || syncing || stale || !state || !queue?.target_id || queue.status === 'running' || queue.status === 'failed' || accessExpired
   const selectAccount = (id) => mutate('/account', { ...scope(auth), selected_account_id: Number(id) }, true)
-  return { selection: scope(auth), selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, cancel, authenticate, reportError, clearError: () => setError(null) }
+  return { selection: scope(auth), selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, addOffer, cancel, authenticate, reportError, clearError: () => setError(null) }
 }

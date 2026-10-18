@@ -17,11 +17,22 @@ from app.scraper.products.ocado import extract_product_objects, normalize_produc
 
 
 @dataclass(frozen=True, slots=True)
+class Offer:
+    id: str
+    label: str
+    required_quantity: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Line:
     sku: str
     name: str | None
     quantity: int
     cost: float | None
+    image_url: str | None = None
+    pack: str | None = None
+    original_cost: float | None = None
+    offers: tuple[Offer, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +55,8 @@ class Found:
     unit_basis: str | None
     in_stock: bool | None
     image_url: str | None = None
+    base_price: float | None = None
+    offers: tuple[Offer, ...] = ()
 
 
 def basket(payload: Any, names: Callable[[list[str]], dict[str, str]]) -> Basket:
@@ -75,10 +88,41 @@ def search_results(payload: Any, limit: int) -> list[Found]:
         found.append(Found(sku=product.sku, name=product.name, price=product.price,
                            pack=product.pack_size_raw, unit_price=product.unit_price,
                            unit_basis=product.unit_price_basis, in_stock=product.in_stock,
-                           image_url=product.image_url))
+                           image_url=product.image_url, base_price=product.base_price,
+                           offers=offers(raw)))
         if len(found) >= limit:
             break
     return found
+
+
+def offers(raw: dict) -> tuple[Offer, ...]:
+    result = []
+    for promo in raw.get("promotions") or []:
+        identifier = promo.get("promoId") or promo.get("promotionId")
+        label = promo.get("description") or promo.get("name")
+        if not identifier or not label:
+            continue
+        quantity = promo.get("requiredProductQuantity")
+        result.append(Offer(str(identifier), str(label), quantity if isinstance(quantity, int) and 1 < quantity <= 50 else None))
+    return tuple(result)
+
+
+def order_lines(raw: dict) -> tuple[Line, ...]:
+    """Decorated prices.offered is the entire line, including multibuy savings."""
+    products = (raw.get("groupedProducts") or {}).get("products") or []
+    result = []
+    for row in products:
+        sku, quantity = row.get("productId"), row.get("quantity")
+        if not sku or not isinstance(quantity, int) or quantity <= 0:
+            continue
+        prices = row.get("prices") or {}
+        cost, original = _amount(prices.get("offered")), _amount(prices.get("retail"))
+        result.append(Line(str(sku), row.get("name"), quantity, cost,
+                           image_url=(row.get("image") or {}).get("src"),
+                           pack=(row.get("packInfo") or {}).get("packSizeDescription"),
+                           original_cost=original if original is not None and cost is not None and original > cost else None,
+                           offers=offers(row)))
+    return tuple(result)
 
 
 def _amount(value: Any) -> float | None:

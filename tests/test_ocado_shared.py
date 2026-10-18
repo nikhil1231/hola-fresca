@@ -713,3 +713,113 @@ def test_shared_settings_migration_preserves_existing_queue(setup_shared):
         db.execute(text("UPDATE alembic_version SET version_num='0018_ocado_shared_queue'"))
     init_db(engine)
     assert store.snapshot() == queued
+
+
+OFFER_ID = "f1dec8f0-2754-412a-ab46-d4f793e94ee1"
+
+
+def _offer_payload():
+    return {"promoId": OFFER_ID, "description": "Buy any 3 for £12", "longDescription": "Subject to availability.",
+            "promotionGroups": [{"quantity": 3, "products": [
+                {"productId": sku, "name": name, "price": {"amount": "6.95"}, "available": True,
+                 "image": {"src": "https://www.ocado.com/images-v3/fish.jpg"},
+                 "promotions": [{"promoId": OFFER_ID, "description": "Buy any 3 for £12", "requiredProductQuantity": 3}]}
+                for sku, name in [("bream", "Sea bream"), ("salmon", "Salmon")]
+            ]}]}
+
+
+def _offer_selection():
+    return {"target_id": "cart", "offer_id": OFFER_ID, "items": [
+        {"sku": "bream", "quantity": 2, "existing_quantity": 0},
+        {"sku": "salmon", "quantity": 1, "existing_quantity": 0}]}
+
+
+def test_decorated_order_keeps_photos_and_allocated_multibuy_prices(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    order = booked()
+    order["items"] = [{"product": "bream", "quantity": 2}, {"product": "salmon", "quantity": 1}]
+    order["groupedProducts"] = {"products": [
+        {"productId": sku, "name": name, "quantity": quantity,
+         "prices": {"retail": {"amount": retail}, "offered": {"amount": offered}},
+         "image": {"src": "https://www.ocado.com/images-v3/fish.jpg"},
+         "packInfo": {"packSizeDescription": "220g"},
+         "promotions": [{"promotionId": OFFER_ID, "name": "Buy any 3 for £12"}]}
+        for sku, name, quantity, retail, offered in [
+            ("bream", "Sea bream", 2, "13.90", "8.08"), ("salmon", "Salmon", 1, "6.75", "3.92")]
+    ]}
+    fake.coming = [order]
+    state = api.get("/api/ocado-shared/state").json()
+    lines = state["basket"]["lines"]
+    assert sum(line["cost"] for line in lines) == 12.0
+    assert lines[0]["cost"] == 8.08 and lines[0]["original_cost"] == 13.9
+    assert lines[0]["pack"] == "220g" and lines[0]["image_url"].endswith("fish.jpg")
+    assert lines[0]["offers"][0]["id"] == OFFER_ID
+    assert "start_edit" not in fake.calls
+    _post(api, "/api/ocado-shared/actions", json={"target_id": "order", **_quantity("bream", 3)})
+    projected = api.get("/api/ocado-shared/state").json()["basket"]["lines"][0]
+    assert projected["quantity"] == 3 and projected["cost"] is None and projected["original_cost"] is None
+    assert projected["image_url"] == lines[0]["image_url"] and projected["offers"] == lines[0]["offers"]
+
+
+def test_offer_browsing_and_atomic_selection_share_existing_queue(shared_api):
+    api, fake, _, current, people = shared_api
+    _login(api)
+    fake.promotion = lambda identifier: _offer_payload()
+    offer = api.get(f"/api/ocado-shared/offers/{OFFER_ID}").json()
+    assert offer["groups"][0]["quantity"] == 3
+    assert offer["groups"][0]["products"][0]["offers"][0]["required_quantity"] == 3
+    _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity("milk", 4)})
+    current[0] = people[1]
+    response = _post(api, "/api/ocado-shared/offer-items", json=_offer_selection())
+    assert response.status_code == 200, response.text
+    queue = response.json()
+    assert {a["sku"]: a["quantity"] for a in queue["actions"]} == {"milk": 4, "bream": 2, "salmon": 1}
+    assert {a["user_id"] for a in queue["actions"] if a["sku"] != "milk"} == {people[1]}
+    assert api.get("/api/ocado-shared/queue").json() == queue
+    assert not any(call in fake.calls for call in ("quantities", "checkout", "start_edit"))
+
+
+@pytest.mark.parametrize("case", ["incomplete", "unknown", "out-of-stock", "duplicate", "stale-quantity", "stale-target", "stale-account", "grouped", "overlap"])
+def test_invalid_offer_selection_never_partially_queues(shared_api, case):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    payload, body = _offer_payload(), _offer_selection()
+    if case == "incomplete": body["items"][0]["quantity"] = 1
+    if case == "unknown": body["items"][1]["sku"] = "other"
+    if case == "out-of-stock": payload["promotionGroups"][0]["products"][0]["available"] = False
+    if case == "duplicate": body["items"][1]["sku"] = "bream"
+    if case == "stale-quantity": body["items"][1]["existing_quantity"] = 1
+    if case == "stale-target": body["target_id"] = "old"
+    if case == "stale-account": body["account_version"] = 99
+    if case == "grouped": payload["promotionGroups"].append({"quantity": 1, "products": [{"productId": "side", "name": "Side dish", "available": True}]})
+    if case == "overlap": payload["promotionGroups"].append(copy.deepcopy(payload["promotionGroups"][0]))
+    fake.promotion = lambda identifier: payload
+    before = api.get("/api/ocado-shared/state").json()["queue"]
+    response = _post(api, "/api/ocado-shared/offer-items", json=body)
+    assert response.status_code == 409, response.text
+    assert api.get("/api/ocado-shared/queue").json() == before
+
+
+def test_multi_group_offer_requires_each_group(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    payload = _offer_payload()
+    payload["promotionGroups"][0]["quantity"] = 2
+    payload["promotionGroups"].append({"quantity": 1, "products": [{"productId": "side", "name": "Side dish", "available": True}]})
+    fake.promotion = lambda identifier: payload
+    body = _offer_selection()
+    body["items"] = [{"sku": "bream", "quantity": 2, "existing_quantity": 0}, {"sku": "side", "quantity": 1, "existing_quantity": 0}]
+    assert _post(api, "/api/ocado-shared/offer-items", json=body).status_code == 200
+
+
+def test_active_cart_and_new_items_get_product_photos(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    fake.products = lambda skus: [{"productId": sku, "name": sku.title(), "available": True,
+                                  "image": {"src": f"https://www.ocado.com/{sku}.jpg"}}
+                                 for sku in skus]
+    _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity("bread", 1)})
+    lines = api.get("/api/ocado-shared/state").json()["basket"]["lines"]
+    assert all(line["image_url"] for line in lines)
+    assert next(line for line in lines if line["sku"] == "bread")["cost"] is None
