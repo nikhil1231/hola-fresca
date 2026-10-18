@@ -62,7 +62,7 @@ class QueueStore:
     def _row(db: Session) -> OcadoSharedQueue | None:
         return db.scalar(select(OcadoSharedQueue).join(
             RetailerAccount, OcadoSharedQueue.account_id == RetailerAccount.id
-        ).where(RetailerAccount.key == shared.account_key(), RetailerAccount.retailer == "ocado"))
+        ).where(RetailerAccount.key == shared.account_key(db), RetailerAccount.retailer == "ocado"))
 
     @staticmethod
     def _cas(db: Session, row: OcadoSharedQueue, **values) -> None:
@@ -200,7 +200,7 @@ class Worker:
 
     def step(self, *, now: datetime | None = None) -> bool:
         try:
-            with shared.account_lock(blocking=False):
+            with shared.account_lock(blocking=False), self.store.factory() as session, shared.using_account(session):
                 if self.store.recover_orphaned(now=now):
                     return True
                 batch = self.store.claim(now=now)

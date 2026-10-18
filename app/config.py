@@ -51,7 +51,7 @@ OCADO_APP_HOSTNAME = os.environ.get(
 ).strip().lower()
 OCADO_ACCESS_AUD = os.environ.get("HOLAFRESCA_OCADO_ACCESS_AUD")
 OCADO_SHARED_ACCOUNT_KEY = os.environ.get(
-    "HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY", "shared"
+    "HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY", "anuja"
 ).strip()
 
 # The address that owns the existing data. The bootstrap user predates having an

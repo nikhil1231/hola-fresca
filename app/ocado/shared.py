@@ -11,6 +11,7 @@ import fcntl
 import logging
 import hashlib
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Iterator
@@ -20,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import config
-from app.db.models import Product, RetailerAccount, User
+from app.db.models import Product, RetailerAccount, User, OcadoSharedSettings
 from app.api.cart import _push_lock
 from app.ocado import amend, shop
 from app.ocado.client import OcadoClient
@@ -36,17 +37,53 @@ class SharedError(RuntimeError):
         self.status_code = status_code
 
 
-def account_key() -> str:
+_selection: ContextVar[tuple[str, int] | None] = ContextVar("ocado_shared_selection", default=None)
+
+
+def account_key(session: Session | None = None) -> str:
     # Never infer an account from a caller, the legacy default, or row order.
+    selected = _selection.get()
+    if selected is not None:
+        return selected[0]
+    if session is not None:
+        settings = session.get(OcadoSharedSettings, 1)
+        if settings is not None:
+            account = session.get(RetailerAccount, settings.account_id)
+            if account is None or account.retailer != "ocado":
+                raise SharedError("The selected Ocado account is unavailable", 503)
+            return account.key
     key = config.OCADO_SHARED_ACCOUNT_KEY
     if not key or key != key.strip():
         raise SharedError("The shared Ocado account key is not configured correctly", 503)
     return key
 
 
+def selection_version(session: Session) -> int:
+    selected = _selection.get()
+    if selected is not None:
+        return selected[1]
+    settings = session.get(OcadoSharedSettings, 1)
+    return settings.version if settings is not None else 0
+
+
+@contextmanager
+def using_account(session: Session) -> Iterator[None]:
+    # Keep this ORM row alive while resolving the key/version pair. The identity
+    # map uses weak references; separate uncached reads could span a selection.
+    settings = session.get(OcadoSharedSettings, 1)
+    current = _selection.get()
+    version = current[1] if current is not None else (settings.version if settings else 0)
+    token = _selection.set((account_key(session), version))
+    try:
+        yield
+    finally:
+        _selection.reset(token)
+
+
 @contextmanager
 def account_lock(*, blocking: bool = True) -> Iterator[None]:
-    digest = hashlib.sha256(account_key().encode()).hexdigest()
+    # Switching accounts and executing any batch share one cross-process lock.
+    digest = hashlib.sha256(b"shared-shop").hexdigest()
     directory = config.DATA_DIR / "ocado" / "shared-locks"
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / f"{digest}.lock").open("a") as handle:
@@ -70,7 +107,7 @@ def account_lock(*, blocking: bool = True) -> Iterator[None]:
 
 def find_account(session: Session) -> RetailerAccount | None:
     return session.scalar(select(RetailerAccount).where(
-        RetailerAccount.key == account_key(), RetailerAccount.retailer == "ocado"
+        RetailerAccount.key == account_key(session), RetailerAccount.retailer == "ocado"
     ))
 
 
@@ -79,9 +116,9 @@ def connect_account(session: Session, email: str) -> RetailerAccount:
     account = find_account(session)
     if account is not None:
         return account
-    digest = hashlib.sha256(account_key().encode()).hexdigest()
+    digest = hashlib.sha256(account_key(session).encode()).hexdigest()
     owner = User(email=f"ocado-shared-{digest}@internal.invalid", name="Shared Ocado account", is_admin=0)
-    account = RetailerAccount(user_id=0, retailer="ocado", key=account_key(), email=email, status="never")
+    account = RetailerAccount(user_id=0, retailer="ocado", key=account_key(session), email=email, status="never")
     try:
         session.add(owner)
         session.flush()

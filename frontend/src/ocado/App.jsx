@@ -81,6 +81,12 @@ function Basket({ lines, basket, order, queue, locked, action, onSearch, onCheck
   </>
 }
 
+function ProductImage({ src }) {
+  const [failed, setFailed] = useState(null)
+  if (!src || failed === src) return <span className="product-placeholder"><IconShoppingBag size={26} stroke={1.3} /></span>
+  return <img className="product-image" src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(src)} />
+}
+
 function Search({ lines, locked, action, reportError }) {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState(null)
@@ -117,7 +123,7 @@ function Search({ lines, locked, action, reportError }) {
     {error && <div className="inline-error" role="alert">{error}</div>}
     {!query.trim() && <Empty icon={IconSearch} title="What’s on your list?">Search the Ocado shelves, then use + to add to the shared basket.</Empty>}
     {result && !result.products?.length && <Empty icon={IconSearch} title="Nothing on this shelf">Try another name or a simpler search.</Empty>}
-    {result?.products?.length > 0 && <><p className="results-label" aria-live="polite">{result.products.length} results for “{result.query}”</p><div className="search-grid">{result.products.map((product) => <article className="search-product" key={product.sku}><div className="product-topline"><span className="product-placeholder"><IconShoppingBag size={26} stroke={1.3} /></span>{product.in_stock === false && <span className="stock-badge">Out of stock</span>}</div><h3>{product.name || product.sku}</h3><p className="pack">{product.pack || 'Pack information unavailable'}</p><div className="product-bottom"><div><strong>{money(product.price)}</strong>{product.unit_price != null && <small>{money(product.unit_price)}{product.unit_basis ? ` / ${product.unit_basis}` : ''}</small>}</div><Quantity name={product.name || product.sku} quantity={quantities.get(String(product.sku)) || 0} disabled={locked} unavailable={product.in_stock === false} onChange={(quantity) => action({ kind: 'quantity', sku: product.sku, name: product.name, quantity })} /></div></article>)}</div></>}
+    {result?.products?.length > 0 && <><p className="results-label" aria-live="polite">{result.products.length} results for “{result.query}”</p><div className="search-grid">{result.products.map((product) => <article className="search-product" key={product.sku}><div className="product-topline"><ProductImage src={product.image_url} />{product.in_stock === false && <span className="stock-badge">Out of stock</span>}</div><h3>{product.name || product.sku}</h3><p className="pack">{product.pack || 'Pack information unavailable'}</p><div className="product-bottom"><div><strong>{money(product.price)}</strong>{product.unit_price != null && <small>{money(product.unit_price)}{product.unit_basis ? ` / ${product.unit_basis}` : ''}</small>}</div><Quantity name={product.name || product.sku} quantity={quantities.get(String(product.sku)) || 0} disabled={locked} unavailable={product.in_stock === false} onChange={(quantity) => action({ kind: 'quantity', sku: product.sku, name: product.name, quantity })} /></div></article>)}</div></>}
   </>
 }
 
@@ -160,15 +166,26 @@ function Slots({ queue, order, locked, action, reportError }) {
   </>
 }
 
-function Account({ auth, busy, authenticate, accessExpired }) {
+function Account({ auth, busy, authenticate, accessExpired, selectAccount, queueBlocked }) {
   const [email, setEmail] = useState(auth?.email || '')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [confirmLogout, setConfirmLogout] = useState(false)
-  useEffect(() => { if (auth?.email) setEmail(auth.email) }, [auth?.email])
+  const [accountId, setAccountId] = useState(auth?.account_id ?? '')
+  useEffect(() => { setAccountId(auth?.account_id ?? ''); setConfirmLogout(false) }, [auth?.account_id, auth?.account_version])
+  useEffect(() => { setEmail(auth?.email || ''); setPassword(''); setCode('') }, [auth?.email, auth?.account_id])
   const otp = auth?.status === 'awaiting_otp' || auth?.status === 'otp_required'
   return <>
     <div className="section-heading"><div><span className="eyebrow">One account, together</span><h2>Shared account</h2></div></div>
+    {auth?.accounts?.length > 0 && <form className="account-form account-choice" onSubmit={async (event) => { event.preventDefault(); await selectAccount(accountId) }}>
+      <label>Ocado account for everyone<select value={accountId} onChange={(event) => setAccountId(event.target.value)} disabled={busy || accessExpired || queueBlocked}>
+        {!auth.account_id && <option value="">Choose an account</option>}
+        {auth.accounts.map((account) => <option key={account.id} value={account.id}>{account.label}{account.email ? ` · ${account.email}` : ''}</option>)}
+      </select></label>
+      <p>Everyone uses this selection for the basket, delivery and shared changes.</p>
+      {queueBlocked && <p role="status">Finish or clear the queued changes before switching accounts.</p>}
+      <button type="submit" className="button button-primary" disabled={busy || accessExpired || queueBlocked || !accountId || Number(accountId) === auth.account_id}>{busy ? 'Changing account…' : 'Use this account for everyone'}</button>
+    </form>}
     <div className="account-status"><span className={`status-dot ${isReady(auth) ? 'connected' : ''}`} /><div><strong>{isReady(auth) ? 'Ocado is connected' : otp ? 'One-time code needed' : 'Connect to Ocado'}</strong><p>{auth?.email || 'The household’s shared Ocado account'}</p></div><span className="status-pill">{auth?.status?.replaceAll('_', ' ') || 'Checking'}</span></div>
     <p className="section-copy">Everyone authorised for this app uses the same Ocado login, delivery, saved payment method and change queue. Signing out disconnects it for everyone.</p>
     {auth?.stage && auth.stage !== 'idle' && <p className="stage" role="status">Authentication: {auth.stage.replaceAll('_', ' ')}</p>}
@@ -192,6 +209,7 @@ export default function App() {
   const [checkout, setCheckout] = useState(false)
   const [cancelQueue, setCancelQueue] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
+  useEffect(() => { setCheckout(false); setCancelQueue(false) }, [shop.auth?.account_id, shop.auth?.account_version])
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     const update = () => setOnline(navigator.onLine)
@@ -217,7 +235,7 @@ export default function App() {
   const order = shop.state?.order
   const totalItems = lines.reduce((sum, line) => sum + line.quantity, 0)
   const navigate = (next) => { setTab(next); document.getElementById('shop-content')?.focus({ preventScroll: true }) }
-  const basketProps = { lines, basket, order, queue: shop.queue, locked, action: shop.action, onSearch: () => navigate('search'), onCheckout: () => setCheckout({ target_id: shop.state.queue.target_id }) }
+  const basketProps = { lines, basket, order, queue: shop.queue, locked, action: shop.action, onSearch: () => navigate('search'), onCheckout: () => setCheckout({ ...shop.selection, target_id: shop.state.queue.target_id }) }
   return <div className="ocado-app">
     <a className="skip-link" href="#shop-content">Skip to shop</a>
     <header className="app-header"><div className="header-inner"><a className="brand" href="#" onClick={(event) => { event.preventDefault(); navigate('delivery') }} aria-label="Shared shop delivery"><span className="brand-mark"><IconLeaf size={24} stroke={1.6} /></span><span>ocado<span className="brand-subtitle">the shared shop</span></span></a><span className="shared-label"><span className="status-dot connected" />Shared account</span></div></header>
@@ -225,15 +243,15 @@ export default function App() {
     <div className="workspace">
       {!online && <div className="notice notice-error" role="alert"><strong>You’re offline.</strong> Reconnect before making changes. Nothing is automatically retried.</div>}
       {shop.error && <div className="notice notice-error" role="alert"><div><strong>{shop.accessExpired ? 'Sign in again to continue' : 'We couldn’t complete that request'}</strong><p>{shop.error}</p></div>{shop.accessExpired ? <a className="button button-outline button-small" href={window.location.pathname + window.location.search}>Sign in again</a> : <button type="button" className="button button-outline button-small" disabled={shop.busy || shop.syncing} onClick={() => { shop.clearError(); void shop.refresh() }}>Refresh shop</button>}</div>}
-      <QueueBanner queue={shop.queue} now={now} busy={shop.busy || !online || shop.accessExpired} cancel={() => setCancelQueue({ target_id: shop.queue.target_id })} />
+      <QueueBanner queue={shop.queue} now={now} busy={shop.busy || !online || shop.accessExpired} cancel={() => setCancelQueue({ ...shop.selection, target_id: shop.queue.target_id })} />
       <main id="shop-content" className="content-panel" tabIndex={-1} aria-busy={shop.loading || shop.syncing}>
         {shop.loading && !shop.auth ? <div className="loading-block" role="status"><span className="spinner" /><h2>Opening the shared shop</h2><p>Finding your next delivery and everyone’s latest changes.</p></div> : <>
           {ready && <div className="sync-line"><span className={`status-dot ${shop.stale ? '' : 'connected'}`} /><span>{shop.busy ? 'Saving your shared change…' : shop.syncing ? 'Refreshing the shared basket…' : shop.stale ? 'Basket needs a refresh before editing' : 'Shared with everyone · updates every 3 seconds'}</span><button type="button" className="text-button" onClick={shop.refresh} disabled={shop.busy || shop.syncing || !online}>Refresh</button></div>}
-          {(!ready || tab === 'account') ? <Account auth={shop.auth} busy={shop.busy} authenticate={shop.authenticate} accessExpired={shop.accessExpired} /> : !shop.state ? <Empty icon={IconTruckDelivery} title="Your shop isn’t available yet">{shop.syncing ? 'Loading your booked delivery and basket…' : 'Refresh the shop to try again. No changes have been sent.'}</Empty> : <>
+          {(!ready || tab === 'account') ? <Account key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selectAccount={shop.selectAccount} queueBlocked={['pending', 'running', 'failed'].includes(shop.queue?.status)} auth={shop.auth} busy={shop.busy} authenticate={shop.authenticate} accessExpired={shop.accessExpired} /> : !shop.state ? <Empty icon={IconTruckDelivery} title="Your shop isn’t available yet">{shop.syncing ? 'Loading your booked delivery and basket…' : 'Refresh the shop to try again. No changes have been sent.'}</Empty> : <>
             {tab === 'delivery' && <><div className="section-heading"><div><span className="eyebrow">Welcome to your shared shop</span><h2>{order ? 'All set for your next delivery' : 'Let’s fill the basket'}</h2></div><span className="heading-icon"><IconBasket size={26} stroke={1.4} /></span></div><p className="section-copy">{order ? 'Top up the essentials, find a better time, or check what’s already coming.' : 'Search for groceries, choose a slot and explicitly confirm checkout when everyone is ready.'} Every change joins one shared queue.</p><div className="quick-actions"><button type="button" onClick={() => navigate('search')}><IconSearch size={23} /><span>Find groceries<small>Fresh ideas & everyday favourites</small></span><IconArrowRight size={20} /></button><button type="button" onClick={() => navigate('slots')}><IconCalendarWeek size={23} /><span>Delivery times<small>{order ? 'Find a better slot' : 'Choose your first slot'}</small></span><IconArrowRight size={20} /></button></div><div className="delivery-basket"><Basket {...basketProps} /></div></>}
             {tab === 'basket' && <Basket {...basketProps} />}
-            {tab === 'search' && <Search lines={lines} locked={locked} action={shop.action} reportError={shop.reportError} />}
-            {tab === 'slots' && <Slots queue={shop.queue} order={order} locked={locked} action={shop.action} reportError={shop.reportError} />}
+            {tab === 'search' && <Search key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} lines={lines} locked={locked} action={shop.action} reportError={shop.reportError} />}
+            {tab === 'slots' && <Slots key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} order={order} locked={locked} action={shop.action} reportError={shop.reportError} />}
           </>}
         </>}
       </main><p className="app-footnote">All times Europe/London · Prices in GBP · This is the shared household shop</p>
@@ -245,12 +263,12 @@ export default function App() {
       <div className="confirmation-total"><span>Last known total</span><strong>{money(basket?.total)}</strong></div>
       <p>Pending edits may change this total. Checkout runs after other queued changes, when the shared 3-minute timer ends. Anyone’s next edit resets that timer. You can cancel before processing starts.</p>
       <p className="muted">If Ocado requires payment verification or cannot complete checkout, the queue will show an error. A failed or uncertain checkout is never automatically retried.</p>
-      <button type="button" className="button button-primary" disabled={locked || checkout.target_id !== shop.queue?.target_id || !totalItems || shop.queue?.actions?.some((item) => item.kind === 'checkout')} onClick={async () => { const accepted = await shop.action({ kind: 'checkout', confirm: true, target_id: checkout.target_id }); if (accepted) setCheckout(false) }}>{shop.busy ? 'Queuing…' : 'Confirm & queue checkout'}</button>
+      <button type="button" className="button button-primary" disabled={locked || checkout.target_id !== shop.queue?.target_id || !totalItems || shop.queue?.actions?.some((item) => item.kind === 'checkout')} onClick={async () => { const accepted = await shop.action({ ...checkout, kind: 'checkout', confirm: true }); if (accepted) setCheckout(false) }}>{shop.busy ? 'Queuing…' : 'Confirm & queue checkout'}</button>
     </Confirm>}
     {cancelQueue && <Confirm title={shop.queue?.status === 'failed' ? 'Clear failed changes?' : 'Cancel everyone’s queued changes?'} onClose={() => setCancelQueue(false)}>
       {cancelQueue.target_id !== shop.queue?.target_id && <p className="inline-error" role="alert">The target delivery has changed. Go back and review the new queue.</p>}
       <p>{shop.queue?.status === 'failed' ? 'This clears the failed queue; it does not undo anything Ocado may already have applied. Check the booked order and payment before intentionally trying again.' : 'All pending item changes, slot moves and checkout confirmations from every user will be removed. The booked order itself is not cancelled.'}</p>
-      <button type="button" className="button button-danger" disabled={shop.busy || shop.accessExpired || shop.queue?.status === 'running' || cancelQueue.target_id !== shop.queue?.target_id || !online} onClick={async () => { const accepted = await shop.cancel(cancelQueue.target_id); if (accepted) setCancelQueue(false) }}>{shop.busy ? 'Clearing…' : 'Clear shared queue'}</button>
+      <button type="button" className="button button-danger" disabled={shop.busy || shop.accessExpired || shop.queue?.status === 'running' || cancelQueue.target_id !== shop.queue?.target_id || !online} onClick={async () => { const accepted = await shop.cancel(cancelQueue); if (accepted) setCancelQueue(false) }}>{shop.busy ? 'Clearing…' : 'Clear shared queue'}</button>
     </Confirm>}
   </div>
 }

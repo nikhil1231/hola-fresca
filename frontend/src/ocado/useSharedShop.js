@@ -3,6 +3,8 @@ import { request } from './api.js'
 
 export const isReady = (auth) => auth?.status === 'ready'
 const queueKey = (queue) => JSON.stringify(queue)
+const scope = (auth) => ({ account_id: auth?.account_id ?? null, account_version: auth?.account_version ?? 0 })
+const sameAccount = (left, right) => left?.account_id === right?.account_id && left?.account_version === right?.account_version
 
 export function useSharedShop() {
   const [auth, setAuth] = useState(null)
@@ -47,6 +49,7 @@ export function useSharedShop() {
     try {
       const next = await request('/state')
       if (!ref.mounted || ref.epoch !== epoch) return
+      if (!sameAccount(next, ref.auth)) { setStale(true); return }
       // A queue poll may have observed edits made during this state read. Read
       // again before allowing quantity edits based on an obsolete projection.
       const current = ref.queue
@@ -79,10 +82,20 @@ export function useSharedShop() {
   const acceptAuth = useCallback((next) => {
     const ref = refs.current
     const wasReady = isReady(ref.auth)
+    const changedAccount = !sameAccount(ref.auth, next)
     ref.auth = next
     setAuth(next)
     setAccessExpired(false)
-    if (wasReady !== isReady(next)) ref.epoch += 1
+    if (changedAccount || wasReady !== isReady(next)) ref.epoch += 1
+    if (changedAccount) {
+      ref.queue = null
+      ref.state = null
+      setState(null)
+      setQueue(null)
+      setError(null)
+      setStale(false)
+      setLoading(isReady(next))
+    }
     if (!isReady(next)) {
       ref.queue = null
       ref.state = null
@@ -97,7 +110,7 @@ export function useSharedShop() {
     ref.mounted = true
     let polling = false
     let disposed = false
-    let refreshedSession = false
+    let refreshedSession = null
     async function poll() {
       if (polling || ref.writing || disposed) return
       polling = true
@@ -105,9 +118,10 @@ export function useSharedShop() {
       try {
         let nextAuth = await request('/status')
         if (disposed || ref.epoch !== epoch) return
-        if (!refreshedSession && nextAuth.email && !isReady(nextAuth) && !['awaiting_otp', 'otp_required'].includes(nextAuth.status)) {
-          refreshedSession = true
-          nextAuth = await request('/session/refresh', { body: {} })
+        const accountKey = JSON.stringify(scope(nextAuth))
+        if (refreshedSession !== accountKey && nextAuth.email && !isReady(nextAuth) && !['awaiting_otp', 'otp_required'].includes(nextAuth.status)) {
+          refreshedSession = accountKey
+          nextAuth = await request('/session/refresh', { body: scope(nextAuth) })
         }
         if (disposed || ref.epoch !== epoch) return
         const wasReady = isReady(ref.auth)
@@ -116,7 +130,7 @@ export function useSharedShop() {
         if (isReady(nextAuth)) {
           const readEpoch = ref.epoch
           const nextQueue = await request('/queue')
-          if (disposed || ref.epoch !== readEpoch) return
+          if (disposed || ref.epoch !== readEpoch || !sameAccount(nextQueue, ref.auth)) return
           const changed = acceptQueue(nextQueue)
           if (changed || !wasReady || !ref.state) void refresh()
         }
@@ -152,7 +166,7 @@ export function useSharedShop() {
     setError(null)
     let accepted = false
     try {
-      const next = await request(path, { body })
+      const next = await request(path, { body: { ...scope(ref.auth), ...body } })
       if (!ref.mounted) return false
       if (authMutation) acceptAuth(next)
       else acceptQueue(next)
@@ -191,10 +205,11 @@ export function useSharedShop() {
   const action = (body) => {
     const ref = refs.current
     if (ref.writing || ref.refreshing || !isReady(ref.auth)) return Promise.resolve(false)
-    return mutate('/actions', { ...body, target_id: body.target_id ?? ref.state?.queue?.target_id })
+    return mutate('/actions', { ...scope(auth), ...body, target_id: body.target_id ?? ref.state?.queue?.target_id })
   }
-  const cancel = (targetId) => mutate('/queue/cancel', { target_id: targetId ?? refs.current.queue?.target_id })
-  const authenticate = (path, body = {}) => mutate(path, body, true)
+  const cancel = (selection = {}) => mutate('/queue/cancel', { ...scope(auth), ...selection, target_id: selection.target_id ?? refs.current.queue?.target_id })
+  const authenticate = (path, body = {}) => mutate(path, { ...scope(auth), ...body }, true)
   const locked = busy || syncing || stale || !state || !queue?.target_id || queue.status === 'running' || queue.status === 'failed' || accessExpired
-  return { auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, cancel, authenticate, reportError, clearError: () => setError(null) }
+  const selectAccount = (id) => mutate('/account', { ...scope(auth), selected_account_id: Number(id) }, true)
+  return { selection: scope(auth), selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, cancel, authenticate, reportError, clearError: () => setError(null) }
 }

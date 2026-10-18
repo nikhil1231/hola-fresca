@@ -109,6 +109,18 @@ class RetailerAccount(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class OcadoSharedSettings(Base):
+    """The household's selected connection, attributed to the person choosing it."""
+
+    __tablename__ = "ocado_shared_settings"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_ocado_shared_settings_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey("retailer_accounts.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 class OcadoSharedQueue(Base):
     """One durable debounced batch for the explicitly configured shared account.
 

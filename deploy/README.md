@@ -234,14 +234,20 @@ Add to `~/secrets/holafresca.env` on the production host:
 ```dotenv
 HOLAFRESCA_OCADO_APP_HOSTNAME=ocado.holafresca.uk
 HOLAFRESCA_OCADO_ACCESS_AUD=<new shop application's Audience tag>
-HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY=shared
+HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY=anuja
 ```
 
 Keep `HOLAFRESCA_ACCESS_TEAM_DOMAIN` configured for the same Cloudflare team.
-To share a previously connected Ocado login, use its exact `retailer_accounts.key`
-instead of `shared`; the app never selects an arbitrary user's connection.
-Otherwise sign in once on the shop's Account page, which creates the dedicated
-shared connection. Every subsequent visitor uses that same connection.
+`anuja` is the default connection. The shop's Account page lists the registered
+Ocado connections and lets an authorised person choose one for the household.
+The choice is saved in SQLite and survives restarts; everyone sees the same
+selection. Switching is refused while any shared batch is pending, running or
+failed. Clear or finish that batch first. Every write includes the selected
+account and its generation, so an older tab cannot submit changes to a newly
+selected account, even if both targets are named `cart`.
+
+With no matching default connection, sign in once on Account to create it, or
+select an existing registered connection from the account picker.
 
 Build/recreate the production container so its environment is reloaded:
 

@@ -80,3 +80,10 @@ def test_basket_endpoints(client, monkeypatch):
     assert ("POST", "/api/cart/v1/carts/active/apply-quantity",
             [{"productId": SKU, "quantity": -3, "meta": {}}]) in session.sent
     assert http.get("/api/ocado/search?q=%20").status_code == 400
+
+
+def test_search_keeps_product_image_urls():
+    payload = {"products": [{"retailerProductId": "123", "productId": "milk", "name": "Milk",
+                             "image": {"src": "https://www.ocado.com/images-v3/milk/300x300.jpg"}}]}
+    found = shop.search_results(payload, 10)
+    assert found[0].image_url == "https://www.ocado.com/images-v3/milk/300x300.jpg"

@@ -43,6 +43,7 @@ class Found:
     unit_price: float | None
     unit_basis: str | None
     in_stock: bool | None
+    image_url: str | None = None
 
 
 def basket(payload: Any, names: Callable[[list[str]], dict[str, str]]) -> Basket:
@@ -73,7 +74,8 @@ def search_results(payload: Any, limit: int) -> list[Found]:
             continue
         found.append(Found(sku=product.sku, name=product.name, price=product.price,
                            pack=product.pack_size_raw, unit_price=product.unit_price,
-                           unit_basis=product.unit_price_basis, in_stock=product.in_stock))
+                           unit_basis=product.unit_price_basis, in_stock=product.in_stock,
+                           image_url=product.image_url))
         if len(found) >= limit:
             break
     return found

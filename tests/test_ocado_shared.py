@@ -196,8 +196,15 @@ def shared_api(factory, monkeypatch):
         yield api, fake, adapter, current, people
 
 
+def _post(api, path, **kwargs):
+    scope = api.get("/api/ocado-shared/status").json()
+    kwargs["json"] = {"account_id": scope.get("account_id"), "account_version": scope.get("account_version", 0),
+                      **(kwargs.get("json") or {})}
+    return api.post(path, **kwargs)
+
+
 def _login(api):
-    return api.post("/api/ocado-shared/login", json={"email": "shared@shop.example", "password": "secret"})
+    return _post(api, "/api/ocado-shared/login", json={"email": "shared@shop.example", "password": "secret"})
 
 
 def _quantity(sku="milk", quantity=3):
@@ -223,7 +230,7 @@ def test_all_users_login_and_read_exact_configured_account_with_dedicated_owner(
     assert _login(api).status_code == 200
     current[0] = people[1]
     assert api.get("/api/ocado-shared/status").json()["email"] == "shared@shop.example"
-    assert api.post("/api/ocado-shared/session/refresh", json={}).status_code == 200
+    assert _post(api, "/api/ocado-shared/session/refresh", json={}).status_code == 200
     with factory() as db:
         account = shared.find_account(db)
         assert account.key == "household-shared"
@@ -253,9 +260,9 @@ def test_booked_delivery_is_earliest_upcoming_and_read_does_not_open_edit(shared
 def test_shared_projected_quantities_and_cancel_are_visible_across_people(shared_api):
     api, _, _, current, people = shared_api
     _login(api)
-    first = api.post("/api/ocado-shared/actions", json={"target_id": "cart", **_quantity("milk", 4)}).json()
+    first = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity("milk", 4)}).json()
     current[0] = people[1]
-    second = api.post("/api/ocado-shared/actions", json={"target_id": "cart", **_quantity("bread", 2), "name": "Bread"}).json()
+    second = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity("bread", 2), "name": "Bread"}).json()
     assert {a["user_id"] for a in second["actions"]} == set(people)
     state = api.get("/api/ocado-shared/state").json()
     assert {line["sku"]: line["quantity"] for line in state["basket"]["lines"]} == {"milk": 4, "bread": 2}
@@ -263,7 +270,7 @@ def test_shared_projected_quantities_and_cancel_are_visible_across_people(shared
     assert state["basket"]["total"] == 3.0  # live estimate, not fabricated projected pricing
     assert api.get("/api/ocado-shared/queue").json() == second
     assert second["due_at"] >= first["due_at"]
-    assert api.post("/api/ocado-shared/queue/cancel", json={"target_id": "cart"}).json()["actions"] == []
+    assert _post(api, "/api/ocado-shared/queue/cancel", json={"target_id": "cart"}).json()["actions"] == []
     assert api.get("/api/ocado-shared/state").json()["basket"]["lines"][0]["quantity"] == 2
 
 
@@ -271,12 +278,12 @@ def test_stale_target_rejected_without_touching_upstream_and_pending_target_stay
     api, fake, _, _, _ = shared_api
     _login(api)
     fake.coming = [booked("pinned", 5)]
-    assert api.post("/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()}).status_code == 409
-    assert api.post("/api/ocado-shared/actions", json={"target_id": "pinned", **_quantity()}).status_code == 200
+    assert _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()}).status_code == 409
+    assert _post(api, "/api/ocado-shared/actions", json={"target_id": "pinned", **_quantity()}).status_code == 200
     fake.coming.append(booked("new-earlier", 3))
     assert api.get("/api/ocado-shared/state").json()["order"]["order_id"] == "pinned"
     fake.coming = [booked("new-earlier", 3)]
-    assert api.post("/api/ocado-shared/actions", json={"target_id": "pinned", **_quantity()}).status_code == 409
+    assert _post(api, "/api/ocado-shared/actions", json={"target_id": "pinned", **_quantity()}).status_code == 409
     assert "quantities" not in fake.calls
 
 
@@ -292,7 +299,7 @@ def test_stale_target_rejected_without_touching_upstream_and_pending_target_stay
 def test_actions_validate_target_confirmation_and_absolute_quantity(shared_api, body):
     api, fake, _, _, _ = shared_api
     _login(api)
-    assert api.post("/api/ocado-shared/actions", json=body).status_code == 422
+    assert _post(api, "/api/ocado-shared/actions", json=body).status_code == 422
     assert "quantities" not in fake.calls and "checkout" not in fake.calls
 
 
@@ -371,7 +378,7 @@ def test_restart_keeps_pending_but_never_replays_orphaned_running_batch(setup_sh
 def test_active_executor_blocks_another_process_worker_and_mutating_requests(shared_api, factory):
     api, fake, _, _, _ = shared_api
     _login(api)
-    api.post("/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()})
+    _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()})
     due = datetime.fromisoformat(QueueStore(factory).snapshot()["due_at"])
     entered, release = threading.Event(), threading.Event()
     original = fake.set_quantities
@@ -390,8 +397,8 @@ def test_active_executor_blocks_another_process_worker_and_mutating_requests(sha
         assert api.get("/api/ocado-shared/status").json()["status"] == "ready"
         assert api.get("/api/ocado-shared/queue").json()["status"] == "running"
         assert Worker(factory, client_factory=lambda key: pytest.fail("double execution")).step(now=due) is False
-        assert api.post("/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()}).status_code == 409
-        assert api.post("/api/ocado-shared/queue/cancel", json={}).status_code == 409
+        assert _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()}).status_code == 409
+        assert _post(api, "/api/ocado-shared/queue/cancel", json={}).status_code == 409
     finally:
         release.set()
         thread.join()
@@ -600,3 +607,108 @@ def test_shared_basket_uses_ocado_without_changing_personal_retailer(shared_api,
     assert api.get("/api/ocado-shared/state").json()["basket"]["lines"][0]["name"] == "Ocado whole milk"
     with factory() as db:
         assert db.scalar(select(PlanSettings.retailer).where(PlanSettings.user_id == current[0])) == "sainsburys"
+
+
+def _add_anuja(factory, people):
+    with factory() as db:
+        person = db.get(User, people[1])
+        person.name = "Anuja"
+        account = RetailerAccount(user_id=person.id, retailer="ocado", key="anuja", email="anuja@example.com", status="connected")
+        db.add(account)
+        db.commit()
+        return account.id
+
+
+def test_shared_account_defaults_to_anuja_and_lists_connections(shared_api, factory, monkeypatch):
+    api, _, _, _, people = shared_api
+    anuja = _add_anuja(factory, people)
+    monkeypatch.setattr(config, "OCADO_SHARED_ACCOUNT_KEY", "anuja")
+    status = api.get("/api/ocado-shared/status").json()
+    assert status["account_id"] == anuja and status["account_version"] == 0
+    assert next(a for a in status["accounts"] if a["id"] == anuja)["label"] == "Anuja"
+
+
+def test_account_choice_is_shared_persisted_and_used_by_worker(shared_api, factory, monkeypatch):
+    from app.db.models import OcadoSharedSettings
+    from app.db.session import make_engine, make_session_factory
+    api, fake, _, current, people = shared_api
+    _login(api)
+    anuja = _add_anuja(factory, people)
+    chosen = _post(api, "/api/ocado-shared/account", json={"selected_account_id": anuja})
+    assert chosen.status_code == 200
+    assert chosen.json()["account_id"] == anuja and chosen.json()["account_version"] == 1
+    current[0] = people[1]
+    assert api.get("/api/ocado-shared/status").json()["account_id"] == anuja
+    reopened = make_session_factory(make_engine(Path(factory.kw["bind"].url.database)))
+    with reopened() as db:
+        assert shared.find_account(db).key == "anuja"
+        assert db.get(OcadoSharedSettings, 1).user_id == people[0]
+    called = []
+    store = QueueStore(factory)
+    store.enqueue("cart", "cart", _quantity(), people[0], now=NOW)
+    Worker(factory, client_factory=lambda key: called.append(key) or fake).step(now=NOW + timedelta(seconds=180))
+    assert called == ["anuja"] and store.snapshot()["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("path,body", [
+    ("actions", {"target_id": "cart", "kind": "quantity", "sku": "milk", "quantity": 4}),
+    ("queue/cancel", {"target_id": "cart"}),
+    ("session/refresh", {}), ("logout", {}), ("otp", {"code": "123456"}),
+    ("login", {"email": "old@example.com", "password": "secret"}),
+])
+def test_account_switch_rejects_stale_writes_even_with_same_cart_target(shared_api, factory, path, body):
+    api, fake, _, _, people = shared_api
+    _login(api)
+    old = api.get("/api/ocado-shared/status").json()
+    stale = {k: old[k] for k in ("account_id", "account_version")}
+    anuja = _add_anuja(factory, people)
+    assert _post(api, "/api/ocado-shared/account", json={"selected_account_id": anuja}).status_code == 200
+    assert _post(api, f"/api/ocado-shared/{path}", json={**body, **stale}).status_code == 409
+    # Switching back does not make an old tab's generation valid again.
+    assert _post(api, "/api/ocado-shared/account", json={"selected_account_id": old["account_id"]}).status_code == 200
+    assert _post(api, f"/api/ocado-shared/{path}", json={**body, **stale}).status_code == 409
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("status", ["pending", "running", "failed"])
+def test_account_switch_requires_resolving_active_queue(shared_api, factory, status):
+    api, _, _, _, people = shared_api
+    _login(api)
+    anuja = _add_anuja(factory, people)
+    store = QueueStore(factory)
+    store.enqueue("cart", "cart", _quantity(), people[0], now=NOW)
+    with factory() as db:
+        row = store._row(db)
+        row.status = status
+        db.commit()
+    response = _post(api, "/api/ocado-shared/account", json={"selected_account_id": anuja})
+    assert response.status_code == 409
+    assert store.snapshot()["status"] == status
+    with factory() as db:
+        assert shared.find_account(db).key == "household-shared"
+
+
+def test_account_switch_rejects_other_retailers_and_requires_selection_token(shared_api, factory):
+    api, _, _, _, people = shared_api
+    _login(api)
+    with factory() as db:
+        account = RetailerAccount(user_id=people[1], retailer="sainsburys", key="other-retailer", status="connected")
+        db.add(account)
+        db.commit()
+        identifier = account.id
+    assert _post(api, "/api/ocado-shared/account", json={"selected_account_id": identifier}).status_code == 404
+    assert api.request("POST", "/api/ocado-shared/logout", json={}).status_code == 422
+
+
+def test_shared_settings_migration_preserves_existing_queue(setup_shared):
+    from sqlalchemy import text
+    from app.db.session import init_db
+    factory, people, _ = setup_shared
+    store = QueueStore(factory)
+    queued = store.enqueue("cart", "cart", _quantity(), people[0], now=NOW)
+    engine = factory.kw["bind"]
+    with engine.begin() as db:
+        db.execute(text("DROP TABLE ocado_shared_settings"))
+        db.execute(text("UPDATE alembic_version SET version_num='0018_ocado_shared_queue'"))
+    init_db(engine)
+    assert store.snapshot() == queued
