@@ -109,6 +109,39 @@ class RetailerAccount(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class OcadoSharedQueue(Base):
+    """One durable debounced batch for the explicitly configured shared account.
+
+    ``user_id`` is the dedicated account owner; each JSON action also records the
+    person who requested it. ``version`` is a compare-and-swap generation, so a
+    worker cannot claim a batch an enqueue has just postponed.
+    """
+
+    __tablename__ = "ocado_shared_queue"
+    __table_args__ = (
+        UniqueConstraint("account_id", name="uq_ocado_shared_queue_account"),
+        CheckConstraint(
+            "status in ('idle', 'pending', 'running', 'failed', 'succeeded')",
+            name="ck_ocado_shared_queue_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("retailer_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="idle", nullable=False)
+    actions_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
 class PlannerCacheState(Base):
     """Singleton generations for the two halves of the planner snapshot."""
 

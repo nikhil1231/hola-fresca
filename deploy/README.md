@@ -210,6 +210,64 @@ journalctl --user -u cloudflared.service -f      # connections, reconnects
 cloudflared tunnel list
 ```
 
+### Standalone Ocado hostname
+
+The same API container serves `holafresca.uk` and `ocado.holafresca.uk`; the Host
+header selects independent app entrypoints and API boundaries. Do **not** rewrite
+the shop's Host header to the main hostname in a proxy.
+
+For the production remotely managed tunnel (`~/infra/stacks/cloudflared`), add a
+published application route in **Zero Trust → Networks → Tunnels**:
+
+```text
+ocado.holafresca.uk → http://holafresca:8100
+```
+
+Create a **new self-hosted Access application** for `ocado.holafresca.uk` with its
+own allowed people/policy. Do not add the hostname to the planner's application:
+their audience tags must differ. Every admitted person can change the shared
+shop and manage its Ocado sign-in, so the allowlist grants purchasing authority.
+Avoid a wildcard Access application that also covers both hostnames.
+
+Add to `~/secrets/holafresca.env` on the production host:
+
+```dotenv
+HOLAFRESCA_OCADO_APP_HOSTNAME=ocado.holafresca.uk
+HOLAFRESCA_OCADO_ACCESS_AUD=<new shop application's Audience tag>
+HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY=shared
+```
+
+Keep `HOLAFRESCA_ACCESS_TEAM_DOMAIN` configured for the same Cloudflare team.
+To share a previously connected Ocado login, use its exact `retailer_accounts.key`
+instead of `shared`; the app never selects an arbitrary user's connection.
+Otherwise sign in once on the shop's Account page, which creates the dedicated
+shared connection. Every subsequent visitor uses that same connection.
+
+Build/recreate the production container so its environment is reloaded:
+
+```sh
+cd ~/infra/stacks/holafresca
+docker compose up -d --build --force-recreate
+```
+
+Schema upgrades run at API startup. Queue records live in the existing SQLite
+database, with the shared session/profile in the same persistent data volume.
+Run one API worker for the shared cookie jar; queue claims and the shared-app
+execution lock also prevent a pending batch being submitted twice. After an
+interrupted/uncertain payment, check ocado.com before cancelling the failed queue
+and intentionally submitting again.
+
+For the older locally managed tunnel instead of production Docker:
+
+```sh
+deploy/setup-tunnel.sh holafresca.uk ocado.holafresca.uk
+```
+
+This writes both ingress rules and DNS routes; the new Access application/policy
+still needs creating separately. Local preview uses `/ocado.html` without changing
+DNS. The public shop deliberately returns 503 until its Access audience is set,
+and 403 without a valid shop assertion; the planner's assertion is not accepted.
+
 ## Backups
 
 `holafresca-backup.{service,timer}` run daily: the mapping export into

@@ -164,13 +164,45 @@ function getPageLastUpdated() {
   )
 }
 
+// Both apps share a dev server, but a document request on the dedicated host
+// must enter the shared shop rather than Vite's default index.html fallback.
+const ocadoHostname = process.env.HOLAFRESCA_OCADO_APP_HOSTNAME || 'ocado.holafresca.uk'
+function ocadoEntry() {
+  const middleware = (req, _res, next) => {
+    const hostname = (req.headers.host || '').split(':')[0].toLowerCase()
+    const url = new URL(req.url || '/', 'http://localhost')
+    const documentRequest = url.pathname === '/' || url.pathname.endsWith('.html') ||
+      (!path.extname(url.pathname) && req.headers.accept?.includes('text/html'))
+    if (hostname === ocadoHostname.toLowerCase() &&
+        (req.method === 'GET' || req.method === 'HEAD') &&
+        !url.pathname.startsWith('/api/') && documentRequest) {
+      req.url = `/ocado.html${url.search}`
+    }
+    next()
+  }
+  return {
+    name: 'ocado-entry',
+    configureServer(server) { server.middlewares.use(middleware) },
+    configurePreviewServer(server) { server.middlewares.use(middleware) },
+  }
+}
+
 export default defineConfig({
   define: {
     __PAGE_LAST_UPDATED__: JSON.stringify(getPageLastUpdated()),
   },
-  plugins: [react()],
+  plugins: [ocadoEntry(), react()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(frontendRoot, 'index.html'),
+        ocado: path.resolve(frontendRoot, 'ocado.html'),
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
+    allowedHosts: [ocadoHostname],
     proxy: {
       '/api': apiTarget,
     },

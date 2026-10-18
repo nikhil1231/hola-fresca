@@ -103,6 +103,7 @@ def _user_for_email(session: Session, email: str) -> User:
 
 
 def get_active_retailer(
+    request: Request,
     session: Session = Depends(get_session), user: User = Depends(get_current_user)
 ) -> str:
     """Which shop this request is about.
@@ -119,6 +120,10 @@ def get_active_retailer(
     without a row appearing. An unrecognised stored value degrades to the default
     too: a retired retailer should not turn every basket into a 500.
     """
+    # The standalone shop selects its retailer through the request, without
+    # changing anyone's planner preference (including Sainsbury's shoppers).
+    if request.url.path.startswith("/api/ocado-shared/"):
+        return "ocado"
     # Imported here rather than at module scope: app.db.models is already loaded
     # by this module, but PlanSettings is only needed on this path.
     from app.db.models import PlanSettings

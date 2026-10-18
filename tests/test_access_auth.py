@@ -399,3 +399,67 @@ def test_a_listed_service_token_acts_for_its_person(configured, signing_key, mon
     assert client.post("/api/cart/ocado/logout", headers=headers).status_code == 403
     # an unlisted token is refused even though Access let it through
     assert get(client, host=HOSTNAME, token=service_token(signing_key, "stranger.access")).status_code == 403
+
+
+@pytest.fixture
+def shared_access(configured, monkeypatch):
+    monkeypatch.setattr("app.config.OCADO_APP_HOSTNAME", "ocado.example.com")
+    monkeypatch.setattr("app.config.OCADO_ACCESS_AUD", "ocado-only-audience")
+    monkeypatch.setattr("app.config.OCADO_SHARED_ACCOUNT_KEY", "isolated-shared-account")
+
+
+def test_ocado_requires_its_own_access_policy(shared_access, signing_key):
+    client = TestClient(main.app)
+    path = "/api/ocado-shared/status"
+    assert client.get(path, headers={"Host": "ocado.example.com"}).status_code == 403
+    assert client.get(path, headers={
+        "Host": "ocado.example.com", "Cf-Access-Jwt-Assertion": make_token(signing_key),
+    }).status_code == 403
+    response = client.get(path, headers={
+        "Host": "ocado.example.com",
+        "Cf-Access-Jwt-Assertion": make_token(signing_key, aud="ocado-only-audience"),
+    })
+    assert response.status_code == 200
+    assert response.json()["status"] == "logged_out"
+
+
+def test_access_policies_cannot_cross_app_boundaries(shared_access, signing_key):
+    client = TestClient(main.app)
+    shared_token = make_token(signing_key, aud="ocado-only-audience")
+    assert client.get("/api/schedule", headers={
+        "Host": "ocado.example.com", "Cf-Access-Jwt-Assertion": shared_token,
+    }).status_code == 404
+    assert client.get("/api/ocado-shared/status", headers={
+        "Host": HOSTNAME, "Cf-Access-Jwt-Assertion": make_token(signing_key),
+    }).status_code == 404
+    # Changing Host to the LAN address cannot promote a shop token into a
+    # planner token (or a planner token into a shop token).
+    assert client.get("/api/schedule", headers={
+        "Host": "192.168.1.50", "Cf-Access-Jwt-Assertion": shared_token,
+    }).status_code == 403
+    assert client.get("/api/ocado-shared/status", headers={
+        "Host": "192.168.1.50", "Cf-Access-Jwt-Assertion": make_token(signing_key),
+    }).status_code == 403
+
+
+def test_ocado_documents_require_access_and_missing_config_fails_closed(
+    shared_access, signing_key, monkeypatch
+):
+    client = TestClient(main.app)
+    assert client.get("/", headers={"Host": "ocado.example.com"}).status_code == 403
+    monkeypatch.setattr("app.config.OCADO_ACCESS_AUD", None)
+    for path in ("/", "/api/ocado-shared/status"):
+        assert client.get(path, headers={
+            "Host": "ocado.example.com",
+            "Cf-Access-Jwt-Assertion": make_token(signing_key),
+        }).status_code == 503
+
+
+def test_planner_origin_cannot_submit_shared_shop_writes(shared_access, signing_key):
+    response = TestClient(main.app).post("/api/ocado-shared/queue/cancel", headers={
+        "Host": "ocado.example.com",
+        "Origin": f"https://{HOSTNAME}",
+        "Sec-Fetch-Site": "same-site",
+        "Cf-Access-Jwt-Assertion": make_token(signing_key, aud="ocado-only-audience"),
+    })
+    assert response.status_code == 403

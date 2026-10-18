@@ -11,10 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import config
+from app.api.access import authenticated_identity
 from app.api.account import router as account_router
 from app.api.cart import router as cart_router
 from app.api.mapping import router as mapping_router
 from app.api.ocado import router as ocado_router
+from app.api.ocado_shared import router as ocado_shared_router
 from app.api.pantry import router as pantry_router
 from app.api.plan import router as plan_router
 from app.api.planner import router as planner_router
@@ -49,13 +52,19 @@ async def lifespan(_app: FastAPI):
     from app.api.deps import get_session_factory
     from app.ocado import events, heartbeat
     from app.planner import warmup
+    from app.ocado import shared_queue
 
     events.set_sink(events.db_sink(get_session_factory))
     warmup.start(get_session_factory)
     heartbeat.start()
+    # Like planner warm-up, the worker cannot see request-scoped test database
+    # overrides. Queue tests own its lifecycle with an explicit temp factory.
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        shared_queue.start(get_session_factory())
     try:
         yield
     finally:
+        shared_queue.stop()
         heartbeat.stop()
         warmup.stop()
         events.set_sink(None)
@@ -69,6 +78,7 @@ app.include_router(mapping_router)
 app.include_router(planner_router)
 app.include_router(cart_router)
 app.include_router(ocado_router)
+app.include_router(ocado_shared_router)
 app.include_router(schedule_router)
 app.include_router(plan_router)
 app.include_router(pantry_router)
@@ -137,9 +147,39 @@ class _CrossSiteWriteMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class _OcadoAppBoundaryMiddleware(BaseHTTPMiddleware):
+    """Keep the shared shop and planner behind different Access applications."""
+
+    async def dispatch(self, request, call_next):
+        hostname = request.url.hostname
+        path = request.url.path
+        shared_api = path == "/api/ocado-shared" or path.startswith("/api/ocado-shared/")
+        if shared_api and request.method in _WRITE_METHODS:
+            origin = request.headers.get("origin")
+            if origin and urlparse(origin).netloc != request.headers.get("host", ""):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-origin requests may not change the shared shop"},
+                )
+        if hostname == config.OCADO_APP_HOSTNAME:
+            # Authenticate documents and assets too. In particular an absent
+            # audience must fail closed, never take the trusted-LAN fallback.
+            try:
+                authenticated_identity(request)
+            except StarletteHTTPException as exc:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            if path.startswith("/api/") and not shared_api and path != "/api/health":
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        elif hostname == (config.ACCESS_HOSTNAME or "").strip().lower():
+            if shared_api or path == "/ocado.html":
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        return await call_next(request)
+
+
 # Added last, so it runs first: a refused request should not reach a route.
 app.add_middleware(_NoCacheFrontendMiddleware)
 app.add_middleware(_CrossSiteWriteMiddleware)
+app.add_middleware(_OcadoAppBoundaryMiddleware)
 
 
 @app.get("/api/health")
@@ -170,11 +210,18 @@ if _DIST.is_dir():
         async def get_response(self, path: str, scope):
             if path == "api" or path.startswith("api/"):
                 return JSONResponse(status_code=404, content={"detail": "Not Found"})
+            shared = scope.get("headers") is not None and next(
+                (value.decode("latin-1").split(":")[0].lower()
+                 for key, value in scope["headers"] if key == b"host"), ""
+            ) == config.OCADO_APP_HOSTNAME
+            entry = "ocado.html" if shared else "index.html"
+            if shared and path in ("", ".", "index.html", "ocado.html"):
+                return await super().get_response(entry, scope)
             try:
                 return await super().get_response(path, scope)
             except StarletteHTTPException as exc:
                 if exc.status_code == 404 and "." not in Path(path).name:
-                    return await super().get_response("index.html", scope)
+                    return await super().get_response(entry, scope)
                 raise
 
     # Mounted last, so the /api routes above take precedence.

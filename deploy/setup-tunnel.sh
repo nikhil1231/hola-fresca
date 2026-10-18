@@ -13,13 +13,14 @@
 set -euo pipefail
 
 HOSTNAME=${1:-}
+OCADO_HOSTNAME=${2:-${OCADO_HOSTNAME:-}}
 TUNNEL_NAME=${TUNNEL_NAME:-holafresca}
 LOCAL_PORT=${LOCAL_PORT:-8100}
 CLOUDFLARED=${CLOUDFLARED:-$HOME/.local/bin/cloudflared}
 CONFIG_DIR=$HOME/.cloudflared
 
 if [ -z "$HOSTNAME" ]; then
-    echo "usage: $0 <hostname>   e.g. $0 hola.example.com" >&2
+    echo "usage: $0 <hostname> [ocado-hostname]" >&2
     exit 2
 fi
 
@@ -73,6 +74,14 @@ credentials-file: $CONFIG_DIR/$UUID.json
 ingress:
   - hostname: $HOSTNAME
     service: http://localhost:$LOCAL_PORT
+EOF
+if [ -n "$OCADO_HOSTNAME" ]; then
+    cat >>"$CONFIG_DIR/config.yml" <<EOF
+  - hostname: $OCADO_HOSTNAME
+    service: http://localhost:$LOCAL_PORT
+EOF
+fi
+cat >>"$CONFIG_DIR/config.yml" <<EOF
   # Anything else that reaches this tunnel is not for us.
   - service: http_status:404
 EOF
@@ -81,6 +90,9 @@ echo "Wrote $CONFIG_DIR/config.yml -> http://localhost:$LOCAL_PORT"
 # Creates the proxied CNAME for the hostname. Safe to repeat; it updates an
 # existing record that already points at this tunnel.
 "$CLOUDFLARED" tunnel route dns "$TUNNEL_NAME" "$HOSTNAME" || true
+if [ -n "$OCADO_HOSTNAME" ]; then
+    "$CLOUDFLARED" tunnel route dns "$TUNNEL_NAME" "$OCADO_HOSTNAME"
+fi
 
 UNIT_DIR=$HOME/.config/systemd/user
 mkdir -p "$UNIT_DIR"

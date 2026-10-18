@@ -20,7 +20,11 @@ import main
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    # These tests exercise origin enforcement, not the developer's Access
+    # environment. Public-host authentication has its own signed-JWT suite.
+    monkeypatch.setattr("app.config.ACCESS_TEAM_DOMAIN", None)
+    monkeypatch.setattr("app.config.ACCESS_AUD", None)
     with TestClient(main.app) as test_client:
         yield test_client
 

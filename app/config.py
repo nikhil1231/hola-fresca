@@ -43,6 +43,17 @@ ACCESS_AUD = os.environ.get("HOLAFRESCA_ACCESS_AUD")
 # the bootstrap user, because the laptop keeps answering on 0.0.0.0:8100. Unset
 # it and that distinction cannot be drawn — see app/api/access.py.
 ACCESS_HOSTNAME = os.environ.get("HOLAFRESCA_ACCESS_HOSTNAME")
+
+# The standalone shop has its own Access application, never the planner's
+# audience. The exact registry key selects one shared session for every visitor.
+OCADO_APP_HOSTNAME = os.environ.get(
+    "HOLAFRESCA_OCADO_APP_HOSTNAME", "ocado.holafresca.uk"
+).strip().lower()
+OCADO_ACCESS_AUD = os.environ.get("HOLAFRESCA_OCADO_ACCESS_AUD")
+OCADO_SHARED_ACCOUNT_KEY = os.environ.get(
+    "HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY", "shared"
+).strip()
+
 # The address that owns the existing data. The bootstrap user predates having an
 # email, so the first sign-in by this address claims that row rather than making
 # a second account and leaving the plan, hides and preferences behind.

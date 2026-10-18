@@ -90,7 +90,7 @@ def local_identity() -> Identity:
     return Identity(email=config.LOCAL_USER_EMAIL, name=config.LOCAL_USER_NAME)
 
 
-def _settings() -> _Settings | None:
+def _settings(request: Request | None = None) -> _Settings | None:
     """Access settings, or ``None`` when it is not configured.
 
     Read from :mod:`app.config` on every call rather than captured at import, so
@@ -98,13 +98,21 @@ def _settings() -> _Settings | None:
     without an import-order rule.
     """
     team_domain = (config.ACCESS_TEAM_DOMAIN or "").strip()
-    aud = (config.ACCESS_AUD or "").strip()
+    shared = request is not None and (
+        request.url.hostname == config.OCADO_APP_HOSTNAME
+        or request.url.path == "/api/ocado-shared"
+        or request.url.path.startswith("/api/ocado-shared/")
+    )
+    aud = ((config.OCADO_ACCESS_AUD if shared else config.ACCESS_AUD) or "").strip()
     if not team_domain or not aud:
+        if shared and request.url.hostname == config.OCADO_APP_HOSTNAME:
+            raise HTTPException(status_code=503, detail="Ocado Cloudflare Access is not configured")
         return None
-    # Tolerate a full URL being pasted in where a hostname was asked for; the
-    # team domain shows up both ways in Cloudflare's own dashboard.
+    # Tolerate a full URL copied from the Cloudflare dashboard.
     team_domain = team_domain.removeprefix("https://").removeprefix("http://").rstrip("/")
-    hostname = (config.ACCESS_HOSTNAME or "").strip().lower() or None
+    hostname = (
+        config.OCADO_APP_HOSTNAME if shared else (config.ACCESS_HOSTNAME or "").strip().lower()
+    ) or None
     return _Settings(team_domain=team_domain, aud=aud, hostname=hostname)
 
 
@@ -142,7 +150,7 @@ def authenticated_identity(request: Request) -> Identity | None:
     Raises 403 when an assertion is present but does not verify, and when one is
     absent from a request addressed to the public hostname.
     """
-    settings = _settings()
+    settings = _settings(request)
     if settings is None:
         return None
 
@@ -218,7 +226,7 @@ def full_identity(request: Request) -> Identity | None:
     if identity is None or identity.name:
         return identity
 
-    settings = _settings()
+    settings = _settings(request)
     token = _token(request)
     if settings is None or token is None:  # Defensive; authenticated above.
         return identity
