@@ -101,11 +101,14 @@ class QueueStore:
             return _out(row)
 
     def enqueue(self, target_id: str, current_target: str, action: dict, user_id: int,
-                *, now: datetime | None = None) -> dict:
-        return self.enqueue_many(target_id, current_target, [action], user_id, now=now)
+                *, now: datetime | None = None, quantities: dict[str, int] | None = None,
+                slot_id: str | None = None) -> dict:
+        return self.enqueue_many(target_id, current_target, [action], user_id, now=now,
+                                 quantities=quantities, slot_id=slot_id)
 
     def enqueue_many(self, target_id: str, current_target: str, additions: list[dict], user_id: int,
-                     *, now: datetime | None = None) -> dict:
+                     *, now: datetime | None = None, quantities: dict[str, int] | None = None,
+                     slot_id: str | None = None) -> dict:
         """Commit a reviewed offer selection together, with one shared timer."""
         now = now or utcnow()
         with self.factory() as db:
@@ -122,13 +125,32 @@ class QueueStore:
             # Absolute quantities and slot/checkout singletons: the most recent
             # person owns the retained action and extends the one global timer.
             for action in additions:
+                previous = next((old for old in actions if old["kind"] == action["kind"] and
+                                 (action["kind"] != "quantity" or old["sku"] == action["sku"])), None)
+                action = dict(action)
+                if action["kind"] == "quantity":
+                    original = (previous or {}).get("original_quantity")
+                    if original is None and quantities is not None:
+                        original = quantities.get(action["sku"], 0)
+                    if original is not None:
+                        action["original_quantity"] = original
+                elif action["kind"] == "slot":
+                    original = (previous or {}).get("original_slot_id", slot_id)
+                    if original is not None:
+                        action["original_slot_id"] = original
                 actions = [old for old in actions if not (
                     old["kind"] == action["kind"] and
                     (action["kind"] != "quantity" or old["sku"] == action["sku"])
                 )]
+                # Reversing an edit returns to the confirmed shop. There is
+                # nothing to display or send, including after a server restart.
+                if action["kind"] == "quantity" and action.get("original_quantity") == action["quantity"]:
+                    continue
+                if action["kind"] == "slot" and action.get("original_slot_id") == action["slot_id"]:
+                    continue
                 actions.append({**action, "id": uuid.uuid4().hex, "user_id": user_id})
-            values = dict(target_id=target_id, status="pending", actions_json=json.dumps(actions),
-                          due_at=now + DEBOUNCE, updated_at=now, error=None)
+            values = dict(target_id=target_id, status="pending" if actions else "idle", actions_json=json.dumps(actions),
+                          due_at=now + DEBOUNCE if actions else None, updated_at=now, error=None)
             if row is None:
                 row = OcadoSharedQueue(account_id=account.id, user_id=account.user_id, **values)
                 db.add(row)

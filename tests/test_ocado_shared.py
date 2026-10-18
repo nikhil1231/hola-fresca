@@ -170,8 +170,10 @@ def shared_api(factory, monkeypatch):
     monkeypatch.setattr(config, "OCADO_SHARED_ACCOUNT_KEY", "household-shared")
     fake, adapter = FakeSharedClient(), FakeAdapter()
     monkeypatch.setattr(shared, "make_client", lambda key: fake)
+    monkeypatch.setattr(shared, "fetch_statuses", lambda *args, **kwargs: {})
     with factory() as db:
         first = db.scalar(select(User).order_by(User.id))
+        first.email = "nikhilkunde1231@gmail.com"
         second = User(email="other@example.com")
         db.add(second)
         db.commit()
@@ -225,7 +227,7 @@ def test_reads_do_not_create_or_choose_an_arbitrary_personal_account(shared_api,
     assert adapter.keys == []
 
 
-def test_all_users_login_and_read_exact_configured_account_with_dedicated_owner(shared_api, factory):
+def test_owner_connects_and_all_users_read_exact_configured_account_with_dedicated_owner(shared_api, factory):
     api, _, adapter, current, people = shared_api
     assert _login(api).status_code == 200
     current[0] = people[1]
@@ -823,3 +825,85 @@ def test_active_cart_and_new_items_get_product_photos(shared_api):
     lines = api.get("/api/ocado-shared/state").json()["basket"]["lines"]
     assert all(line["image_url"] for line in lines)
     assert next(line for line in lines if line["sku"] == "bread")["cost"] is None
+
+
+@pytest.mark.parametrize("sku,original,changed", [("bread", 0, 1), ("milk", 2, 5), ("milk", 2, 0)])
+def test_reversing_item_edits_clears_queue_without_upstream_writes(shared_api, factory, sku, original, changed):
+    api, fake, _, current, people = shared_api
+    _login(api)
+    first = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity(sku, changed)}).json()
+    assert first["actions"][0]["original_quantity"] == original
+    # A different household member and a fresh QueueStore still see the same
+    # starting point; the comparison is durable rather than browser-local.
+    current[0] = people[1]
+    assert QueueStore(factory).snapshot()["actions"][0]["original_quantity"] == original
+    reverted = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity(sku, original)}).json()
+    assert reverted["status"] == "idle"
+    assert reverted["actions"] == [] and reverted["due_at"] is None
+    assert not Worker(factory, client_factory=lambda key: fake).step(now=NOW)
+    assert "quantities" not in fake.calls and "checkout" not in fake.calls
+
+
+def test_reversing_one_edit_keeps_only_other_net_changes(shared_api):
+    api, _, _, _, _ = shared_api
+    _login(api)
+    for sku, quantity in [("bread", 1), ("milk", 3), ("milk", 4), ("milk", 2)]:
+        response = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity(sku, quantity)})
+        assert response.status_code == 200
+    final = response.json()
+    assert final["status"] == "pending"
+    assert [(action["sku"], action["quantity"]) for action in final["actions"]] == [("bread", 1)]
+    assert api.get("/api/ocado-shared/state").json()["confirmed_quantities"] == {"milk": 2}
+
+
+def test_restoring_original_delivery_time_clears_only_slot_edit(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    fake.coming = [booked()]
+    _post(api, "/api/ocado-shared/actions", json={"target_id": "order", **_quantity("milk", 3)})
+    for slot_id in ["new-slot", "another-slot", "old-slot"]:
+        response = _post(api, "/api/ocado-shared/actions", json={"target_id": "order", "kind": "slot", "slot_id": slot_id})
+        assert response.status_code == 200
+    assert [action["kind"] for action in response.json()["actions"]] == ["quantity"]
+    assert "reserve" not in fake.calls and "start_edit" not in fake.calls
+
+
+def test_offer_items_can_be_fully_reversed(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    fake.promotion = lambda identifier: _offer_payload()
+    response = _post(api, "/api/ocado-shared/offer-items", json=_offer_selection())
+    assert response.status_code == 200
+    for action in response.json()["actions"]:
+        assert action["original_quantity"] == 0
+        reverted = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity(action["sku"], 0)})
+        assert reverted.status_code == 200
+    assert reverted.json()["actions"] == []
+    assert reverted.json()["status"] == "idle"
+
+
+@pytest.mark.parametrize("path,body", [
+    ("account", {"selected_account_id": 1}),
+    ("login", {"email": "other@ocado.example", "password": "secret"}),
+    ("otp", {"code": "123456"}),
+    ("logout", {}),
+])
+def test_only_named_owner_can_change_shared_settings(shared_api, factory, path, body):
+    api, _, adapter, current, people = shared_api
+    assert _login(api).status_code == 200
+    assert api.get("/api/ocado-shared/status").json()["can_manage_settings"] is True
+    current[0] = people[1]
+    # Even a catalogue admin cannot access the owner's account settings.
+    with factory() as db:
+        db.get(User, people[1]).is_admin = 1
+        db.commit()
+    status = api.get("/api/ocado-shared/status").json()
+    assert status["can_manage_settings"] is False and status["accounts"] == []
+    before = list(adapter.keys)
+    denied = api.post(f"/api/ocado-shared/{path}", json={
+        "account_id": status["account_id"], "account_version": status["account_version"], **body})
+    assert denied.status_code == 403
+    assert adapter.keys == before
+    # Shopping and shared session recovery still work for the household.
+    assert api.get("/api/ocado-shared/state").status_code == 200
+    assert _post(api, "/api/ocado-shared/session/refresh", json={}).status_code == 200

@@ -199,9 +199,10 @@ def _amount(value) -> float | None:
         return None
 
 
-def basket(client: OcadoClient, session: Session, order: dict | None, *, retailer: str) -> shop.Basket:
+def basket(client: OcadoClient, session: Session, order: dict | None, *, retailer: str,
+           name_products: bool = True) -> shop.Basket:
     if order is None:
-        result = shop.basket(client.cart_view(), lambda skus: _names(client, session, skus, retailer))
+        result = shop.basket(client.cart_view(), lambda skus: _names(client, session, skus, retailer) if name_products else {})
         return replace(result, lines=tuple(replace(line, name=line.name or line.sku) for line in result.lines))
     # Decorated order reads do not open an edit session or disturb the active cart.
     raw = client.get_order(str(order["orderId"]))
@@ -210,7 +211,7 @@ def basket(client: OcadoClient, session: Session, order: dict | None, *, retaile
     rows = raw.get("items") or []
     decorated = {line.sku: line for line in shop.order_lines(raw)}
     skus = [str(row["product"]) for row in rows if row.get("product") is not None]
-    names = _names(client, session, [sku for sku in skus if sku not in decorated], retailer)
+    names = _names(client, session, [sku for sku in skus if sku not in decorated], retailer) if name_products else {}
     lines = []
     for row in rows:
         sku = str(row.get("product") or "")

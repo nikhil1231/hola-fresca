@@ -28,6 +28,16 @@ from app.ocado.shared_queue import ACTIVE, QueueStore, empty
 router = APIRouter(prefix="/api/ocado-shared", tags=["ocado-shared"], dependencies=[Depends(get_current_user)])
 
 
+def _can_manage_settings(user: User) -> bool:
+    return (user.email or "").strip().lower() == "nikhilkunde1231@gmail.com"
+
+
+def require_settings_owner(user: User = Depends(get_current_user)) -> User:
+    if not _can_manage_settings(user):
+        raise HTTPException(status_code=403, detail="Only the shop owner can change these settings")
+    return user
+
+
 def get_shared_adapter() -> OcadoAdapter:
     return OcadoAdapter()
 
@@ -70,7 +80,7 @@ def _check_selection(session: Session, body: SelectionIn) -> None:
         raise shared.SharedError("The household's Ocado account changed. Refresh before making changes.")
 
 
-def _auth_out(auth, account, session: Session) -> dict:
+def _auth_out(auth, account, session: Session, user: User) -> dict:
     labels = {item.id: item.label for item in config.OCADO_ACCOUNTS}
     accounts = [{"id": row.id, "label": labels.get(row.key) or name or row.email or "Ocado account",
                  "email": row.email, "status": row.status}
@@ -78,7 +88,9 @@ def _auth_out(auth, account, session: Session) -> dict:
                     User, User.id == RetailerAccount.user_id
                 ).where(RetailerAccount.retailer == "ocado").order_by(User.id))]
     result = CartLoginOut(status=auth.status, stage=auth.stage or "idle", email=account.email) if account else CartLoginOut(status="logged_out")
-    return {**result.model_dump(), **_scope(session), "accounts": accounts}
+    allowed = _can_manage_settings(user)
+    return {**result.model_dump(), **_scope(session), "accounts": accounts if allowed else [],
+            "can_manage_settings": allowed}
 
 
 class AccountSelectionIn(SelectionIn):
@@ -86,7 +98,7 @@ class AccountSelectionIn(SelectionIn):
 
 
 @router.post("/account", dependencies=[Depends(require_person)])
-def choose_account(body: AccountSelectionIn, user: User = Depends(get_current_user),
+def choose_account(body: AccountSelectionIn, user: User = Depends(require_settings_owner),
                    session: Session = Depends(get_session), adapter: OcadoAdapter = Depends(get_shared_adapter)):
     with _operation(session, blocking=False, bind=False):
         with shared.using_account(session):
@@ -105,24 +117,25 @@ def choose_account(body: AccountSelectionIn, user: User = Depends(get_current_us
                     settings.account_id, settings.user_id = account.id, user.id
                     settings.version += 1
                 session.commit()
-        return _auth_out(adapter.status(account.key), account, session)
+        return _auth_out(adapter.status(account.key), account, session, user)
 
 
 @router.get("/status")
-def status(session: Session = Depends(get_session), adapter: OcadoAdapter = Depends(get_shared_adapter)):
+def status(session: Session = Depends(get_session), adapter: OcadoAdapter = Depends(get_shared_adapter),
+           user: User = Depends(get_current_user)):
     # Status only reads the auth ladder's in-memory state. It must remain
     # available during checkout so clients can continue polling the queue.
     try:
         with shared.using_account(session):
             account = shared.find_account(session)
-            return _auth_out(adapter.status(account.key) if account else None, account, session)
+            return _auth_out(adapter.status(account.key) if account else None, account, session, user)
     except shared.SharedError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.post("/login", dependencies=[Depends(require_person)])
 def login(body: SharedLoginIn, session: Session = Depends(get_session),
-          adapter: OcadoAdapter = Depends(get_shared_adapter)):
+          adapter: OcadoAdapter = Depends(get_shared_adapter), user: User = Depends(require_settings_owner)):
     email, password = body.email.strip(), body.password.get_secret_value()
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password are required")
@@ -134,12 +147,12 @@ def login(body: SharedLoginIn, session: Session = Depends(get_session),
         finally:
             del password
         retailer_accounts.record_status(session, account, auth.status, email=email, after_login=True)
-        return _auth_out(auth, account, session)
+        return _auth_out(auth, account, session, user)
 
 
 @router.post("/otp", dependencies=[Depends(require_person)])
 def otp(body: SharedOtpIn, session: Session = Depends(get_session),
-        adapter: OcadoAdapter = Depends(get_shared_adapter)):
+        adapter: OcadoAdapter = Depends(get_shared_adapter), user: User = Depends(require_settings_owner)):
     with _operation(session, blocking=False):
         _check_selection(session, body)
         account = shared.require_account(session)
@@ -148,31 +161,33 @@ def otp(body: SharedOtpIn, session: Session = Depends(get_session),
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         retailer_accounts.record_status(session, account, auth.status, after_login=True)
-        return _auth_out(auth, account, session)
+        return _auth_out(auth, account, session, user)
 
 
 @router.post("/session/refresh", dependencies=[Depends(require_person)])
-def refresh(body: SelectionIn, session: Session = Depends(get_session), adapter: OcadoAdapter = Depends(get_shared_adapter)):
+def refresh(body: SelectionIn, session: Session = Depends(get_session), adapter: OcadoAdapter = Depends(get_shared_adapter),
+            user: User = Depends(get_current_user)):
     with _operation(session, blocking=False):
         _check_selection(session, body)
         account = shared.find_account(session)
         if account is None:
-            return _auth_out(None, None, session)
+            return _auth_out(None, None, session, user)
         auth = adapter.ensure_authenticated(account.key)
         retailer_accounts.record_status(session, account, auth.status)
-        return _auth_out(auth, account, session)
+        return _auth_out(auth, account, session, user)
 
 
 @router.post("/logout", dependencies=[Depends(require_person)])
-def logout(body: SelectionIn, session: Session = Depends(get_session), adapter: OcadoAdapter = Depends(get_shared_adapter)):
+def logout(body: SelectionIn, session: Session = Depends(get_session), adapter: OcadoAdapter = Depends(get_shared_adapter),
+           user: User = Depends(require_settings_owner)):
     with _operation(session, blocking=False):
         _check_selection(session, body)
         account = shared.find_account(session)
         if account is None:
-            return _auth_out(None, None, session)
+            return _auth_out(None, None, session, user)
         auth = adapter.logout(account.key)
         retailer_accounts.disconnect(session, account)
-        return _auth_out(auth, account, session)
+        return _auth_out(auth, account, session, user)
 
 
 def _selection(client, store: QueueStore) -> tuple[str, dict | None, dict]:
@@ -191,11 +206,13 @@ def state(session: Session = Depends(get_session), factory: sessionmaker[Session
         account = shared.require_account(session)
         client, store = shared.make_client(account.key), QueueStore(factory)
         _, order, queue = _selection(client, store)
-        basket = shared.project(shared.basket(client, session, order, retailer=retailer), queue["actions"])
+        confirmed = shared.basket(client, session, order, retailer=retailer)
+        basket = shared.project(confirmed, queue["actions"])
         basket = shared.decorate(basket, client, session, retailer=retailer)
         scope = _scope(session)
         return {**scope, "order": asdict(orders.summarise(order)) if order else None,
-                "basket": asdict(basket), "queue": {**queue, **scope}}
+                "basket": asdict(basket), "confirmed_quantities": {line.sku: line.quantity for line in confirmed.lines},
+                "queue": {**queue, **scope}}
 
 
 @router.get("/search")
@@ -293,7 +310,8 @@ def add_offer_items(body: OfferSelectionIn, user: User = Depends(get_current_use
                 raise shared.SharedError("Choose the required number of items from each offer group")
         if any(sku not in membership or membership[sku][1]["in_stock"] is False for sku in selected):
             raise shared.SharedError("An item is no longer available in this offer; reopen the offer")
-        basket = shared.project(shared.basket(client, session, order, retailer=retailer), queue["actions"])
+        confirmed = shared.basket(client, session, order, retailer=retailer)
+        basket = shared.project(confirmed, queue["actions"])
         current = {line.sku: line.quantity for line in basket.lines}
         additions = []
         for sku, item in selected.items():
@@ -304,12 +322,14 @@ def add_offer_items(body: OfferSelectionIn, user: User = Depends(get_current_use
                 raise shared.SharedError("A basket item cannot exceed 50 packs")
             additions.append({"kind": "quantity", "sku": sku,
                               "name": membership[sku][1]["name"], "quantity": quantity})
-        return {**store.enqueue_many(body.target_id, current_target, additions, user.id), **_scope(session)}
+        return {**store.enqueue_many(body.target_id, current_target, additions, user.id,
+                                    quantities={line.sku: line.quantity for line in confirmed.lines}), **_scope(session)}
 
 
 @router.post("/actions", dependencies=[Depends(require_person)])
 def actions(body: Action, user: User = Depends(get_current_user), session: Session = Depends(get_session),
-            factory: sessionmaker[Session] = Depends(get_session_factory)):
+            factory: sessionmaker[Session] = Depends(get_session_factory),
+            retailer: str = Depends(get_active_retailer)):
     with _operation(session, blocking=False):
         _check_selection(session, body)
         client = shared.make_client(shared.require_account(session).key)
@@ -318,9 +338,14 @@ def actions(body: Action, user: User = Depends(get_current_user), session: Sessi
         if queue["status"] in {"running", "failed"}:
             raise shared.SharedError("Wait for the running batch, or inspect and cancel the failed queue before adding changes")
         pinned = queue["target_id"] if queue["status"] == "pending" else None
-        current_target, _ = shared.target(client, pinned)
+        current_target, order = shared.target(client, pinned)
         action = body.model_dump(exclude={"target_id", "confirm", "account_id", "account_version"}, exclude_none=True)
-        return {**store.enqueue(body.target_id, current_target, action, user.id), **_scope(session)}
+        quantities = None
+        if body.kind == "quantity":
+            confirmed = shared.basket(client, session, order, retailer=retailer, name_products=False)
+            quantities = {line.sku: line.quantity for line in confirmed.lines}
+        return {**store.enqueue(body.target_id, current_target, action, user.id, quantities=quantities,
+                               slot_id=order.get("slotId") if order else None), **_scope(session)}
 
 
 @router.get("/queue")

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { IconArrowRight, IconBasket, IconCalendarWeek, IconCheck, IconClock, IconLeaf, IconMinus, IconPlus, IconSearch, IconShoppingBag, IconTruckDelivery, IconUserCircle, IconX } from '@tabler/icons-react'
 import { request } from './api.js'
 import { isReady, useSharedShop } from './useSharedShop.js'
@@ -30,32 +30,57 @@ function Quantity({ name, quantity, disabled, onChange, unavailable = false }) {
   </div>
 }
 
-function DeliveryCard({ order, queue, ready, loading, onSlots }) {
+function DeliveryCard({ order, queue, ready, loading, onSlots, total }) {
   const moved = queue?.actions?.findLast((action) => action.kind === 'slot')
   return <section className="delivery-card" aria-label="Current delivery">
     <IconTruckDelivery size={25} stroke={1.6} />
     <div className="delivery-information">
-      <p className="delivery-label">Your delivery</p>
-      <h1>{order ? day(order.delivery_start) : loading ? 'Checking delivery…' : ready ? 'No delivery booked' : 'Connect your Ocado account'}</h1>
-      {order && <p className="delivery-time">{slotTime(order.delivery_start, order.delivery_end)}</p>}
-      {moved && <p className="queued-slot">Move queued: {day(moved.start)}, {slotTime(moved.start, moved.end)}</p>}
+      <p className="delivery-label">Next delivery</p>
+      <h1>{order ? day(order.delivery_start) : loading ? 'Checking delivery…' : ready ? 'No delivery booked' : 'Waiting for Ocado'}</h1>
+      {order && <p className="delivery-time">{slotTime(order.delivery_start, order.delivery_end)}<span className="delivery-cost">{money(order.total ?? total)}<small>order total</small></span></p>}
+      {moved && <p className="queued-slot">New delivery time: {day(moved.start)}, {slotTime(moved.start, moved.end)}</p>}
     </div>
     {ready && <button type="button" className="delivery-link" onClick={onSlots}>{order ? 'Change' : 'Choose'}</button>}
     {order && <details className="delivery-details"><summary>Delivery details{order.editable === false ? ' · Editing closed' : ''}</summary><p>{order.address}</p><p>{order.edit_until ? `Edit until ${day(order.edit_until)}, ${time(order.edit_until)}` : 'Edit deadline unavailable'}</p></details>}
   </section>
 }
 
-function QueueBanner({ queue, busy, cancel, now }) {
-  if (!queue || queue.status === 'idle' || queue.status === 'succeeded') return null
-  const seconds = queue.due_at ? Math.max(0, Math.ceil((Date.parse(queue.due_at) - now) / 1000)) : 0
-  const countdown = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-  const headings = { pending: seconds > 0 ? `Changes send in ${countdown}` : 'Changes are ready to send', running: 'Sending the shared changes…', failed: 'The shared changes need attention', succeeded: 'The shared shop is up to date' }
-  return <section className={`queue-banner queue-${queue.status}`} aria-label="Shared change queue">
-    <div className="queue-top"><span className="queue-icon">{queue.status === 'succeeded' ? <IconCheck size={20} /> : <IconClock size={20} />}</span><div><h2 aria-live="polite">{headings[queue.status] || queue.status}</h2><p>{queue.status === 'pending' ? 'You can undo these before they’re sent. Each change restarts the 3-minute timer.' : queue.status === 'running' ? 'Please wait. New changes and cancellation are paused while Ocado applies this batch.' : queue.status === 'failed' ? 'No automatic retry. Check the actual order before clearing these changes, especially after a checkout error.' : 'Changes from everyone using this account appear here.'}</p></div></div>
-    {queue.error && <p className="queue-error" role="alert">{queue.error}</p>}
-    {queue.actions?.length > 0 && <details className="queue-details"><summary>{queue.actions.length} shared queued {queue.actions.length === 1 ? 'change' : 'changes'}</summary><ul>{queue.actions.map((action) => <li key={action.id}>{action.kind === 'quantity' ? `${action.name || action.sku}: ${action.quantity === 0 ? 'remove from basket' : `quantity ${action.quantity}`}` : action.kind === 'slot' ? `Delivery: ${day(action.start)}, ${slotTime(action.start, action.end)}` : 'Confirmed checkout'}</li>)}</ul></details>}
-    {(queue.status === 'pending' || queue.status === 'failed') && <button type="button" className="button button-outline button-small" disabled={busy} onClick={cancel}>{busy ? 'Please wait…' : queue.status === 'failed' ? 'Clear failed changes' : 'Cancel all queued changes'}</button>}
-  </section>
+function EditingStatus({ queue, busy, cancel, now }) {
+  const [open, setOpen] = useState(false)
+  const [toast, setToast] = useState(null)
+  const previous = useRef(null)
+  const active = ['pending', 'running', 'failed'].includes(queue?.status) && queue?.actions?.length > 0
+  useEffect(() => { if (!active) setOpen(false) }, [active])
+  useEffect(() => {
+    const before = previous.current
+    previous.current = queue?.status
+    let message = null
+    if (queue?.status === 'pending' && queue.actions?.length) message = 'Changes noted. You can keep shopping.'
+    if (queue?.status === 'succeeded' && before && before !== 'succeeded') message = 'Your changes have been saved.'
+    if (queue?.status === 'failed' && before !== 'failed') message = 'Please review your changes.'
+    setToast(message)
+    const timeout = window.setTimeout(() => setToast(null), 4500)
+    return () => window.clearTimeout(timeout)
+  }, [queue?.status, queue?.updated_at, queue?.actions?.length])
+  const remaining = queue?.due_at ? Math.max(0, Math.min(1, (Date.parse(queue.due_at) - now) / 180000)) : 0
+  const title = queue?.status === 'running' ? 'Saving your changes' : queue?.status === 'failed' ? 'Review your changes' : 'Editing your shop'
+  const progress = <span className="save-progress" role={queue?.status === 'pending' ? 'progressbar' : undefined} aria-label="Time remaining before automatic saving" aria-valuemin={queue?.status === 'pending' ? 0 : undefined} aria-valuemax={queue?.status === 'pending' ? 100 : undefined} aria-valuenow={queue?.status === 'pending' ? Math.round(remaining * 100) : undefined}>
+    <svg viewBox="0 0 28 28" aria-hidden="true"><circle className="progress-track" cx="14" cy="14" r="11" /><circle className="progress-value" cx="14" cy="14" r="11" pathLength="100" strokeDasharray={`${remaining * 100} 100`} /></svg>
+    {queue?.status === 'failed' ? <span aria-hidden="true">!</span> : queue?.status === 'running' ? <IconClock size={12} aria-hidden="true" /> : <IconCheck size={12} aria-hidden="true" />}
+  </span>
+  return <>
+    {active && <div className="editing-bar"><button type="button" className={`editing-pill editing-${queue.status}`} onClick={() => setOpen(true)} aria-haspopup="dialog">{progress}<span>{title}</span><span className="pill-details">View changes<IconArrowRight size={14} /></span></button></div>}
+    <div className="toast-region" role="status" aria-live="polite" aria-atomic="true">{toast && <div className="shop-toast"><IconCheck size={20} aria-hidden="true" /><span>{toast}</span><button type="button" className="icon-button" aria-label="Dismiss notification" onClick={() => setToast(null)}><IconX size={18} /></button></div>}</div>
+    {open && active && <Confirm title="Your changes" closeLabel="Keep shopping" onClose={() => setOpen(false)}>
+      <p className="muted">{queue.status === 'pending' ? 'Take your time. We’ll save these automatically when you’ve finished making changes. The little circle shows the time left.' : queue.status === 'running' ? 'We’re saving these with Ocado. Please wait a moment.' : 'We couldn’t confirm that everything saved. Check your order on Ocado before trying again.'}</p>
+      <ul className="change-list">{queue.actions.map((action) => <li key={action.id}>
+        <span className="change-symbol" aria-hidden="true">{action.kind === 'quantity' ? action.quantity === 0 ? <IconMinus size={18} /> : <IconBasket size={18} /> : action.kind === 'slot' ? <IconTruckDelivery size={18} /> : <IconCheck size={18} />}</span>
+        <div><strong>{action.kind === 'quantity' ? action.name || action.sku : action.kind === 'slot' ? 'Delivery time' : 'Place your order'}</strong><p>{action.kind === 'quantity' ? action.quantity === 0 ? 'Remove from basket' : `${action.quantity} ${action.quantity === 1 ? 'pack' : 'packs'}${action.original_quantity != null ? ` · previously ${action.original_quantity}` : ''}` : action.kind === 'slot' ? `${day(action.start)}, ${slotTime(action.start, action.end)}` : 'Using your saved payment method'}</p></div>
+      </li>)}</ul>
+      {queue.error && <details className="save-error"><summary>More information</summary><p>{queue.error}</p></details>}
+      {queue.status !== 'running' && <><p className="cancel-explanation">{queue.status === 'failed' ? 'Clearing this list won’t undo any changes Ocado has already saved.' : 'Cancel changes removes everyone’s unsaved edits. Your booked delivery stays in place.'}</p><button type="button" className="button button-outline cancel-changes" disabled={busy} onClick={async () => { if (await cancel()) setOpen(false) }}>{busy ? 'Please wait…' : queue.status === 'failed' ? 'Clear reviewed changes' : 'Cancel changes'}</button></>}
+    </Confirm>}
+  </>
 }
 
 function Basket({ lines, basket, order, queue, locked, action, onSearch, onCheckout, onOffer }) {
@@ -63,8 +88,8 @@ function Basket({ lines, basket, order, queue, locked, action, onSearch, onCheck
   const quantity = lines.reduce((sum, line) => sum + line.quantity, 0)
   return <>
     <div className="section-heading"><h2>Your basket <span className="count">{quantity}</span></h2><div className="basket-tools"><button type="button" className="button button-outline button-small" onClick={onSearch}>Add items<IconPlus size={18} /></button></div></div>
-    {pending && <p className="section-copy">Your changes are shown below. Ocado confirms new prices when they’re sent.</p>}
-    {!lines.length ? <Empty title="Room for something delicious">Search for your favourites and start adding to the shared basket.</Empty> : <div className="product-list">{lines.map((line) => <article className="basket-line" key={line.sku}>
+    {pending && <p className="section-copy">Your changes are shown below. We’ll save them for you automatically.</p>}
+    {!lines.length ? <Empty title="Room for something delicious">Search for your favourites and add them to your basket.</Empty> : <div className="product-list">{lines.map((line) => <article className="basket-line" key={line.sku}>
       <ProductImage src={line.image_url} />
       <div className="product-information"><h3>{line.name || line.sku}</h3>{line.pack && <p className="pack">{line.pack}</p>}
         <Offers offers={line.offers} onOffer={onOffer} />
@@ -78,9 +103,9 @@ function Basket({ lines, basket, order, queue, locked, action, onSearch, onCheck
       <div><span>{pending ? 'Last confirmed total' : order ? 'Booked total' : 'Basket total'}</span><strong>{money(basket?.total)}</strong></div>
       {basket?.minimum != null && <p>Minimum order {money(basket.minimum)}. Delivery and final prices are confirmed by Ocado.</p>}
       {basket?.restrictions?.length > 0 && <ul className="restrictions">{basket.restrictions.map((restriction, index) => <li key={index}>{restriction}</li>)}</ul>}
-      {!order && basket?.can_checkout === false && <p>Ocado does not currently mark this basket ready for checkout. Queued items or a slot may resolve this; eligibility is checked again after applying your changes.</p>}
-      {!order && <button type="button" className="button button-primary" disabled={locked || !lines.length || queue?.actions?.some((item) => item.kind === 'checkout')} onClick={onCheckout}>{queue?.actions?.some((item) => item.kind === 'checkout') ? 'Checkout is queued' : 'Review & queue checkout'}<IconArrowRight size={18} /></button>}
-      <p className="checkout-note">{order ? 'Already booked. Item and delivery changes are saved automatically after the 3-minute timer.' : 'Checkout uses the shared account’s saved payment method. Review before confirming.'}</p>
+      {!order && basket?.can_checkout === false && <p>Your basket isn’t ready to order yet. Add your items and choose a delivery time, then review your order.</p>}
+      {!order && <button type="button" className="button button-primary" disabled={locked || !lines.length || queue?.actions?.some((item) => item.kind === 'checkout')} onClick={onCheckout}>{queue?.actions?.some((item) => item.kind === 'checkout') ? 'Order ready to place' : 'Review your order'}<IconArrowRight size={18} /></button>}
+      <p className="checkout-note">{order ? 'Your delivery is booked. We’ll save your changes automatically.' : 'Checkout uses the shared account’s saved payment method. Review before confirming.'}</p>
     </section>
   </>
 }
@@ -179,16 +204,16 @@ function Search({ lines, locked, action, reportError, onOffer }) {
   return <>
     <div className="section-heading"><h2>Search groceries</h2></div>
     <label className="search-field"><IconSearch size={22} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search for milk, bread, fish…" aria-label="Search Ocado products" autoComplete="off" />{query && <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><IconX size={18} /></button>}</label>
-    <p className="section-copy">Use + to add to your basket. Changes send after 3 minutes.</p>
+    <p className="section-copy">Tap + to add an item. We’ll save your changes for you.</p>
     {loading && <p className="loading" role="status">Searching the shelves…</p>}
     {error && <div className="inline-error" role="alert">{error}</div>}
-    {!query.trim() && <Empty icon={IconSearch} title="What’s on your list?">Search the Ocado shelves, then use + to add to the shared basket.</Empty>}
+    {!query.trim() && <Empty icon={IconSearch} title="What’s on your list?">Find your favourites, then tap + to add them.</Empty>}
     {result && !result.products?.length && <Empty icon={IconSearch} title="Nothing on this shelf">Try another name or a simpler search.</Empty>}
     {result?.products?.length > 0 && <><p className="results-label" aria-live="polite">{result.products.length} results for “{result.query}”</p><div className="search-grid">{result.products.map((product) => <article className="search-product" key={product.sku}><div className="product-topline"><ProductImage src={product.image_url} />{product.in_stock === false && <span className="stock-badge">Out of stock</span>}</div><h3>{product.name || product.sku}</h3><p className="pack">{product.pack}</p><Offers offers={product.offers} onOffer={onOffer} /><div className="product-bottom"><div><strong>{money(product.price)}</strong>{product.base_price != null && <span className="was-price">was {money(product.base_price)}</span>}{product.unit_price != null && <small>{money(product.unit_price)}{product.unit_basis ? ` / ${product.unit_basis}` : ''}</small>}</div><Quantity name={product.name || product.sku} quantity={quantities.get(String(product.sku)) || 0} disabled={locked} unavailable={product.in_stock === false} onChange={(quantity) => action({ kind: 'quantity', sku: product.sku, name: product.name, quantity })} /></div></article>)}</div></>}
   </>
 }
 
-function Slots({ queue, order, locked, action, reportError }) {
+function Slots({ queue, locked, action, reportError }) {
   const [items, setItems] = useState(null)
   const [error, setError] = useState(null)
   const [selected, setSelected] = useState(null)
@@ -220,7 +245,7 @@ function Slots({ queue, order, locked, action, reportError }) {
   const queued = queue?.actions?.findLast((item) => item.kind === 'slot')
   return <>
     <div className="section-heading"><h2>Delivery times</h2><button type="button" className="text-button" disabled={loading} onClick={() => setReload((value) => value + 1)}>Refresh</button></div>
-    <p className="section-copy">Choose a day, then morning, afternoon or evening. Your booking changes only after you confirm and the 3-minute timer ends.</p>
+    <p className="section-copy">Choose a day, then a time that suits you. We’ll save your choice automatically after you confirm.</p>
     {loading && <p className="loading" role="status">Finding delivery times…</p>}
     {error && <p className="inline-error" role="alert">{error}</p>}
     {!loading && !error && !items?.length && <Empty icon={IconCalendarWeek} title="No delivery slots available">Try refreshing later. Your current booking has not changed.</Empty>}
@@ -236,11 +261,11 @@ function Slots({ queue, order, locked, action, reportError }) {
         <button type="button" className="day-toggle" aria-expanded={openDay === date} aria-controls={`day-${date.replaceAll(/[^a-zA-Z0-9]/g, '')}`} onClick={() => { setOpenDay(openDay === date ? null : date); setOpenPeriod(null); setSelected(null) }}><span><strong>{label}</strong><small>{available.length ? `${available.length} times${prices.length ? ` · from ${money(Math.min(...prices))}` : ''}` : 'No available times'}</small></span><span aria-hidden="true">{openDay === date ? '−' : '+'}</span></button>
         <div id={`day-${date.replaceAll(/[^a-zA-Z0-9]/g, '')}`} hidden={openDay !== date}>{periods.map((period) => <section className="slot-period" key={period.label}>
           <button type="button" className="period-toggle" aria-expanded={openPeriod === period.label} onClick={() => { setOpenPeriod(openPeriod === period.label ? null : period.label); setSelected(null) }}><span>{period.label}<small>{period.label === 'Morning' ? 'Before 12 noon' : period.label === 'Afternoon' ? '12 noon – 5pm' : period.label === 'Evening' ? 'From 5pm' : ''}</small></span><span aria-hidden="true">{openPeriod === period.label ? '−' : '+'}</span></button>
-          <div className="slot-grid" hidden={openPeriod !== period.label}>{period.slots.map((slot) => <button type="button" className={`slot-option ${selected?.slot_id === slot.slot_id ? 'selected' : ''}`} key={slot.slot_id} aria-pressed={selected?.slot_id === slot.slot_id} disabled={!slot.available || locked} onClick={() => setSelected({ ...slot, target_id: queue.target_id })}><strong>{slotTime(slot.start, slot.end)}</strong><span>{slot.available ? money(slot.price) : 'Unavailable'}</span>{slot.eco && <small className="eco"><IconLeaf size={14} />Greener slot</small>}{queued?.slot_id === slot.slot_id && <small>Currently queued</small>}</button>)}</div>
+          <div className="slot-grid" hidden={openPeriod !== period.label}>{period.slots.map((slot) => <button type="button" className={`slot-option ${selected?.slot_id === slot.slot_id ? 'selected' : ''}`} key={slot.slot_id} aria-pressed={selected?.slot_id === slot.slot_id} disabled={!slot.available || locked} onClick={() => setSelected({ ...slot, target_id: queue.target_id })}><strong>{slotTime(slot.start, slot.end)}</strong><span>{slot.available ? money(slot.price) : 'Unavailable'}</span>{slot.eco && <small className="eco"><IconLeaf size={14} />Greener slot</small>}{queued?.slot_id === slot.slot_id && <small>Your new choice</small>}</button>)}</div>
         </section>)}</div>
       </section>
     })}
-    {selected && <section className="slot-confirm"><div><span className="eyebrow">Your selection</span><h3>{day(selected.start)}</h3><p>{slotTime(selected.start, selected.end)} · {money(selected.price)}</p></div><button type="button" className="button button-primary" disabled={locked || loading || Boolean(error) || selected.target_id !== queue.target_id} onClick={async () => { const accepted = await action({ kind: 'slot', target_id: selected.target_id, slot_id: selected.slot_id, start: selected.start, end: selected.end }); if (accepted) setSelected(null) }}>Queue {order ? 'delivery move' : 'delivery slot'}<IconArrowRight size={18} /></button></section>}
+    {selected && <section className="slot-confirm"><div><span className="eyebrow">Your selection</span><h3>{day(selected.start)}</h3><p>{slotTime(selected.start, selected.end)} · {money(selected.price)}</p></div><button type="button" className="button button-primary" disabled={locked || loading || Boolean(error) || selected.target_id !== queue.target_id} onClick={async () => { const accepted = await action({ kind: 'slot', target_id: selected.target_id, slot_id: selected.slot_id, start: selected.start, end: selected.end }); if (accepted) setSelected(null) }}>Choose this time<IconArrowRight size={18} /></button></section>}
   </>
 }
 
@@ -261,11 +286,11 @@ function Account({ auth, busy, authenticate, accessExpired, selectAccount, queue
         {auth.accounts.map((account) => <option key={account.id} value={account.id}>{account.label}{account.email ? ` · ${account.email}` : ''}</option>)}
       </select></label>
       <p>Everyone uses this selection for the basket, delivery and shared changes.</p>
-      {queueBlocked && <p role="status">Finish or clear the queued changes before switching accounts.</p>}
+      {queueBlocked && <p role="status">Save or cancel the changes before switching accounts.</p>}
       <button type="submit" className="button button-primary" disabled={busy || accessExpired || queueBlocked || !accountId || Number(accountId) === auth.account_id}>{busy ? 'Changing account…' : 'Use this account for everyone'}</button>
     </form>}
     <div className="account-status"><span className={`status-dot ${isReady(auth) ? 'connected' : ''}`} /><div><strong>{isReady(auth) ? 'Ocado is connected' : otp ? 'One-time code needed' : 'Connect to Ocado'}</strong><p>{auth?.email || 'The household’s shared Ocado account'}</p></div><span className="status-pill">{auth?.status?.replaceAll('_', ' ') || 'Checking'}</span></div>
-    <p className="section-copy">Everyone authorised for this app uses the same Ocado login, delivery, saved payment method and change queue. Signing out disconnects it for everyone.</p>
+    <p className="section-copy">Everyone authorised for this app uses the same Ocado login, delivery, saved payment method and changes. Signing out disconnects it for everyone.</p>
     {auth?.stage && auth.stage !== 'idle' && <p className="stage" role="status">Authentication: {auth.stage.replaceAll('_', ' ')}</p>}
     {!isReady(auth) && !otp && <form className="account-form" onSubmit={async (event) => { event.preventDefault(); const secret = password; setPassword(''); await authenticate('/login', { email: email.trim(), password: secret }) }}><label>Email address<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} disabled={busy || accessExpired} /></label><label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy || accessExpired} /></label><button className="button button-primary" type="submit" disabled={busy || accessExpired}>{busy ? 'Connecting…' : 'Connect shared account'}<IconArrowRight size={18} /></button></form>}
     {otp && <form className="account-form" onSubmit={async (event) => { event.preventDefault(); const accepted = await authenticate('/otp', { code: code.trim() }); if (accepted) setCode('') }}><p>Enter the one-time code sent by Ocado to finish connecting the shared account.</p><label>One-time code<input type="text" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={(event) => setCode(event.target.value)} disabled={busy || accessExpired} /></label><button type="submit" className="button button-primary" disabled={busy || accessExpired}>{busy ? 'Verifying…' : 'Verify code'}</button></form>}
@@ -274,10 +299,11 @@ function Account({ auth, busy, authenticate, accessExpired, selectAccount, queue
   </>
 }
 
-function Confirm({ title, children, onClose }) {
+function Confirm({ title, children, onClose, closeLabel = 'Go back' }) {
   const ref = useRef(null)
+  const titleId = useId()
   useEffect(() => { ref.current.showModal() }, [])
-  return <dialog ref={ref} className="confirm-dialog" aria-labelledby="confirm-title" onCancel={onClose} onClose={onClose}><div className="dialog-heading"><h2 id="confirm-title">{title}</h2><button type="button" className="icon-button" aria-label="Close confirmation" onClick={onClose}><IconX size={22} /></button></div>{children}<button type="button" className="button button-outline" onClick={onClose}>Go back</button></dialog>
+  return <dialog ref={ref} className="confirm-dialog" aria-labelledby={titleId} onCancel={onClose} onClose={onClose}><div className="dialog-heading"><h2 id={titleId}>{title}</h2><button type="button" className="icon-button" aria-label="Close confirmation" onClick={onClose}><IconX size={22} /></button></div>{children}<button type="button" className="button button-outline" onClick={onClose}>{closeLabel}</button></dialog>
 }
 
 export default function App() {
@@ -285,10 +311,9 @@ export default function App() {
   const [tab, setTab] = useState('basket')
   const [now, setNow] = useState(Date.now())
   const [checkout, setCheckout] = useState(false)
-  const [cancelQueue, setCancelQueue] = useState(false)
   const [offer, setOffer] = useState(null)
   const [online, setOnline] = useState(navigator.onLine)
-  useEffect(() => { setCheckout(false); setCancelQueue(false); setOffer(null) }, [shop.auth?.account_id, shop.auth?.account_version])
+  useEffect(() => { setCheckout(false); setOffer(null) }, [shop.auth?.account_id, shop.auth?.account_version])
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     const update = () => setOnline(navigator.onLine)
@@ -297,11 +322,17 @@ export default function App() {
     return () => { window.clearInterval(timer); window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
   const ready = isReady(shop.auth)
+  const canManageSettings = shop.auth?.can_manage_settings === true
+  const currentTab = tab === 'account' && !canManageSettings ? 'basket' : tab
   const locked = shop.locked || !online
   // Quantity actions are absolute, so overlaying the queue is idempotent even
   // when the server basket already includes those projected quantities.
   const projected = new Map((shop.state?.basket?.lines || []).map((line) => [String(line.sku), { ...line }]))
   if (shop.state?.queue?.target_id === shop.queue?.target_id) {
+    // Rebuild from confirmed quantities before overlaying the latest edits.
+    for (const line of projected.values()) {
+      if (shop.queue.status !== 'succeeded') line.quantity = shop.state.confirmed_quantities?.[String(line.sku)] ?? 0
+    }
     for (const action of shop.queue?.actions || []) {
       if (action.kind !== 'quantity') continue
       const key = String(action.sku)
@@ -318,36 +349,30 @@ export default function App() {
   return <div className="ocado-app">
     <a className="skip-link" href="#shop-content">Skip to shop</a>
     <header className="app-header"><div className="header-inner"><a className="brand" href="#" onClick={(event) => { event.preventDefault(); navigate('basket') }} aria-label="Shared shop basket"><span className="brand-mark"><IconLeaf size={24} stroke={1.6} /></span><span>ocado<span className="brand-subtitle">the shared shop</span></span></a><button type="button" className="text-button" disabled={shop.busy || shop.syncing || !online || !ready} onClick={shop.refresh}>{shop.syncing ? 'Updating…' : 'Refresh'}</button></div></header>
-    <div className="app-layout"><DeliveryCard order={order} queue={shop.queue} ready={ready} loading={shop.loading} onSlots={() => navigate('slots')} />
+    <div className="app-layout"><EditingStatus key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} now={now} busy={shop.busy || !online || shop.accessExpired} cancel={() => shop.cancel({ ...shop.selection, target_id: shop.queue.target_id })} /><DeliveryCard order={order} queue={shop.queue} ready={ready} loading={shop.loading} onSlots={() => navigate('slots')} total={basket?.total} />
     <div className="workspace">
       {!online && <div className="notice notice-error" role="alert"><strong>You’re offline.</strong> Reconnect before making changes. Nothing is automatically retried.</div>}
       {shop.error && <div className="notice notice-error" role="alert"><div><strong>{shop.accessExpired ? 'Sign in again to continue' : 'We couldn’t complete that request'}</strong><p>{shop.error}</p></div>{shop.accessExpired ? <a className="button button-outline button-small" href={window.location.pathname + window.location.search}>Sign in again</a> : <button type="button" className="button button-outline button-small" disabled={shop.busy || shop.syncing} onClick={() => { shop.clearError(); void shop.refresh() }}>Refresh shop</button>}</div>}
-      <QueueBanner queue={shop.queue} now={now} busy={shop.busy || !online || shop.accessExpired} cancel={() => setCancelQueue({ ...shop.selection, target_id: shop.queue.target_id })} />
       <main id="shop-content" className="content-panel" tabIndex={-1} aria-busy={shop.loading || shop.syncing}>
         {shop.loading && !shop.auth ? <div className="loading-block" role="status"><span className="spinner" /><h2>Opening the shared shop</h2><p>Finding your next delivery and everyone’s latest changes.</p></div> : <>
           {ready && shop.stale && <div className="notice notice-error" role="status">Refresh the basket before making changes.<button type="button" className="text-button" onClick={shop.refresh} disabled={shop.busy || shop.syncing || !online}>Refresh</button></div>}
-          {(!ready || tab === 'account') ? <Account key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selectAccount={shop.selectAccount} queueBlocked={['pending', 'running', 'failed'].includes(shop.queue?.status)} auth={shop.auth} busy={shop.busy} authenticate={shop.authenticate} accessExpired={shop.accessExpired} /> : !shop.state ? <Empty icon={IconTruckDelivery} title="Your shop isn’t available yet">{shop.syncing ? 'Loading your booked delivery and basket…' : 'Refresh the shop to try again. No changes have been sent.'}</Empty> : <>
-            {tab === 'basket' && <Basket {...basketProps} />}
-            {tab === 'search' && <Search key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} lines={lines} locked={locked} action={shop.action} reportError={shop.reportError} onOffer={setOffer} />}
-            {tab === 'slots' && <Slots key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} order={order} locked={locked} action={shop.action} reportError={shop.reportError} />}
+          {(canManageSettings && (!ready || currentTab === 'account')) ? <Account key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selectAccount={shop.selectAccount} queueBlocked={['pending', 'running', 'failed'].includes(shop.queue?.status)} auth={shop.auth} busy={shop.busy} authenticate={shop.authenticate} accessExpired={shop.accessExpired} /> : !ready ? <Empty icon={IconTruckDelivery} title="Your shop will be back soon">Please ask Nikhil to reconnect Ocado. Your booked delivery is still with Ocado.</Empty> : !shop.state ? <Empty icon={IconTruckDelivery} title="Your shop isn’t available yet">{shop.syncing ? 'Loading your booked delivery and basket…' : 'Refresh the shop to try again. No changes have been sent.'}</Empty> : <>
+            {currentTab === 'basket' && <Basket {...basketProps} />}
+            {currentTab === 'search' && <Search key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} lines={lines} locked={locked} action={shop.action} reportError={shop.reportError} onOffer={setOffer} />}
+            {currentTab === 'slots' && <Slots key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} locked={locked} action={shop.action} reportError={shop.reportError} />}
           </>}
         </>}
       </main><p className="app-footnote">Prices and offers are confirmed by Ocado. Times shown for the UK.</p>
     </div></div>
-    <nav className="bottom-nav" aria-label="Shared shop navigation">{tabs.map(({ id, label, icon: Icon }) => <button type="button" key={id} className={tab === id ? 'active' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={23} stroke={tab === id ? 2 : 1.6} />{id === 'basket' && totalItems > 0 && <span className="nav-badge">{totalItems > 99 ? '99+' : totalItems}</span>}</span><span>{label}</span></button>)}</nav>
+    <nav className="bottom-nav" aria-label="Shared shop navigation">{tabs.filter(({ id }) => id !== 'account' || canManageSettings).map(({ id, label, icon: Icon }) => <button type="button" key={id} className={currentTab === id ? 'active' : ''} aria-current={currentTab === id ? 'page' : undefined} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={23} stroke={currentTab === id ? 2 : 1.6} />{id === 'basket' && totalItems > 0 && <span className="nav-badge">{totalItems > 99 ? '99+' : totalItems}</span>}</span><span>{label}</span></button>)}</nav>
     {offer && <OfferPicker key={`${shop.auth?.account_id}:${shop.auth?.account_version}:${offer.id}`} offer={offer} lines={lines} locked={locked} selection={shop.selection} targetId={shop.queue?.target_id} addOffer={shop.addOffer} addSingle={shop.action} reportError={shop.reportError} onClose={() => setOffer(null)} />}
-    {checkout && <Confirm title="Queue checkout for everyone?" onClose={() => setCheckout(false)}>
-      {checkout.target_id !== shop.queue?.target_id && <p className="inline-error" role="alert">The target delivery has changed. Go back and review the current shared basket before confirming.</p>}
+    {checkout && <Confirm title="Place your order?" onClose={() => setCheckout(false)}>
+      {checkout.target_id !== shop.queue?.target_id && <p className="inline-error" role="alert">Your delivery has changed. Go back and review your basket before confirming.</p>}
       <p>You are confirming checkout of the <strong>{order ? 'booked delivery' : 'active shared basket'}</strong> with {totalItems} items, using the shared account’s saved payment method.</p>
       <div className="confirmation-total"><span>Last known total</span><strong>{money(basket?.total)}</strong></div>
-      <p>Pending edits may change this total. Checkout runs after other queued changes, when the shared 3-minute timer ends. Anyone’s next edit resets that timer. You can cancel before processing starts.</p>
-      <p className="muted">If Ocado requires payment verification or cannot complete checkout, the queue will show an error. A failed or uncertain checkout is never automatically retried.</p>
-      <button type="button" className="button button-primary" disabled={locked || checkout.target_id !== shop.queue?.target_id || !totalItems || shop.queue?.actions?.some((item) => item.kind === 'checkout')} onClick={async () => { const accepted = await shop.action({ ...checkout, kind: 'checkout', confirm: true }); if (accepted) setCheckout(false) }}>{shop.busy ? 'Queuing…' : 'Confirm & queue checkout'}</button>
-    </Confirm>}
-    {cancelQueue && <Confirm title={shop.queue?.status === 'failed' ? 'Clear failed changes?' : 'Cancel everyone’s queued changes?'} onClose={() => setCancelQueue(false)}>
-      {cancelQueue.target_id !== shop.queue?.target_id && <p className="inline-error" role="alert">The target delivery has changed. Go back and review the new queue.</p>}
-      <p>{shop.queue?.status === 'failed' ? 'This clears the failed queue; it does not undo anything Ocado may already have applied. Check the booked order and payment before intentionally trying again.' : 'All pending item changes, slot moves and checkout confirmations from every user will be removed. The booked order itself is not cancelled.'}</p>
-      <button type="button" className="button button-danger" disabled={shop.busy || shop.accessExpired || shop.queue?.status === 'running' || cancelQueue.target_id !== shop.queue?.target_id || !online} onClick={async () => { const accepted = await shop.cancel(cancelQueue); if (accepted) setCancelQueue(false) }}>{shop.busy ? 'Clearing…' : 'Clear shared queue'}</button>
+      <p>Your changes may affect the final total. We’ll place your order when you’ve finished editing. You can cancel your changes before saving starts.</p>
+      <p className="muted">If Ocado needs you to verify payment, we’ll let you know. We won’t try a payment again automatically.</p>
+      <button type="button" className="button button-primary" disabled={locked || checkout.target_id !== shop.queue?.target_id || !totalItems || shop.queue?.actions?.some((item) => item.kind === 'checkout')} onClick={async () => { const accepted = await shop.action({ ...checkout, kind: 'checkout', confirm: true }); if (accepted) setCheckout(false) }}>{shop.busy ? 'Please wait…' : 'Confirm order'}</button>
     </Confirm>}
   </div>
 }
