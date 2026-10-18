@@ -191,8 +191,9 @@ def state(session: Session = Depends(get_session), factory: sessionmaker[Session
         client, store = shared.make_client(account.key), QueueStore(factory)
         _, order, queue = _selection(client, store)
         basket = shared.project(shared.basket(client, session, order, retailer=retailer), queue["actions"])
-        return {**_scope(session), "order": asdict(orders.summarise(order)) if order else None,
-                "basket": asdict(basket), "queue": queue}
+        scope = _scope(session)
+        return {**scope, "order": asdict(orders.summarise(order)) if order else None,
+                "basket": asdict(basket), "queue": {**queue, **scope}}
 
 
 @router.get("/search")

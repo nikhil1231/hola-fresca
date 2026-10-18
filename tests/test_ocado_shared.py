@@ -268,6 +268,7 @@ def test_shared_projected_quantities_and_cancel_are_visible_across_people(shared
     assert {line["sku"]: line["quantity"] for line in state["basket"]["lines"]} == {"milk": 4, "bread": 2}
     assert all(line["cost"] is None for line in state["basket"]["lines"])
     assert state["basket"]["total"] == 3.0  # live estimate, not fabricated projected pricing
+    assert state["queue"] == second  # unchanged polls must not trigger another upstream basket read
     assert api.get("/api/ocado-shared/queue").json() == second
     assert second["due_at"] >= first["due_at"]
     assert _post(api, "/api/ocado-shared/queue/cancel", json={"target_id": "cart"}).json()["actions"] == []
