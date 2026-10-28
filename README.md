@@ -299,8 +299,10 @@ Endpoints and request bodies were read off the site's own JavaScript, not guesse
 The reads (subscriptions, plans, deliveries, a week, its menu) have since been
 confirmed against a real account and the answers kept, trimmed and anonymised, in
 `tests/fixtures/hellofresh/`; the gateway answered a bearer token from httpx with
-no Cloudflare cookies. Not yet seen live: the writes (skip/un-skip's `PATCH`,
-cancel) and `/login` itself. Meals aren't in the deliveries list; each coming
+no Cloudflare cookies. The skip `PATCH` has since been confirmed live too: it
+moved a real week to `PAUSED`, and the same call repeated reported `changed:
+false` without sending a second one. Not yet seen live: un-skip, cancel, and
+`/login` itself. Meals aren't in the deliveries list; each coming
 box's are read from `/my-deliveries/menu`. Whether a week can still be skipped is
 HelloFresh's own `allowedActions.pause`. Weeks are ISO weeks (`2030-W42`).
 
@@ -316,6 +318,35 @@ HelloFresh's own `allowedActions.pause`. Weeks are ISO weeks (`2030-W42`).
 | `GET subscriptions/{id}/product-options`, `POST plans/{id}/product` | `/api/subscriptions/{id}/product_options`, `PATCH /api/plans/{id}` `{productHandle}` |
 | `GET plans`, `GET plans/{id}`, `POST plans/{id}/cancel` `{reason?}` | `/api/plans`, `POST /api/plans/{id}/cancel` + `/cancellation/reason` |
 | `GET orders`, `GET menu/{week}`, `GET raw/customer`, `GET raw/deliveries` | `/api/customers/me/orders`, `/menus-service/menus`, `/api/customers/me` |
+
+### Skipping by default
+
+A box arrives unless somebody stops it, and HelloFresh's window gains a week at
+its far edge every week, arriving `RUNNING`. So `app/hellofresh/autoskip.py`
+inverts the default: a week is skipped the first time it is ever seen, on every
+account the env file can sign in.
+
+Doing that safely needs one fact HelloFresh does not keep. A delivery is
+`RUNNING` or `PAUSED` with no author and no history, so a week somebody
+un-skipped on purpose is indistinguishable from one that has just appeared —
+and a job that skipped everything running would undo that choice a few days
+later. `hellofresh_week_decisions` is the missing half: one row per week the job
+has settled, and a week with a row is never touched again. Un-skip anywhere —
+here, HelloFresh's app, their website — and it stays un-skipped. A week found
+already paused is recorded without a write, which is the half that is easy to
+miss: without that row, the first un-skip of it would read as a new week and be
+skipped straight back. A settled week found `RUNNING` again is left alone and
+reported, because from here there is no telling whether you un-skipped it or
+HelloFresh moved the plan, and acting on the guess either delivers an unwanted
+box or cancels a wanted one.
+
+    python -m app.hellofresh autoskip --dry-run   # what it would do, writing nothing
+    python -m app.hellofresh autoskip             # settle every unseen week
+
+Run weekly by `infra-holafresca-autoskip.timer` (Sunday 22:00, `Persistent`) via
+`~/infra/stacks/holafresca/autoskip`, which sends the two lines worth a person's
+attention — a week running again, and anything that failed — to `bin/notify`. A
+failed write deliberately records nothing, so the next run tries it again.
 
 Everything that changes the subscription needs `{"confirm": true}` in the body.
 Not mapped yet: choosing the week's meals (it goes through a separate carts
