@@ -369,3 +369,25 @@ def cancel(body: CancelIn, session: Session = Depends(get_session),
         if shared.find_account(session) is None:
             return {**empty(), **_scope(session)}
         return {**QueueStore(factory).cancel(body.target_id), **_scope(session)}
+
+
+@router.post("/queue/retry", dependencies=[Depends(require_person)])
+def retry(body: CancelIn, session: Session = Depends(get_session),
+          factory: sessionmaker[Session] = Depends(get_session_factory)):
+    """Send changes Ocado refused (and that we confirmed didn't land) straight away."""
+    with _operation(session, blocking=False):
+        _check_selection(session, body)
+        return {**QueueStore(factory).retry(body.target_id), **_scope(session)}
+
+
+@router.post("/queue/check", dependencies=[Depends(require_person)])
+def check(body: CancelIn, session: Session = Depends(get_session),
+          factory: sessionmaker[Session] = Depends(get_session_factory)):
+    """Read Ocado back for a failed batch: clear it if it landed, unlock it if nothing changed."""
+    with _operation(session, blocking=False):
+        _check_selection(session, body)
+        if shared.find_account(session) is None:
+            return {**empty(), **_scope(session)}
+        client = shared.make_client(shared.account_key(session))
+        return {**QueueStore(factory).recheck(lambda target, actions: shared.verify(client, target, actions)),
+                **_scope(session)}

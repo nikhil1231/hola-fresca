@@ -25,6 +25,8 @@ from app.ocado import shared
 log = logging.getLogger(__name__)
 DEBOUNCE = timedelta(seconds=180)
 ACTIVE = {"pending", "running", "failed"}
+NOT_SAVED = ("Ocado didn't accept these changes ({reason}). We checked your order and nothing was changed, "
+             "so your changes are kept here: try again, or keep editing and they'll be sent together.")
 UNCERTAIN = ("The server stopped while this batch was running. Its changes or payment may have completed. "
              "Check the delivery on ocado.com, then cancel this queue before intentionally submitting anything again.")
 
@@ -207,6 +209,59 @@ class QueueStore:
             db.commit()
             return {**batch, "version": row.version + 1}
 
+    def settle(self, version: int, reason: str, outcome: str, *, now: datetime | None = None) -> None:
+        """Record a failed run by what Ocado shows afterwards, not by the exception alone.
+
+        Applied: it landed despite the error, so it succeeded. Unchanged: nothing
+        landed, so the batch goes back to an editable pending state with no timer —
+        it is resubmitted only when someone retries or edits again, never by itself.
+        Anything else stays ``failed`` for a person to check on ocado.com."""
+        if outcome == shared.APPLIED:
+            self.finish(version, None, now=now)
+            return
+        if outcome != shared.UNCHANGED:
+            self.finish(version, f"{reason}. Changes or checkout may be incomplete; check Ocado before cancelling "
+                                 "and intentionally submitting another batch.", now=now)
+            return
+        with self.factory() as db:
+            row = self._row(db)
+            if row is None or row.version != version or row.status != "running":
+                raise shared.SharedError("The claimed batch changed while it was executing")
+            self._cas(db, row, status="pending", due_at=None, error=NOT_SAVED.format(reason=reason.rstrip(".")),
+                      updated_at=now or utcnow())
+
+    def recheck(self, outcome_for: Callable[[str, list[dict]], str], *, now: datetime | None = None) -> dict:
+        """Re-read Ocado for a failed batch. Caller MUST hold the account lock."""
+        with self.factory() as db:
+            row = self._row(db)
+            if row is None or row.status != "failed":
+                return _out(row) if row is not None else empty()
+            outcome = outcome_for(row.target_id, json.loads(row.actions_json))
+            if outcome == shared.APPLIED:
+                self._cas(db, row, status="succeeded", actions_json="[]", error=None, due_at=None,
+                          updated_at=now or utcnow())
+            elif outcome == shared.UNCHANGED:
+                self._cas(db, row, status="pending", due_at=None, updated_at=now or utcnow(),
+                          error=NOT_SAVED.format(reason="the last attempt failed"))
+            else:
+                raise shared.SharedError("Ocado's order doesn't match either the old or the requested basket; "
+                                         "check it on ocado.com, then clear these changes")
+            db.refresh(row)
+            return _out(row)
+
+    def retry(self, target_id: str | None = None, *, now: datetime | None = None) -> dict:
+        """Send a held (unsent, verified-unchanged) batch now."""
+        now = now or utcnow()
+        with self.factory() as db:
+            row = self._row(db)
+            if row is None or row.status != "pending" or not json.loads(row.actions_json):
+                raise shared.SharedError("There are no held changes to send")
+            if target_id is not None and row.target_id != target_id:
+                raise shared.SharedError("The queue target changed; refresh before retrying")
+            self._cas(db, row, due_at=now, error=None, updated_at=now)
+            db.refresh(row)
+            return _out(row)
+
     def finish(self, version: int, error: str | None, *, now: datetime | None = None) -> None:
         with self.factory() as db:
             row = self._row(db)
@@ -234,13 +289,16 @@ class Worker:
                 batch = self.store.claim(now=now)
                 if batch is None:
                     return False
+                client = None
                 try:
                     client = self.client_factory(shared.account_key())
                     shared.execute(client, batch["target_id"], batch["actions"])
                 except Exception as exc:  # upstream failures are retained, never automatically retried
-                    error = (f"{exc}. Changes or checkout may be incomplete; check Ocado before cancelling "
-                             "and intentionally submitting another batch.")
-                    self.store.finish(batch["version"], error, now=now)
+                    log.warning("Shared Ocado batch failed: %s", exc, exc_info=True)
+                    outcome = shared.verify(client, batch["target_id"], batch["actions"]) \
+                        if client is not None else shared.UNKNOWN
+                    log.info("Shared Ocado batch read back as %s", outcome)
+                    self.store.settle(batch["version"], str(exc).rstrip(".") or type(exc).__name__, outcome, now=now)
                 else:
                     self.store.finish(batch["version"], None, now=now)
                 return True

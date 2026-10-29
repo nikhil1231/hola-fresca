@@ -907,3 +907,63 @@ def test_only_named_owner_can_change_shared_settings(shared_api, factory, path, 
     # Shopping and shared session recovery still work for the household.
     assert api.get("/api/ocado-shared/state").status_code == 200
     assert _post(api, "/api/ocado-shared/session/refresh", json={}).status_code == 200
+
+
+class _ReadBack:
+    """Only what verify() reads: the order as Ocado shows it after a failed run."""
+
+    def __init__(self, milk):
+        self.milk = milk
+
+    def get_order(self, order_id):
+        return {**booked(order_id), "items": [{"product": "milk", "quantity": self.milk}]}
+
+    def orders(self, pending=True):
+        return [booked("order")]
+
+
+def _failing_run(monkeypatch, factory, people, milk_after):
+    store = QueueStore(factory)
+    store.enqueue("order", "order", _quantity(quantity=3), people[0], now=NOW, quantities={"milk": 2})
+
+    def boom(*_):
+        raise RuntimeError("The payment provider rejected payment completion (HTTP 404)")
+    monkeypatch.setattr(shared, "execute", boom)
+    assert Worker(factory, client_factory=lambda _key: _ReadBack(milk_after)).step(now=NOW + timedelta(seconds=180))
+    return store
+
+
+def test_refused_batch_that_changed_nothing_stays_editable_and_is_not_resent(setup_shared, monkeypatch):
+    factory, people, _owner = setup_shared
+    store = _failing_run(monkeypatch, factory, people, milk_after=2)
+    held = store.snapshot()
+    assert held["status"] == "pending" and held["due_at"] is None and held["actions"]
+    assert "nothing was changed" in held["error"] and "HTTP 404" in held["error"]
+    assert store.claim(now=NOW + timedelta(days=1)) is None  # never retried by itself
+    # Editing again resubmits the kept changes together with the new one.
+    edited = store.enqueue("order", "order", _quantity(sku="eggs", quantity=1), people[1],
+                           now=NOW + timedelta(minutes=10), quantities={"milk": 2, "eggs": 0})
+    assert edited["error"] is None and edited["due_at"] and {a["sku"] for a in edited["actions"]} == {"milk", "eggs"}
+
+
+def test_retry_sends_held_changes_now(setup_shared, monkeypatch):
+    factory, people, _owner = setup_shared
+    store = _failing_run(monkeypatch, factory, people, milk_after=2)
+    later = NOW + timedelta(minutes=5)
+    assert store.retry("order", now=later)["due_at"] == later.isoformat()
+    assert store.claim(now=later) is not None
+
+
+def test_refused_batch_that_landed_anyway_succeeds(setup_shared, monkeypatch):
+    factory, people, _owner = setup_shared
+    store = _failing_run(monkeypatch, factory, people, milk_after=3)
+    assert store.snapshot()["status"] == "succeeded"
+
+
+def test_refused_batch_in_an_unexplained_state_stays_failed_until_rechecked(setup_shared, monkeypatch):
+    factory, people, _owner = setup_shared
+    store = _failing_run(monkeypatch, factory, people, milk_after=7)
+    assert store.snapshot()["status"] == "failed"
+    with pytest.raises(shared.SharedError):
+        store.recheck(lambda target, actions: shared.verify(_ReadBack(7), target, actions))
+    assert store.recheck(lambda target, actions: shared.verify(_ReadBack(2), target, actions))["status"] == "pending"

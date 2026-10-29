@@ -316,6 +316,51 @@ def checkout_cart(client: OcadoClient) -> None:
         raise SharedError("Checkout completed but the new order could not be verified. Check ocado.com before trying again", 502)
 
 
+APPLIED, UNCHANGED, UNKNOWN = "applied", "unchanged", "unknown"
+
+
+def verify(client: OcadoClient, target_id: str, actions: list[dict]) -> str:
+    """Read-only: did a failed batch land on Ocado, not land at all, or something between?
+
+    ``unchanged`` means every quantity and the slot still match what the shop showed
+    before the batch, so resubmitting it cannot double-apply anything. A checkout of
+    the plain cart can't be told apart from "nothing happened", so it is ``unknown``.
+    """
+    quantities = [a for a in actions if a["kind"] == "quantity"]
+    slot = next((a for a in reversed(actions) if a["kind"] == "slot"), None)
+    try:
+        target(client, target_id)  # the delivery itself moved on: resending can't be right
+    except Exception:  # noqa: BLE001
+        return UNKNOWN
+    try:
+        if target_id == "cart":
+            if any(a["kind"] == "checkout" for a in actions):
+                return UNKNOWN
+            from app.ocado.sync import cart_quantities
+
+            have = cart_quantities(client.cart_view())
+            slot_now = None
+            if slot is not None:
+                return UNKNOWN  # a cart reservation isn't cheaply readable back
+        else:
+            order = client.get_order(target_id)
+            have = {str(item["product"]): item["quantity"] for item in order.get("items") or []}
+            slot_now = str(order.get("slotId")) if order.get("slotId") is not None else None
+    except Exception:  # noqa: BLE001 - can't read it back: say so, never guess
+        log.warning("ocado shared: couldn't read back target %s after a failed batch", target_id, exc_info=True)
+        return UNKNOWN
+    wanted = all(have.get(a["sku"], 0) == a["quantity"] for a in quantities) and (
+        slot is None or slot_now == str(slot["slot_id"]))
+    if wanted:
+        return APPLIED
+    if any(a.get("original_quantity") is None for a in quantities) or (
+            slot is not None and slot.get("original_slot_id") is None):
+        return UNKNOWN
+    before = all(have.get(a["sku"], 0) == a["original_quantity"] for a in quantities) and (
+        slot is None or slot_now == str(slot["original_slot_id"]))
+    return UNCHANGED if before else UNKNOWN
+
+
 def execute(client: OcadoClient, target_id: str, actions: list[dict]) -> None:
     _, order = target(client, target_id)
     quantities = {action["sku"]: action["quantity"] for action in actions if action["kind"] == "quantity"}

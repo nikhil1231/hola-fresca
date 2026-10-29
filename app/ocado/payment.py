@@ -16,6 +16,10 @@ from urllib.parse import urlsplit
 log = logging.getLogger(__name__)
 DONE = "checkout-result-response"
 FLOW_SECONDS = 75
+#: How long to keep going after the payment provider reports an error. Its SDK
+#: retries and probes on its own, and the merchant's validated result is what
+#: decides the outcome, so one provider 4xx is a symptom, not the verdict.
+PROVIDER_GRACE_SECONDS = 20
 _ACTION = re.compile(r"^(?:pay(?: now)?|continue(?: to payment)?|confirm(?: changes| payment| order)?|"
                      r"place (?:your )?order|submit|complete (?:purchase|order))$", re.I)
 _SECRET = re.compile(r"cvv|cvc|security.?code|one.?time|otp|verification.?code|pass(?:word|code)|card.?number", re.I)
@@ -59,13 +63,14 @@ def _checkout_request(route: Any, client: Any, body: dict, order_id: str,
         route.fallback()
         return
     if submitted:
-        failures.append("The payment page attempted to start checkout again; check the saved order before retrying")
+        failures.append((False, time.monotonic(),
+                         "The payment page attempted to start checkout again; check the saved order before retrying"))
         route.abort()
         return
     # Verify the active cart immediately before submission: never place a new/different order.
     summary = client.checkout_summary()
     if str(summary.get("orderId")) != order_id:
-        failures.append("The active checkout is no longer the requested order; checkout was stopped")
+        failures.append((False, time.monotonic(), "The active checkout is no longer the requested order; checkout was stopped"))
         route.abort()
         return
     native = route.request.post_data_json
@@ -125,7 +130,10 @@ def _completion_response(resp: Any, completed: list, failures: list) -> None:
         code = value.get("code") or value.get("errorCode")
         detail = f"; code {code}" if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code) else ""
         source = "The payment provider" if provider else "Ocado"
-        failures.append(f"{source} rejected payment completion (HTTP {resp.status}{detail})")
+        # Host and path only: queries can carry payment tokens.
+        log.warning("ocado payment: %s answered HTTP %s%s", f"{parts.hostname}{parts.path}", resp.status, detail)
+        message = f"{source} rejected payment completion (HTTP {resp.status}{detail})"
+        failures.append((provider, time.monotonic(), message))
 
 
 def _advance(page: Any, clicked: set[tuple]) -> bool:
@@ -179,14 +187,17 @@ def _advance(page: Any, clicked: set[tuple]) -> bool:
     return False
 
 
-def _drive(page: Any, completed: list[dict], failures: list[str]) -> dict[str, Any]:
+def _drive(page: Any, completed: list[dict], failures: list[tuple[bool, float, str]]) -> dict[str, Any]:
     deadline = time.monotonic() + FLOW_SECONDS
     clicked: set[tuple] = set()
     while time.monotonic() < deadline:
         if completed:
             return completed[0]
-        if failures:
-            raise PaymentFlowError(failures[0])
+        hard = next((message for provider, _at, message in failures if not provider), None)
+        if hard:
+            raise PaymentFlowError(hard)
+        if failures and time.monotonic() - failures[0][1] > PROVIDER_GRACE_SECONDS:
+            raise PaymentFlowError(failures[0][2])
         try:
             _advance(page, clicked)
         except PaymentFlowError:
@@ -195,5 +206,7 @@ def _drive(page: Any, completed: list[dict], failures: list[str]) -> dict[str, A
             # Frames/elements are replaced while the payment SDK loads. Inspect the new page next tick.
             pass
         page.wait_for_timeout(500)
+    if failures:
+        raise PaymentFlowError(failures[0][2])
     raise PaymentFlowError("The payment page timed out after continuing its available controls; "
                            "check the saved order on ocado.com")

@@ -45,7 +45,8 @@ function DeliveryCard({ order, queue, ready, loading, onSlots, total }) {
   </section>
 }
 
-function EditingStatus({ queue, busy, cancel, now }) {
+function EditingStatus({ queue, busy, cancel, retry, check, now }) {
+  const held = queue?.status === 'pending' && !queue?.due_at && Boolean(queue?.error)
   const [open, setOpen] = useState(false)
   const [toast, setToast] = useState(null)
   const previous = useRef(null)
@@ -55,7 +56,7 @@ function EditingStatus({ queue, busy, cancel, now }) {
     const before = previous.current
     previous.current = queue?.status
     let message = null
-    if (queue?.status === 'pending' && queue.actions?.length) message = 'Changes noted. You can keep shopping.'
+    if (queue?.status === 'pending' && queue.actions?.length) message = held ? 'Ocado didn’t take your changes. Nothing changed, so you can try again.' : 'Changes noted. You can keep shopping.'
     if (queue?.status === 'succeeded' && before && before !== 'succeeded') message = 'Your changes have been saved.'
     if (queue?.status === 'failed' && before !== 'failed') message = 'Please review your changes.'
     setToast(message)
@@ -63,7 +64,7 @@ function EditingStatus({ queue, busy, cancel, now }) {
     return () => window.clearTimeout(timeout)
   }, [queue?.status, queue?.updated_at, queue?.actions?.length])
   const remaining = queue?.due_at ? Math.max(0, Math.min(1, (Date.parse(queue.due_at) - now) / 180000)) : 0
-  const title = queue?.status === 'running' ? 'Saving your changes' : queue?.status === 'failed' ? 'Review your changes' : 'Editing your shop'
+  const title = queue?.status === 'running' ? 'Saving your changes' : queue?.status === 'failed' ? 'Review your changes' : held ? 'Changes not sent yet' : 'Editing your shop'
   const progress = <span className="save-progress" role={queue?.status === 'pending' ? 'progressbar' : undefined} aria-label="Time remaining before automatic saving" aria-valuemin={queue?.status === 'pending' ? 0 : undefined} aria-valuemax={queue?.status === 'pending' ? 100 : undefined} aria-valuenow={queue?.status === 'pending' ? Math.round(remaining * 100) : undefined}>
     <svg viewBox="0 0 28 28" aria-hidden="true"><circle className="progress-track" cx="14" cy="14" r="11" /><circle className="progress-value" cx="14" cy="14" r="11" pathLength="100" strokeDasharray={`${remaining * 100} 100`} /></svg>
     {queue?.status === 'failed' ? <span aria-hidden="true">!</span> : queue?.status === 'running' ? <IconClock size={12} aria-hidden="true" /> : <IconCheck size={12} aria-hidden="true" />}
@@ -72,11 +73,13 @@ function EditingStatus({ queue, busy, cancel, now }) {
     {active && <div className="editing-bar"><button type="button" className={`editing-pill editing-${queue.status}`} onClick={() => setOpen(true)} aria-haspopup="dialog">{progress}<span>{title}</span><span className="pill-details">View changes<IconArrowRight size={14} /></span></button></div>}
     <div className="toast-region" role="status" aria-live="polite" aria-atomic="true">{toast && <div className="shop-toast"><IconCheck size={20} aria-hidden="true" /><span>{toast}</span><button type="button" className="icon-button" aria-label="Dismiss notification" onClick={() => setToast(null)}><IconX size={18} /></button></div>}</div>
     {open && active && <Confirm title="Your changes" closeLabel="Keep shopping" onClose={() => setOpen(false)}>
-      <p className="muted">{queue.status === 'pending' ? 'Take your time. We’ll save these automatically when you’ve finished making changes. The little circle shows the time left.' : queue.status === 'running' ? 'We’re saving these with Ocado. Please wait a moment.' : 'We couldn’t confirm that everything saved. Check your order on Ocado before trying again.'}</p>
+      <p className="muted">{held ? 'Ocado didn’t accept these changes. We checked your order and nothing was changed, so they’re kept here. Send them again now, or keep editing and they’ll be sent together.' : queue.status === 'pending' ? 'Take your time. We’ll save these automatically when you’ve finished making changes. The little circle shows the time left.' : queue.status === 'running' ? 'We’re saving these with Ocado. Please wait a moment.' : 'We couldn’t confirm that everything saved. Check with Ocado to see what it has, or look at your order on ocado.com.'}</p>
       <ul className="change-list">{queue.actions.map((action) => <li key={action.id}>
         <span className="change-symbol" aria-hidden="true">{action.kind === 'quantity' ? action.quantity === 0 ? <IconMinus size={18} /> : <IconBasket size={18} /> : action.kind === 'slot' ? <IconTruckDelivery size={18} /> : <IconCheck size={18} />}</span>
         <div><strong>{action.kind === 'quantity' ? action.name || action.sku : action.kind === 'slot' ? 'Delivery time' : 'Place your order'}</strong><p>{action.kind === 'quantity' ? action.quantity === 0 ? 'Remove from basket' : `${action.quantity} ${action.quantity === 1 ? 'pack' : 'packs'}${action.original_quantity != null ? ` · previously ${action.original_quantity}` : ''}` : action.kind === 'slot' ? `${day(action.start)}, ${slotTime(action.start, action.end)}` : 'Using your saved payment method'}</p></div>
       </li>)}</ul>
+      {held && <button type="button" className="button button-primary" disabled={busy} onClick={retry}>{busy ? 'Please wait…' : 'Send changes now'}</button>}
+      {queue.status === 'failed' && <button type="button" className="button button-primary" disabled={busy} onClick={check}>{busy ? 'Please wait…' : 'Check with Ocado'}</button>}
       {queue.error && <details className="save-error"><summary>More information</summary><p>{queue.error}</p></details>}
       {queue.status !== 'running' && <><p className="cancel-explanation">{queue.status === 'failed' ? 'Clearing this list won’t undo any changes Ocado has already saved.' : 'Cancel changes removes everyone’s unsaved edits. Your booked delivery stays in place.'}</p><button type="button" className="button button-outline cancel-changes" disabled={busy} onClick={async () => { if (await cancel()) setOpen(false) }}>{busy ? 'Please wait…' : queue.status === 'failed' ? 'Clear reviewed changes' : 'Cancel changes'}</button></>}
     </Confirm>}
@@ -349,7 +352,7 @@ export default function App() {
   return <div className="ocado-app">
     <a className="skip-link" href="#shop-content">Skip to shop</a>
     <header className="app-header"><div className="header-inner"><a className="brand" href="#" onClick={(event) => { event.preventDefault(); navigate('basket') }} aria-label="Shared shop basket"><span className="brand-mark"><IconLeaf size={24} stroke={1.6} /></span><span>ocado<span className="brand-subtitle">the shared shop</span></span></a><button type="button" className="text-button" disabled={shop.busy || shop.syncing || !online || !ready} onClick={shop.refresh}>{shop.syncing ? 'Updating…' : 'Refresh'}</button></div></header>
-    <div className="app-layout"><EditingStatus key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} now={now} busy={shop.busy || !online || shop.accessExpired} cancel={() => shop.cancel({ ...shop.selection, target_id: shop.queue.target_id })} /><DeliveryCard order={order} queue={shop.queue} ready={ready} loading={shop.loading} onSlots={() => navigate('slots')} total={basket?.total} />
+    <div className="app-layout"><EditingStatus key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} now={now} busy={shop.busy || !online || shop.accessExpired} cancel={() => shop.cancel({ ...shop.selection, target_id: shop.queue.target_id })} retry={() => shop.retry({ ...shop.selection, target_id: shop.queue.target_id })} check={() => shop.check({ ...shop.selection, target_id: shop.queue.target_id })} /><DeliveryCard order={order} queue={shop.queue} ready={ready} loading={shop.loading} onSlots={() => navigate('slots')} total={basket?.total} />
     <div className="workspace">
       {!online && <div className="notice notice-error" role="alert"><strong>You’re offline.</strong> Reconnect before making changes. Nothing is automatically retried.</div>}
       {shop.error && <div className="notice notice-error" role="alert"><div><strong>{shop.accessExpired ? 'Sign in again to continue' : 'We couldn’t complete that request'}</strong><p>{shop.error}</p></div>{shop.accessExpired ? <a className="button button-outline button-small" href={window.location.pathname + window.location.search}>Sign in again</a> : <button type="button" className="button button-outline button-small" disabled={shop.busy || shop.syncing} onClick={() => { shop.clearError(); void shop.refresh() }}>Refresh shop</button>}</div>}
