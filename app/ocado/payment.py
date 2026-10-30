@@ -22,6 +22,7 @@ FLOW_SECONDS = 75
 PROVIDER_GRACE_SECONDS = 20
 _ACTION = re.compile(r"^(?:pay(?: now)?|continue(?: to payment)?|confirm(?: changes| payment| order)?|"
                      r"place (?:your )?order|submit|complete (?:purchase|order))$", re.I)
+_CARD_KEYS = ("group", "type", "walletItemId")
 _SECRET = re.compile(r"cvv|cvc|security.?code|one.?time|otp|verification.?code|pass(?:word|code)|card.?number", re.I)
 
 
@@ -74,7 +75,15 @@ def _checkout_request(route: Any, client: Any, body: dict, order_id: str,
         route.abort()
         return
     native = route.request.post_data_json
-    native["paymentMethod"] = body["paymentMethod"]
+    page_method = native.get("paymentMethod") or {}
+    # Enforce which card pays; leave everything else (e.g. toSave) as the page sent it.
+    # Forcing the page's toSave=True to False for an already-saved card preceded a
+    # provider /checkout/complete 404 on every order edit from 2026-10-29.
+    native["paymentMethod"] = {**page_method, **{key: value for key, value in body["paymentMethod"].items()
+                                                 if key in _CARD_KEYS}}
+    log.info("ocado payment: submitting checkout (page card %s ours, toSave=%s, recurringOrder=%s)",
+             "matches" if page_method.get("walletItemId") == body["paymentMethod"].get("walletItemId") else "differs from",
+             native["paymentMethod"].get("toSave"), "yes" if body.get("recurringOrder") or native.get("recurringOrder") else "no")
     if body.get("billingAddressId"):
         native["billingAddressId"] = body["billingAddressId"]
     if body.get("recurringOrder") or native.get("recurringOrder"):
@@ -107,7 +116,7 @@ def _native_checkout(page: Any, client: Any, body: dict, order_id: str) -> dict[
                lambda route: _checkout_request(route, client, body, order_id, submitted, failures))
     page.context.on("response", lambda response: _completion_response(response, completed, failures))
     page.goto("https://www.ocado.com/checkout/summary", wait_until="domcontentloaded", timeout=30000)
-    return _drive(page, completed, failures)
+    return _drive(page, completed, failures, submitted)
 
 
 def _completion_response(resp: Any, completed: list, failures: list) -> None:
@@ -131,13 +140,19 @@ def _completion_response(resp: Any, completed: list, failures: list) -> None:
         detail = f"; code {code}" if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", code) else ""
         source = "The payment provider" if provider else "Ocado"
         # Host and path only: queries can carry payment tokens.
-        log.warning("ocado payment: %s answered HTTP %s%s", f"{parts.hostname}{parts.path}", resp.status, detail)
+        # Body keys only (values can carry tokens): enough to tell a missing session from a refusal.
+        log.warning("ocado payment: %s %s answered HTTP %s%s (body keys %s)", getattr(getattr(resp, "request", None), "method", "?"),
+                    f"{parts.hostname}{parts.path}", resp.status, detail, sorted(value)[:12])
         message = f"{source} rejected payment completion (HTTP {resp.status}{detail})"
         failures.append((provider, time.monotonic(), message))
 
 
-def _advance(page: Any, clicked: set[tuple]) -> bool:
-    """Take an available ordinary checkout action, without entering unknown credentials."""
+def _advance(page: Any, clicked: set[tuple], submitted: list | None = None) -> bool:
+    """Take an available ordinary checkout action, without entering unknown credentials.
+
+    Once checkout has been submitted, a control already used is never pressed again: after
+    a provider error the page re-offers Place order, and pressing it starts a second checkout.
+    """
     frames = [frame for tab in page.context.pages if not tab.is_closed() for frame in tab.frames] \
         if hasattr(page, "context") else page.frames
     for frame in frames:
@@ -176,18 +191,23 @@ def _advance(page: Any, clicked: set[tuple]) -> bool:
                     missing.append(name)
         for button in frame.get_by_role("button", name=_ACTION).all():
             if button.is_visible() and button.is_enabled():
-                key = (frame.url, button.inner_text(), hash(frame.locator("body").inner_text()))
+                text = button.inner_text().strip()
+                used = ("used", frame.url, text)
+                if submitted and used in clicked:
+                    continue
+                key = (frame.url, text, hash(frame.locator("body").inner_text()))
                 if key not in clicked:
-                    log.info("ocado payment: continuing %s", button.inner_text().strip())
+                    log.info("ocado payment: continuing %s (in %s)", text, urlsplit(frame.url).hostname)
                     button.click()
-                    clicked.add(key)
+                    clicked.update((key, used))
                     return True
         if missing:
             raise PaymentFlowError("The payment form requires a card security code, verification code, or password that is not available")
     return False
 
 
-def _drive(page: Any, completed: list[dict], failures: list[tuple[bool, float, str]]) -> dict[str, Any]:
+def _drive(page: Any, completed: list[dict], failures: list[tuple[bool, float, str]],
+           submitted: list | None = None) -> dict[str, Any]:
     deadline = time.monotonic() + FLOW_SECONDS
     clicked: set[tuple] = set()
     while time.monotonic() < deadline:
@@ -199,7 +219,7 @@ def _drive(page: Any, completed: list[dict], failures: list[tuple[bool, float, s
         if failures and time.monotonic() - failures[0][1] > PROVIDER_GRACE_SECONDS:
             raise PaymentFlowError(failures[0][2])
         try:
-            _advance(page, clicked)
+            _advance(page, clicked, submitted)
         except PaymentFlowError:
             raise
         except Exception:

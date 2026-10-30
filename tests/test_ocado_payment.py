@@ -1,4 +1,5 @@
 """Payment handoffs are continued, and unavailable inputs are reported precisely."""
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -243,3 +244,31 @@ def test_payment_result_from_an_unrelated_frame_is_ignored():
                                json=lambda: {'type': payment.DONE, 'orderId': 'o1'})
     payment._completion_response(response, completed, failures)
     assert completed == failures == []
+
+
+def test_checkout_enforces_the_card_but_keeps_the_pages_other_payment_fields():
+    """Forcing toSave=False onto the page's saved card preceded provider 404s on every edit."""
+    sent = []
+    route = SimpleNamespace(request=SimpleNamespace(method='POST', post_data_json={
+        'paymentMethod': {'group': 'PAY_NOW', 'type': 'CARDS', 'toSave': True, 'walletItemId': 'w1'},
+        'redirectUrl': 'https://www.ocado.com/checkout/3ds/end'}),
+        abort=lambda: pytest.fail('Must submit'), fallback=lambda post_data: sent.append(json.loads(post_data)))
+    client = SimpleNamespace(checkout_summary=lambda: {'orderId': 'o1'})
+    body = {'paymentMethod': {'group': 'PAY_NOW', 'type': 'CARDS', 'toSave': False, 'walletItemId': 'w1'},
+            'recurringOrder': {'edit': {'replaceItems': False}}}
+    payment._checkout_request(route, client, body, 'o1', [], [])
+    assert sent[0]['paymentMethod'] == {'group': 'PAY_NOW', 'type': 'CARDS', 'toSave': True, 'walletItemId': 'w1'}
+    assert sent[0]['recurringOrder'] == {'edit': {'replaceItems': False}}
+
+
+def test_a_reoffered_place_order_is_not_pressed_after_checkout_was_submitted(monkeypatch):
+    """After a provider error the page shows Place order again; pressing it is a second checkout."""
+    frame = Frame()
+    presses = []
+    frame.buttons = [Control('Place order', click=lambda: presses.append('place'))]
+    page = SimpleNamespace(frames=[frame], wait_for_timeout=lambda _: None)
+    clicked = set()
+    assert payment._advance(page, clicked, []) is True
+    frame.locator = lambda selector: Control(text='payment failed') if selector == 'body' else Elements([])
+    assert payment._advance(page, clicked, [True]) is False
+    assert presses == ['place']
