@@ -204,7 +204,8 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: [ocadoHostname],
     proxy: {
-      '/api': apiTarget,
+      // Shared-shop writes compare Origin with Host, including on the LAN.
+      '/api': { target: apiTarget, changeOrigin: false },
     },
   },
 })

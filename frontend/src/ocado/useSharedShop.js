@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { request } from './api.js'
+import { canEditOrder } from './orderEditing.js'
 
 export const isReady = (auth) => auth?.status === 'ready'
 const queueKey = (queue) => JSON.stringify(queue)
 const scope = (auth) => ({ account_id: auth?.account_id ?? null, account_version: auth?.account_version ?? 0 })
 const sameAccount = (left, right) => left?.account_id === right?.account_id && left?.account_version === right?.account_version
+const deliverySessionKey = (auth) => `ocado:delivery:${auth?.account_id}:${auth?.account_version ?? 0}`
+const rememberedDelivery = (auth) => {
+  try { return sessionStorage.getItem(deliverySessionKey(auth)) || null } catch { return null }
+}
+const rememberDelivery = (auth, id) => {
+  try {
+    if (id) sessionStorage.setItem(deliverySessionKey(auth), id)
+    else sessionStorage.removeItem(deliverySessionKey(auth))
+  } catch { /* Selection still works in memory if browser storage is unavailable. */ }
+}
 
 export function useSharedShop() {
   const [auth, setAuth] = useState(null)
@@ -16,7 +27,7 @@ export function useSharedShop() {
   const [syncing, setSyncing] = useState(false)
   const [stale, setStale] = useState(false)
   const [accessExpired, setAccessExpired] = useState(false)
-  const refs = useRef({ epoch: 0, mounted: false, writing: false, refreshing: false, refreshAgain: false, auth: null, queue: null, state: null })
+  const refs = useRef({ epoch: 0, mounted: false, writing: false, refreshing: false, refreshAgain: false, auth: null, queue: null, state: null, target: null })
 
   const reportError = useCallback((failure) => {
     if (!refs.current.mounted || failure.name === 'AbortError') return
@@ -47,7 +58,7 @@ export function useSharedShop() {
     setSyncing(true)
     const epoch = ref.epoch
     try {
-      const next = await request('/state')
+      const next = await request(`/state${ref.target ? `?target_id=${encodeURIComponent(ref.target)}` : ''}`)
       if (!ref.mounted || ref.epoch !== epoch) return
       if (!sameAccount(next, ref.auth)) { setStale(true); return }
       // A queue poll may have observed edits made during this state read. Read
@@ -61,8 +72,14 @@ export function useSharedShop() {
       setState(next)
       acceptQueue(next.queue)
       setStale(false)
+      return true
     } catch (failure) {
       if (ref.epoch === epoch) {
+        if (failure.status === 409 && ref.target) {
+          ref.target = null
+          rememberDelivery(ref.auth, null)
+          ref.refreshAgain = true
+        }
         setStale(true)
         reportError(failure)
       }
@@ -86,8 +103,10 @@ export function useSharedShop() {
     ref.auth = next
     setAuth(next)
     setAccessExpired(false)
+    if (!wasReady && isReady(next)) setError(null)
     if (changedAccount || wasReady !== isReady(next)) ref.epoch += 1
     if (changedAccount) {
+      ref.target = rememberedDelivery(next)
       ref.queue = null
       ref.state = null
       setState(null)
@@ -118,6 +137,7 @@ export function useSharedShop() {
       try {
         let nextAuth = await request('/status')
         if (disposed || ref.epoch !== epoch) return
+        if (isReady(ref.auth) && !isReady(nextAuth)) refreshedSession = null
         const accountKey = JSON.stringify(scope(nextAuth))
         if (refreshedSession !== accountKey && nextAuth.email && !isReady(nextAuth) && !['awaiting_otp', 'otp_required'].includes(nextAuth.status)) {
           refreshedSession = accountKey
@@ -204,17 +224,41 @@ export function useSharedShop() {
 
   const action = (body) => {
     const ref = refs.current
-    if (ref.writing || ref.refreshing || !isReady(ref.auth)) return Promise.resolve(false)
-    return mutate('/actions', { ...scope(auth), ...body, target_id: body.target_id ?? ref.state?.queue?.target_id })
+    if (ref.writing || ref.refreshing || !isReady(ref.auth) || !ref.state || !canEditOrder(ref.state.order)) return Promise.resolve(false)
+    const target = ref.state.target_id ?? ref.state.queue?.target_id
+    if (body.target_id && body.target_id !== target) return Promise.resolve(false)
+    return mutate('/actions', { ...scope(auth), ...body, target_id: target })
   }
   const addOffer = (body) => {
     const ref = refs.current
-    if (ref.writing || ref.refreshing || !isReady(ref.auth)) return Promise.resolve(false)
+    if (ref.writing || ref.refreshing || !isReady(ref.auth) || !ref.state || !canEditOrder(ref.state.order)) return Promise.resolve(false)
+    if (body.target_id !== (ref.state.target_id ?? ref.state.queue?.target_id)) return Promise.resolve(false)
     return mutate('/offer-items', { ...scope(auth), ...body })
   }
+  const selectDelivery = async (id) => {
+    const ref = refs.current
+    if (ref.writing || ref.refreshing) return false
+    if (['pending', 'running', 'failed'].includes(ref.queue?.status) && ref.queue.target_id !== id) {
+      reportError(new Error('Save or cancel your current changes before choosing another delivery.'))
+      return false
+    }
+    ref.epoch += 1
+    ref.target = id
+    ref.state = null
+    setState(null)
+    setLoading(true)
+    setError(null)
+    const accepted = await refresh()
+    if (accepted) rememberDelivery(ref.auth, id)
+    return Boolean(accepted)
+  }
   const cancel = (selection = {}) => mutate('/queue/cancel', { ...scope(auth), ...selection, target_id: selection.target_id ?? refs.current.queue?.target_id })
+  const undo = (actionId) => mutate('/queue/undo', { target_id: refs.current.queue?.target_id, action_id: actionId })
   const authenticate = (path, body = {}) => mutate(path, { ...scope(auth), ...body }, true)
-  const locked = busy || syncing || stale || !state || !queue?.target_id || queue.status === 'running' || queue.status === 'failed' || accessExpired
+  const targetId = state?.target_id ?? state?.queue?.target_id
+  const otherDeliveryPending = Boolean(targetId) && ['pending', 'running', 'failed'].includes(queue?.status) && queue.target_id !== targetId
+  const locked = busy || syncing || stale || !state || !canEditOrder(state?.order) || !targetId || otherDeliveryPending || queue?.status === 'running' || queue?.status === 'failed' || accessExpired
+  const clearError = useCallback(() => setError(null), [])
   const selectAccount = (id) => mutate('/account', { ...scope(auth), selected_account_id: Number(id) }, true)
-  return { selection: scope(auth), selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, addOffer, cancel, authenticate, reportError, clearError: () => setError(null) }
+  return { selection: scope(auth), targetId, selectDelivery, otherDeliveryPending, selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, addOffer, cancel, undo, authenticate, reportError, clearError }
 }

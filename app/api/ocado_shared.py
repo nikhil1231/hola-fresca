@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Annotated, Iterator, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Path
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -190,29 +191,64 @@ def logout(body: SelectionIn, session: Session = Depends(get_session), adapter: 
         return _auth_out(auth, account, session, user)
 
 
-def _selection(client, store: QueueStore) -> tuple[str, dict | None, dict]:
+def _selection(client, store: QueueStore, selected: str | None = None) -> tuple[str, dict | None, dict, list[dict]]:
     queue = store.snapshot()
-    pinned = queue["target_id"] if queue["status"] in ACTIVE else None
-    target_id, order = shared.target(client, pinned)
-    if pinned is None:
+    upcoming = shared.upcoming_orders(client)
+    order = upcoming[0] if upcoming else None
+    if selected is not None:
+        order = next((item for item in upcoming if str(item.get("orderId")) == selected), None)
+        if selected == "cart":
+            if upcoming:
+                raise shared.SharedError("A delivery has been booked since this cart was selected; choose a delivery")
+        elif order is None:
+            raise shared.SharedError("This delivery is no longer available. Choose another delivery.")
+    target_id = str(order["orderId"]) if order else "cart"
+    # A browser's choice is never written into the shared selection. Cache only
+    # the default idle target, so browsers viewing different orders don't fight.
+    if selected is None and queue["status"] not in ACTIVE:
         queue = store.remember_target(target_id)
-    return target_id, order, queue
+    return target_id, order, queue, upcoming
+
+
+def _require_editable(order: dict | None) -> None:
+    if order is None:
+        return
+    summary = orders.summarise(order)
+    deadline = shared._date(summary.edit_until)
+    if not summary.editable or (deadline is not None and deadline <= datetime.now(timezone.utc)):
+        raise shared.SharedError("Editing is closed for this delivery. Choose another delivery.")
+
+
+@router.get("/deliveries")
+def deliveries(session: Session = Depends(get_session)):
+    with _operation(session):
+        client = shared.make_client(shared.require_account(session).key)
+        return {**_scope(session), "items": [asdict(orders.summarise(order)) for order in shared.upcoming_orders(client)]}
 
 
 @router.get("/state")
 def state(session: Session = Depends(get_session), factory: sessionmaker[Session] = Depends(get_session_factory),
-          retailer: str = Depends(get_active_retailer)):
+          retailer: str = Depends(get_active_retailer),
+          target_id: str | None = Query(default=None, min_length=1, max_length=128)):
     with _operation(session):
         account = shared.require_account(session)
         client, store = shared.make_client(account.key), QueueStore(factory)
-        _, order, queue = _selection(client, store)
-        confirmed = shared.basket(client, session, order, retailer=retailer)
-        basket = shared.project(confirmed, queue["actions"])
+        selected, order, queue, upcoming = _selection(client, store, target_id)
+        confirmed = shared.decorate(shared.basket(client, session, order, retailer=retailer), client, session, retailer=retailer)
+        basket = shared.project(confirmed, queue["actions"] if queue["target_id"] == selected else [])
         basket = shared.decorate(basket, client, session, retailer=retailer)
+        pictured = {line.sku: line for line in (*confirmed.lines, *basket.lines)}
+        changes = shop.Basket(tuple(pictured.get(action["sku"]) or shop.Line(
+            action["sku"], action.get("name"), 1, None
+        ) for action in queue["actions"] if action["kind"] == "quantity"), None, False)
+        changes = shared.decorate(changes, client, session, retailer=retailer)
+        change_products = {line.sku: {"name": line.name, "image_url": line.image_url} for line in changes.lines}
         scope = _scope(session)
-        return {**scope, "order": asdict(orders.summarise(order)) if order else None,
-                "basket": asdict(basket), "confirmed_quantities": {line.sku: line.quantity for line in confirmed.lines},
-                "queue": {**queue, **scope}}
+        earlier = upcoming[0] if order and upcoming and shared._date(upcoming[0]["dates"]["deliveryStartDate"]) < shared._date(order["dates"]["deliveryStartDate"]) else None
+        return {**scope, "target_id": selected, "order": asdict(orders.summarise(order)) if order else None,
+                "earlier_delivery": asdict(orders.summarise(earlier)) if earlier else None,
+                "basket": asdict(basket), "confirmed_lines": [asdict(line) for line in confirmed.lines], "confirmed_quantities": {line.sku: line.quantity for line in confirmed.lines},
+                "queue": {**queue, **scope}, "change_products": change_products}
 
 
 @router.get("/search")
@@ -225,11 +261,35 @@ def search(q: str, session: Session = Depends(get_session)):
         return {**_scope(session), "query": q, "products": [asdict(product) for product in shop.search_results(client.search(q, size=20), 20)]}
 
 
-@router.get("/slots")
-def slots(session: Session = Depends(get_session), factory: sessionmaker[Session] = Depends(get_session_factory)):
+@router.get("/products/{sku}")
+def product_details(sku: str = Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9-]+$"),
+                    session: Session = Depends(get_session)):
     with _operation(session):
         client = shared.make_client(shared.require_account(session).key)
-        _, order, _ = _selection(client, QueueStore(factory))
+        rows = client.products([sku])
+        raw = next((row for row in rows if str(row.get("productId")) == sku), None)
+        products = shop.search_results({"products": [raw]} if raw else {}, 1)
+        if not products:
+            raise shared.SharedError("This product is no longer available on Ocado", 404)
+        text = None
+        unavailable = False
+        product_id = str(raw.get("retailerProductId") or "")
+        if product_id:
+            try:
+                text = client.product_description(product_id)
+            except Exception:
+                unavailable = True
+        return {**_scope(session), "product": {**asdict(products[0]), "description": text,
+                                              "description_unavailable": unavailable}}
+
+
+@router.get("/slots")
+def slots(session: Session = Depends(get_session), factory: sessionmaker[Session] = Depends(get_session_factory),
+          target_id: str | None = Query(default=None, min_length=1, max_length=128)):
+    with _operation(session):
+        client = shared.make_client(shared.require_account(session).key)
+        _, order, _, _ = _selection(client, QueueStore(factory), target_id)
+        _require_editable(order)
         return {**_scope(session), "items": shared.slots(client, order)}
 
 
@@ -288,7 +348,8 @@ def add_offer_items(body: OfferSelectionIn, user: User = Depends(get_current_use
         _check_selection(session, body)
         client = shared.make_client(shared.require_account(session).key)
         store = QueueStore(factory)
-        current_target, order, queue = _selection(client, store)
+        current_target, order, queue, _ = _selection(client, store, body.target_id)
+        _require_editable(order)
         if queue["status"] in {"running", "failed"}:
             raise shared.SharedError("Wait for or clear the current batch before adding offer items")
         promotion = shared.promotion(client, str(body.offer_id))
@@ -311,7 +372,7 @@ def add_offer_items(body: OfferSelectionIn, user: User = Depends(get_current_use
         if any(sku not in membership or membership[sku][1]["in_stock"] is False for sku in selected):
             raise shared.SharedError("An item is no longer available in this offer; reopen the offer")
         confirmed = shared.basket(client, session, order, retailer=retailer)
-        basket = shared.project(confirmed, queue["actions"])
+        basket = shared.project(confirmed, queue["actions"] if queue["target_id"] == current_target else [])
         current = {line.sku: line.quantity for line in basket.lines}
         additions = []
         for sku, item in selected.items():
@@ -337,8 +398,8 @@ def actions(body: Action, user: User = Depends(get_current_user), session: Sessi
         queue = store.snapshot()
         if queue["status"] in {"running", "failed"}:
             raise shared.SharedError("Wait for the running batch, or inspect and cancel the failed queue before adding changes")
-        pinned = queue["target_id"] if queue["status"] == "pending" else None
-        current_target, order = shared.target(client, pinned)
+        current_target, order, _, _ = _selection(client, store, body.target_id)
+        _require_editable(order)
         action = body.model_dump(exclude={"target_id", "confirm", "account_id", "account_version"}, exclude_none=True)
         quantities = None
         if body.kind == "quantity":
@@ -369,3 +430,17 @@ def cancel(body: CancelIn, session: Session = Depends(get_session),
         if shared.find_account(session) is None:
             return {**empty(), **_scope(session)}
         return {**QueueStore(factory).cancel(body.target_id), **_scope(session)}
+
+
+class UndoIn(SelectionIn):
+    target_id: str = Field(min_length=1, max_length=128)
+    action_id: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/queue/undo", dependencies=[Depends(require_person)])
+def undo(body: UndoIn, session: Session = Depends(get_session),
+         factory: sessionmaker[Session] = Depends(get_session_factory)):
+    with _operation(session, blocking=False):
+        _check_selection(session, body)
+        shared.require_account(session)
+        return {**QueueStore(factory).undo(body.target_id, body.action_id), **_scope(session)}

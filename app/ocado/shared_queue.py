@@ -164,6 +164,22 @@ class QueueStore:
                 db.refresh(row)
             return _out(row)
 
+    def undo(self, target_id: str, action_id: str, *, now: datetime | None = None) -> dict:
+        """Remove exactly the reviewed unsaved edit, without touching Ocado."""
+        now = now or utcnow()
+        with self.factory() as db:
+            row = self._row(db)
+            if row is None or row.target_id != target_id or row.status != "pending":
+                raise shared.SharedError("These changes can no longer be undone. Refresh to see their status.")
+            actions = json.loads(row.actions_json)
+            remaining = [action for action in actions if action["id"] != action_id]
+            if len(remaining) == len(actions):
+                raise shared.SharedError("This change has been updated. Refresh before undoing it.")
+            self._cas(db, row, actions_json=json.dumps(remaining), status="pending" if remaining else "idle",
+                      due_at=now + DEBOUNCE if remaining else None, updated_at=now, error=None)
+            db.refresh(row)
+            return _out(row)
+
     def cancel(self, target_id: str | None = None, *, now: datetime | None = None) -> dict:
         with self.factory() as db:
             row = self._row(db)

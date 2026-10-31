@@ -33,6 +33,7 @@ class Line:
     pack: str | None = None
     original_cost: float | None = None
     offers: tuple[Offer, ...] = ()
+    category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +58,7 @@ class Found:
     image_url: str | None = None
     base_price: float | None = None
     offers: tuple[Offer, ...] = ()
+    category: str | None = None
 
 
 def basket(payload: Any, names: Callable[[list[str]], dict[str, str]]) -> Basket:
@@ -89,7 +91,7 @@ def search_results(payload: Any, limit: int) -> list[Found]:
                            pack=product.pack_size_raw, unit_price=product.unit_price,
                            unit_basis=product.unit_price_basis, in_stock=product.in_stock,
                            image_url=product.image_url, base_price=product.base_price,
-                           offers=offers(raw)))
+                           offers=offers(raw), category=product.category))
         if len(found) >= limit:
             break
     return found

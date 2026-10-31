@@ -127,6 +127,16 @@ class OcadoClient:
             result.extend(payload.get("products") or [])
         return result
 
+    def product_description(self, product_id: str) -> str | None:
+        from urllib.parse import quote
+        from app.ocado.product_details import description
+        response = self.session.request("GET", f"/products/{quote(product_id, safe='')}",
+                                        headers={"accept": "text/html"})
+        response.raise_for_status()
+        if getattr(response, "headers", {}).get("x-amzn-waf-action") in {"challenge", "captcha"}:
+            raise RuntimeError("Ocado is asking for a browser check")
+        return description(response.text, product_id)
+
     def checkout_walk(self) -> dict[str, Any]:
         return self._json("GET", CHECKOUT_WALK_PATH)
 
@@ -247,6 +257,8 @@ class OcadoClient:
     def _json(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self.session.request(method, path, **kwargs)
         response.raise_for_status()
+        if getattr(response, "headers", {}).get("x-amzn-waf-action") in {"challenge", "captcha"}:
+            raise RuntimeError("Ocado is asking for a browser check. Refresh the Ocado connection to continue.")
         if not response.content:
             return {}
         return response.json()

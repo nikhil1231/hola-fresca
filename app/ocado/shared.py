@@ -156,6 +156,14 @@ def _date(value: str | None) -> datetime | None:
         return None
 
 
+def upcoming_orders(client: OcadoClient, *, now: datetime | None = None) -> list[dict]:
+    now = now or datetime.now(timezone.utc)
+    return sorted((order for order in client.orders(pending=True)
+                   if (start := _date((order.get("dates") or {}).get("deliveryStartDate"))) is not None
+                   and start >= now and order.get("status") not in {"CANCELLED", "DELIVERED"}),
+                  key=lambda order: (_date((order.get("dates") or {}).get("deliveryStartDate")), str(order.get("orderId"))))
+
+
 def target(client: OcadoClient, pinned: str | None = None, *, now: datetime | None = None) -> tuple[str, dict | None]:
     coming = client.orders(pending=True)
     if pinned is not None and pinned != "cart":
@@ -245,21 +253,24 @@ def project(basket: shop.Basket, actions: list[dict]) -> shop.Basket:
 
 
 def decorate(basket: shop.Basket, client: OcadoClient, session: Session, *, retailer: str) -> shop.Basket:
-    """Pictures and offers for active-cart and newly queued lines; prices stay live totals."""
-    missing = [line.sku for line in basket.lines if not line.image_url]
-    if not missing:
+    """Catalogue categories for all lines, plus missing pictures and offers; prices stay live."""
+    if not basket.lines:
         return basket
+    missing = [line.sku for line in basket.lines if not line.image_url]
     known = {p.sku: p for p in session.scalars(select(Product).where(
-        Product.retailer == retailer, Product.sku.in_(missing)
+        Product.retailer == retailer, Product.sku.in_([line.sku for line in basket.lines])
     ))}
     found = {}
     try:
-        found = {p.sku: p for p in shop.search_results({"products": client.products(missing)}, len(missing))}
+        if missing:
+            found = {p.sku: p for p in shop.search_results({"products": client.products(missing)}, len(missing))}
     except Exception as exc:
         log.info("Shared basket decoration unavailable: %s", exc)
     lines = []
     for line in basket.lines:
         product, cached = found.get(line.sku), known.get(line.sku)
+        category = line.category or (product.category if product else None) or (cached.category if cached else None)
+        line = replace(line, category=category)
         if line.image_url:
             lines.append(line)
         elif product:

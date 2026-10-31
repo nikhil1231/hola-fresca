@@ -226,7 +226,8 @@ ocado.holafresca.uk → http://holafresca:8100
 Create a **new self-hosted Access application** for `ocado.holafresca.uk` with its
 own allowed people/policy. Do not add the hostname to the planner's application:
 their audience tags must differ. Every admitted person can change the shared
-shop and manage its Ocado sign-in, so the allowlist grants purchasing authority.
+shop, so the allowlist grants purchasing authority. Only the named owner can
+manage Settings and the shared Ocado sign-in.
 Avoid a wildcard Access application that also covers both hostnames.
 
 Add to `~/secrets/holafresca.env` on the production host:
@@ -239,7 +240,7 @@ HOLAFRESCA_OCADO_SHARED_ACCOUNT_KEY=anuja
 
 Keep `HOLAFRESCA_ACCESS_TEAM_DOMAIN` configured for the same Cloudflare team.
 `anuja` is the default connection. The shop's Settings page lists the registered
-Ocado connections and lets an authorised person choose one for the household.
+Ocado connections and lets the owner choose one for the household.
 The choice is saved in SQLite and survives restarts; everyone sees the same
 selection. Switching is refused while any shared batch is pending, running or
 failed. Clear or finish that batch first. Every write includes the selected
@@ -248,6 +249,20 @@ selected account, even if both targets are named `cart`.
 
 With no matching default connection, sign in once on Settings to create it, or
 select an existing registered connection from the account picker.
+
+The delivery card opens an upcoming-delivery picker. The browser sends its
+chosen order as `target_id` to basket and slot reads and to edits. The selection
+lives in `sessionStorage`, scoped to the shared account and its version; it is
+never a household setting. A fresh browser session starts with the earliest
+upcoming order. Choosing a later one shows an “Earlier delivery” badge. Queued
+changes retain their original target: finish or cancel them before switching.
+The API rejects edits to closed deliveries and never projects one order's
+pending items onto another order's basket.
+
+For LAN iteration, the Vite server can proxy a reloadable API on `127.0.0.1:8101`.
+When it uses the existing shared data directory alongside the production API,
+run the development API with `--lifespan off` so only the production process
+executes the durable queue. Both APIs use the same on-disk account lock.
 
 The shop opens directly on the basket, below a compact delivery banner. Delivery
 times expand by day, then morning/afternoon/evening. A booked order's pictures

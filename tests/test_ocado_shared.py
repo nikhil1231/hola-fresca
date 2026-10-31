@@ -277,14 +277,16 @@ def test_shared_projected_quantities_and_cancel_are_visible_across_people(shared
     assert api.get("/api/ocado-shared/state").json()["basket"]["lines"][0]["quantity"] == 2
 
 
-def test_stale_target_rejected_without_touching_upstream_and_pending_target_stays_pinned(shared_api):
+def test_stale_target_rejected_and_browser_selection_does_not_retarget_pending_changes(shared_api):
     api, fake, _, _, _ = shared_api
     _login(api)
     fake.coming = [booked("pinned", 5)]
     assert _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()}).status_code == 409
     assert _post(api, "/api/ocado-shared/actions", json={"target_id": "pinned", **_quantity()}).status_code == 200
     fake.coming.append(booked("new-earlier", 3))
-    assert api.get("/api/ocado-shared/state").json()["order"]["order_id"] == "pinned"
+    assert api.get("/api/ocado-shared/state?target_id=pinned").json()["order"]["order_id"] == "pinned"
+    assert api.get("/api/ocado-shared/state").json()["order"]["order_id"] == "new-earlier"
+    assert api.get("/api/ocado-shared/queue").json()["target_id"] == "pinned"
     fake.coming = [booked("new-earlier", 3)]
     assert _post(api, "/api/ocado-shared/actions", json={"target_id": "pinned", **_quantity()}).status_code == 409
     assert "quantities" not in fake.calls
@@ -907,3 +909,190 @@ def test_only_named_owner_can_change_shared_settings(shared_api, factory, path, 
     # Shopping and shared session recovery still work for the household.
     assert api.get("/api/ocado-shared/state").status_code == 200
     assert _post(api, "/api/ocado-shared/session/refresh", json={}).status_code == 200
+
+
+
+def test_delivery_selection_reads_the_requested_basket_without_persisting_it(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    first, later = booked("first", 3), booked("later", 5)
+    later["items"] = [{"product": "bread", "quantity": 4}]
+    fake.coming = [later, first]
+    listed = api.get("/api/ocado-shared/deliveries").json()["items"]
+    assert [item["order_id"] for item in listed] == ["first", "later"]
+    selected = api.get("/api/ocado-shared/state?target_id=later").json()
+    assert selected["target_id"] == "later"
+    assert selected["order"]["order_id"] == "later"
+    assert selected["earlier_delivery"]["order_id"] == "first"
+    assert selected["confirmed_quantities"] == {"bread": 4}
+    fresh = api.get("/api/ocado-shared/state").json()
+    assert fresh["order"]["order_id"] == "first"
+    assert fresh["earlier_delivery"] is None
+    assert "start_edit" not in fake.calls
+
+
+def test_selected_delivery_receives_changes_and_other_baskets_are_not_projected(shared_api, factory):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    fake.coming = [booked("first", 3), booked("later", 5)]
+    accepted = _post(api, "/api/ocado-shared/actions", json={"target_id": "later", **_quantity("milk", 5)})
+    assert accepted.status_code == 200
+    assert accepted.json()["target_id"] == "later"
+    assert api.get("/api/ocado-shared/state?target_id=later").json()["basket"]["lines"][0]["quantity"] == 5
+    first = api.get("/api/ocado-shared/state").json()
+    assert first["target_id"] == "first"
+    assert first["basket"]["lines"][0]["quantity"] == 2
+    denied = _post(api, "/api/ocado-shared/actions", json={"target_id": "first", **_quantity("milk", 6)})
+    assert denied.status_code == 409
+    assert QueueStore(factory).snapshot()["actions"][0]["quantity"] == 5
+    assert Worker(factory, client_factory=lambda key: fake).step(now=NOW)
+    assert fake.saved_order == "later"
+    assert fake.coming[0]["items"][0]["quantity"] == 2
+
+
+@pytest.mark.parametrize("kind,extra", [("quantity", {"sku": "milk", "quantity": 3}),
+                                       ("slot", {"slot_id": "new-slot"}),
+                                       ("checkout", {"confirm": True})])
+def test_closed_selected_delivery_rejects_every_edit_before_queueing(shared_api, kind, extra):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    closed = booked("closed", 3)
+    closed["dates"]["confirmOrderChangesBy"] = "2020-01-01T20:00:00Z"
+    fake.coming = [closed, booked("later", 5)]
+    response = _post(api, "/api/ocado-shared/actions", json={"target_id": "closed", "kind": kind, **extra})
+    assert response.status_code == 409 and "closed" in response.json()["detail"]
+    assert api.get("/api/ocado-shared/queue").json()["actions"] == []
+    assert "start_edit" not in fake.calls and "quantities" not in fake.calls
+
+
+def test_delivery_picker_excludes_past_cancelled_and_delivered_orders(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    past = booked("past", 3)
+    past["dates"]["deliveryStartDate"] = "2020-01-01T10:00:00Z"
+    cancelled, delivered = booked("cancelled", 4), booked("delivered", 5)
+    cancelled["status"], delivered["status"] = "CANCELLED", "DELIVERED"
+    fake.coming = [cancelled, delivered, past, booked("future", 6)]
+    assert [item["order_id"] for item in api.get("/api/ocado-shared/deliveries").json()["items"]] == ["future"]
+    for identifier in ["past", "cancelled", "delivered", "unknown"]:
+        assert api.get(f"/api/ocado-shared/state?target_id={identifier}").status_code == 409
+
+
+def test_basket_categories_use_current_retailer_even_when_photos_exist(factory):
+    from app.ocado import shop
+
+    with factory() as db:
+        db.add_all([
+            Product(retailer="ocado", sku="category-milk", name="Milk", category="Fresh & Chilled Food > Dairy"),
+            Product(retailer="sainsburys", sku="category-milk", name="Milk", category="Wrong department"),
+        ])
+        db.commit()
+        class NoFetch:
+            def products(self, skus):
+                pytest.fail("Already pictured lines should use catalogue categories without another upstream call")
+        original = shop.Basket((shop.Line("category-milk", "Milk", 2, 3.0, image_url="milk.jpg"),
+                                shop.Line("unknown", "Unknown", 1, 2.0, image_url="unknown.jpg")), 5.0, False)
+        result = shared.decorate(original, NoFetch(), db, retailer="ocado")
+        assert result.lines[0].category == "Fresh & Chilled Food > Dairy"
+        assert result.lines[1].category is None
+        assert result.lines[0].cost == 3.0
+        assert result.lines[0].image_url == "milk.jpg"
+
+
+def test_new_basket_lines_keep_live_product_categories(factory):
+    from app.ocado import shop
+
+    class Products:
+        def products(self, skus):
+            return [{"productId": "new-fruit", "name": "Apples", "category": "Fresh & Chilled Food > Fruit",
+                     "image": {"src": "apples.jpg"}}]
+    with factory() as db:
+        original = shop.Basket((shop.Line("new-fruit", "Apples", 1, None),), None, False)
+        result = shared.decorate(original, Products(), db, retailer="ocado")
+        assert result.lines[0].category == "Fresh & Chilled Food > Fruit"
+        assert result.lines[0].cost is None
+
+
+def test_undo_one_change_preserves_others_and_last_undo_empties_queue(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    first = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()}).json()["actions"][0]
+    queued = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity("bread", 1)}).json()
+    before_calls = list(fake.calls)
+    response = _post(api, "/api/ocado-shared/queue/undo", json={"target_id": "cart", "action_id": first["id"]})
+    assert response.status_code == 200, response.text
+    remaining = response.json()
+    assert [action["sku"] for action in remaining["actions"]] == ["bread"]
+    assert remaining["status"] == "pending" and remaining["due_at"]
+    assert fake.calls == before_calls  # undo only drops queued work; no Ocado edit session
+    last = _post(api, "/api/ocado-shared/queue/undo", json={"target_id": "cart", "action_id": remaining["actions"][0]["id"]}).json()
+    assert last["status"] == "idle" and not last["actions"] and last["due_at"] is None
+    assert api.get("/api/ocado-shared/state").json()["basket"]["lines"][0]["quantity"] == 2
+
+
+@pytest.mark.parametrize("case", ["stale-action", "wrong-target", "wrong-account", "running", "failed"])
+def test_undo_rejects_stale_or_started_changes(shared_api, factory, case):
+    api, _, _, _, _ = shared_api
+    _login(api)
+    queued = _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity()}).json()
+    body = {"target_id": "cart", "action_id": queued["actions"][0]["id"]}
+    if case == "stale-action":
+        _post(api, "/api/ocado-shared/actions", json={"target_id": "cart", **_quantity(quantity=4)})
+    if case == "wrong-target": body["target_id"] = "other"
+    if case == "wrong-account": body["account_version"] = 999
+    if case in {"running", "failed"}:
+        with factory() as db:
+            row = db.scalar(select(OcadoSharedQueue))
+            row.status = case
+            db.commit()
+    before = api.get("/api/ocado-shared/queue").json()
+    response = _post(api, "/api/ocado-shared/queue/undo", json=body)
+    assert response.status_code == 409, response.text
+    assert api.get("/api/ocado-shared/queue").json() == before
+
+
+def test_removed_product_picture_remains_available_in_change_details(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    order = booked()
+    photo = "https://www.ocado.com/images-v3/milk.jpg"
+    order["groupedProducts"] = {"products": [{"productId": "milk", "name": "Milk", "quantity": 2,
+        "image": {"src": photo}, "prices": {"offered": {"amount": "3.00"}}}]}
+    fake.coming = [order]
+    _post(api, "/api/ocado-shared/actions", json={"target_id": "order", **_quantity(quantity=0)})
+    state = api.get("/api/ocado-shared/state").json()
+    assert state["basket"]["lines"] == []
+    assert state["change_products"]["milk"]["image_url"] == photo
+    assert state["confirmed_lines"][0]["sku"] == "milk"
+    assert state["confirmed_lines"][0]["quantity"] == 2
+
+
+def test_product_details_returns_compact_live_product_data(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    fake.products = lambda skus: [{"productId": "milk", "retailerProductId": "123", "name": "Whole Milk",
+                                  "packSizeDescription": "2 pints", "price": {"amount": "1.65"},
+                                  "image": {"src": "milk.jpg"},
+                                  "promotions": [{"promoId": OFFER_ID, "description": "2 for £3"}]}]
+    fake.product_description = lambda product_id: "Fresh whole milk" if product_id == "123" else None
+    response = api.get("/api/ocado-shared/products/milk")
+    assert response.status_code == 200, response.text
+    product = response.json()["product"]
+    assert product["name"] == "Whole Milk" and product["price"] == 1.65
+    assert product["pack"] == "2 pints" and product["image_url"] == "https://www.ocado.com/milk.jpg"
+    assert product["description"] == "Fresh whole milk"
+    assert product["offers"][0]["label"] == "2 for £3"
+
+
+def test_product_details_missing_description_preserves_basic_details(shared_api):
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    fake.products = lambda skus: [{"productId": "milk", "retailerProductId": "123", "name": "Milk"}]
+    def fail(product_id):
+        raise RuntimeError("Page unavailable")
+    fake.product_description = fail
+    product = api.get("/api/ocado-shared/products/milk").json()["product"]
+    assert product["name"] == "Milk" and product["description"] is None
+    assert product["description_unavailable"] is True
+    fake.products = lambda skus: [{"productId": "other", "name": "Wrong product"}]
+    assert api.get("/api/ocado-shared/products/milk").status_code == 404
