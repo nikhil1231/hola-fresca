@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { IconAlertTriangle, IconArrowBackUp, IconArrowRight, IconBasket, IconCalendarWeek, IconCheck, IconClock, IconLeaf, IconLock, IconMinus, IconPlus, IconSearch, IconShoppingBag, IconTruckDelivery, IconTrash, IconUserCircle, IconX } from '@tabler/icons-react'
 import { request } from './api.js'
+import { ReservedRules } from './ReservedRules.jsx'
 import { isReady, useSharedShop } from './useSharedShop.js'
 import { canEditOrder, queuedEditingClosed } from './orderEditing.js'
 import { basketCategories } from './basketCategories.js'
@@ -19,6 +20,7 @@ const slotTime = (start, end) => `${time(start)}${end ? ` – ${time(end)}` : ''
 const tabs = [
   { id: 'basket', label: 'Basket', icon: IconBasket },
   { id: 'search', label: 'Search', icon: IconSearch },
+  { id: 'reserved', label: 'Reserved', icon: IconShoppingBag },
   { id: 'slots', label: 'Delivery', icon: IconCalendarWeek },
   { id: 'account', label: 'Settings', icon: IconUserCircle },
 ]
@@ -424,12 +426,14 @@ export default function App() {
     <div className="workspace">
       {!online && <ToastMessage message="You’re offline. Reconnect before making changes." toastKey="offline" type="error" />}
       {shop.error && <ShopError {...shop} />}
+      {shop.auth?.reserved_warnings?.map((run) => <div className="reserved-warning" role="alert" key={run.order_id}><IconAlertTriangle size={20} aria-hidden="true" /><div><strong>Reserved delivery needs attention</strong><p>{run.warning}</p><button type="button" className="text-button" onClick={() => navigate('reserved')}>Review Reserved rules</button></div></div>)}
       {shop.otherDeliveryPending && <ToastMessage message="Changes for another delivery are waiting to save." toastKey="other-delivery" />}
       <main id="shop-content" className="content-panel" tabIndex={-1} aria-busy={shop.loading || shop.syncing}>
         {shop.loading && !shop.auth ? <ToastMessage message="Opening your shop…" toastKey="shop-loading" duration={0} /> : <>
           {ready && shop.stale && !shop.error && <ToastMessage message="Refresh the basket before making changes." type="error" />}
 
           {(canManageSettings && (!ready || currentTab === 'account')) ? <Account key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selectAccount={shop.selectAccount} queueBlocked={['pending', 'running', 'failed'].includes(shop.queue?.status)} auth={shop.auth} busy={shop.busy} authenticate={shop.authenticate} accessExpired={shop.accessExpired} /> : !ready ? <ToastMessage message="Please ask Nikhil to reconnect Ocado. Your booked delivery is still with Ocado." toastKey="shop-disconnected" type="error" /> : !shop.state ? <ToastMessage message={shop.syncing ? 'Loading your basket…' : 'Refresh the shop to try again.'} toastKey="basket-loading" type={shop.syncing ? 'info' : 'error'} duration={shop.syncing ? 0 : 9000} /> : <>
+            {currentTab === 'reserved' && <ReservedRules key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selection={shop.selection} reportError={shop.reportError} />}
             {currentTab === 'basket' && <Basket {...basketProps} />}
             {currentTab === 'search' && <Search key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} lines={effectiveLines} locked={locked} canEdit={canEdit} action={shop.action} reportError={shop.reportError} onProduct={setProduct} onOffer={setOffer} />}
             {currentTab === 'slots' && <Slots key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} targetId={shop.targetId} locked={locked} action={shop.action} reportError={shop.reportError} />}

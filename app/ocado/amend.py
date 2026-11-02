@@ -86,7 +86,8 @@ def move_slot(client: OcadoClient, order_id: str, slot_id: str) -> Moved:
 
 
 def change_order(client: OcadoClient, order_id: str, *,
-                 quantities: dict[str, int] | None = None, slot_id: str | None = None) -> dict[str, Any]:
+                 quantities: dict[str, int] | None = None, slot_id: str | None = None,
+                 minimum_total: float | None = None) -> dict[str, Any]:
     """Edit basket lines and/or a slot, then re-check out the same order."""
     if not quantities and not slot_id:
         raise OrderChangeError("Supply basket quantities or a delivery slot")
@@ -108,10 +109,23 @@ def change_order(client: OcadoClient, order_id: str, *,
             client.set_quantities(quantities)
         if slot_id and slot_id != order.get("slotId"):
             client.reserve(slot_id, ddid=ddid, region=region)
+        if minimum_total is not None:
+            from app.ocado.shop import basket
+
+            live = basket(client.cart_view(), lambda skus: {})
+            threshold = max(minimum_total, live.minimum or minimum_total)
+            if live.total is None:
+                raise OrderChangeError("The adjusted items total could not be verified; changes were not confirmed")
+            if live.total < threshold:
+                raise OrderChangeError(f"The adjusted items total is £{live.total:.2f}, below the £{threshold:.2f} minimum. "
+                                       "Changes were not confirmed; add items or revise your Reserved rules")
         client.checkout_start()
         summary = client.checkout_summary()
         group = summary.get("activeCheckoutGroup") or {}
         restrictions = group.get("checkoutRestrictions") or []
+        if minimum_total is not None and ("NOT_REACHED_THRESHOLD" in restrictions or group.get("basketAboveThreshold") is False):
+            raise OrderChangeError(f"Ocado reports the adjusted basket is below its £{minimum_total:.2f} minimum. "
+                                   "Changes were not confirmed; add items or revise your Reserved rules")
         if restrictions or group.get("canCheckout") is False:
             raise OrderChangeError(f"Ocado cannot check out these changes: {', '.join(restrictions) or 'basket not ready'}")
         result = client.checkout(body, order_id=str(order_id))

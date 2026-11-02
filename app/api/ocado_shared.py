@@ -89,9 +89,11 @@ def _auth_out(auth, account, session: Session, user: User) -> dict:
                     User, User.id == RetailerAccount.user_id
                 ).where(RetailerAccount.retailer == "ocado").order_by(User.id))]
     result = CartLoginOut(status=auth.status, stage=auth.stage or "idle", email=account.email) if account else CartLoginOut(status="logged_out")
+    from app.ocado.reserved import snapshot
+    reserved_state = snapshot(session, account.id) if account else {"runs": []}
     allowed = _can_manage_settings(user)
     return {**result.model_dump(), **_scope(session), "accounts": accounts if allowed else [],
-            "can_manage_settings": allowed}
+            "can_manage_settings": allowed, "reserved_revision": reserved_state.get("revision"), "reserved_warnings": [run for run in reserved_state["runs"] if run["warning"]]}
 
 
 class AccountSelectionIn(SelectionIn):
@@ -465,3 +467,48 @@ def check(body: CancelIn, session: Session = Depends(get_session),
         client = shared.make_client(shared.account_key(session))
         return {**QueueStore(factory).recheck(lambda target, actions: shared.verify(client, target, actions)),
                 **_scope(session)}
+
+
+class ReservedRuleIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sku: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9-]+$")
+    name: str = Field(min_length=1, max_length=500)
+    quantity: int = Field(ge=0, le=50, strict=True)
+
+
+class ReservedRulesIn(SelectionIn):
+    enabled: bool = Field(strict=True)
+    rules: list[ReservedRuleIn] = Field(max_length=200)
+
+
+@router.get("/reserved")
+def reserved_rules(session: Session = Depends(get_session)):
+    from app.ocado.reserved import snapshot
+
+    with _operation(session):
+        account = shared.require_account(session)
+        return {**_scope(session), **snapshot(session, account.id)}
+
+
+@router.post("/reserved", dependencies=[Depends(require_person)])
+def save_reserved_rules(body: ReservedRulesIn, session: Session = Depends(get_session),
+                        user: User = Depends(get_current_user)):
+    import json
+    from app.db.models import OcadoReservedRules
+    from app.ocado.reserved import snapshot
+
+    if len({rule.sku for rule in body.rules}) != len(body.rules):
+        raise HTTPException(status_code=400, detail="Each product can only have one Reserved rule")
+    if body.enabled and not body.rules:
+        raise HTTPException(status_code=400, detail="Add a product rule before enabling Reserved adjustments")
+    with _operation(session, blocking=False):
+        _check_selection(session, body)
+        account = shared.require_account(session)
+        row = session.scalar(select(OcadoReservedRules).where(OcadoReservedRules.account_id == account.id))
+        if row is None:
+            row = OcadoReservedRules(account_id=account.id, user_id=user.id)
+            session.add(row)
+        row.user_id, row.enabled = user.id, body.enabled
+        row.rules_json = json.dumps([rule.model_dump() for rule in body.rules])
+        session.commit()
+        return {**_scope(session), **snapshot(session, account.id)}

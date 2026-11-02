@@ -145,6 +145,7 @@ export function useSharedShop() {
         }
         if (disposed || ref.epoch !== epoch) return
         const wasReady = isReady(ref.auth)
+        const reservedChanged = ref.auth?.reserved_revision !== nextAuth.reserved_revision
         acceptAuth(nextAuth)
         epoch = ref.epoch
         if (isReady(nextAuth)) {
@@ -152,7 +153,7 @@ export function useSharedShop() {
           const nextQueue = await request('/queue')
           if (disposed || ref.epoch !== readEpoch || !sameAccount(nextQueue, ref.auth)) return
           const changed = acceptQueue(nextQueue)
-          if (changed || !wasReady || !ref.state) void refresh()
+          if (changed || reservedChanged || !wasReady || !ref.state) void refresh()
         }
       } catch (failure) {
         if (!disposed && ref.epoch === epoch) {

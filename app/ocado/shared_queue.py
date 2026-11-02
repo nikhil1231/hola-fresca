@@ -324,9 +324,16 @@ class Worker:
             return False
 
     def _run(self) -> None:
+        from app.ocado import reserved
+        import time
+
+        next_reserved = 0.0
         while not self.stopping.is_set():
             try:
                 self.step()
+                if time.monotonic() >= next_reserved:
+                    next_reserved = time.monotonic() + 60
+                    reserved.step(self.store.factory, client_factory=self.client_factory)
             except Exception:  # keep the durable claim for explicit recovery on the next iteration
                 log.exception("Shared Ocado queue worker failed")
             self.stopping.wait(1)

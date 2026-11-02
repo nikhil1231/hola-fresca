@@ -389,3 +389,20 @@ collide eventually.
 guard is there to protect hand-edits to `app/` and `frontend/`, which it still
 catches; blocking on a CSV that a background job rewrote means one failed
 overnight push takes the deploy path down with it until somebody notices.
+
+### Reserved delivery rules
+
+The standalone shop's **Reserved** tab saves absolute pack quantities for the
+selected shared account; zero excludes a product. Save and enable the rules to
+check upcoming editable Ocado Reserved orders every minute, even while the app
+is closed. Existing upcoming Reserved orders are eligible when first enabled.
+Manual orders and the active shopping cart are never rule targets. A nonempty
+cart or pending/running/failed shared batch defers processing.
+
+`ocado_reserved_runs` has a unique account/order key and retains the rule
+snapshot across a process restart. Completed orders (including those already
+matching) and warning outcomes are terminal: later manual edits and rule changes
+do not reapply rules. A process interrupted mid-run resumes its saved snapshot.
+An adjusted items total below £40, or Ocado's minimum threshold if higher,
+cancels the unconfirmed edit and produces a persistent warning in the shop and
+Reserved history. Review warned deliveries manually; no automatic retry occurs.

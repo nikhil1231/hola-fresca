@@ -154,6 +154,34 @@ class OcadoSharedQueue(Base):
     version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+class OcadoReservedRules(Base):
+    __tablename__ = "ocado_reserved_rules"
+    __table_args__ = (UniqueConstraint("account_id", name="uq_ocado_reserved_rules_account"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("retailer_accounts.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Integer, default=0, nullable=False)
+    rules_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+
+
+class OcadoReservedRun(Base):
+    __tablename__ = "ocado_reserved_runs"
+    __table_args__ = (
+        UniqueConstraint("account_id", "order_id", name="uq_ocado_reserved_run_order"),
+        CheckConstraint("status in ('running', 'completed', 'warning')", name="ck_ocado_reserved_run_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("retailer_accounts.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    order_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    rules_json: Mapped[str] = mapped_column(Text, nullable=False)
+    warning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class PlannerCacheState(Base):
     """Singleton generations for the two halves of the planner snapshot."""
 

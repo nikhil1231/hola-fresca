@@ -381,3 +381,18 @@ h2 { letter-spacing: -.7px; font-size: 27px; }
 .product-details .discounted-price strong { color: #b42332; }
 .product-description { margin-top: 20px; }
 .product-description p { white-space: pre-line; margin-top: 8px; line-height: 1.6; }
+
+.reserved-panel { max-width: 52rem; margin: auto; }
+.reserved-enable { display: flex !important; flex-direction: row !important; align-items: center; gap: .7rem; }
+.reserved-enable input { width: auto; }
+.reserved-rule-list, .reserved-history { list-style: none; padding: 0; }
+.reserved-rule-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 0; border-bottom: 1px solid var(--line, #ddd); }
+.reserved-rule-list label { display: flex; flex-direction: row; align-items: center; gap: 1rem; flex: 1; }
+.reserved-rule-list label span { flex: 1; }
+.reserved-rule-list input { width: 5rem; }
+.reserved-search { display: grid; gap: .5rem; margin-top: 2rem; }
+.reserved-search input { padding: .8rem; font: inherit; border: 1px solid #bbb; border-radius: .5rem; }
+.reserved-warning { display: flex; gap: .8rem; padding: 1rem; margin: 1rem 0; border: 1px solid #c59029; border-radius: .8rem; background: #fff6df; }
+.reserved-warning svg { flex-shrink: 0; }
+.reserved-warning p, .reserved-history p { overflow-wrap: anywhere; }
+.reserved-history li { padding: .8rem 0; }
