@@ -32,8 +32,8 @@ from app.api.access import require_person
 from app.api.deps import get_current_user, get_session
 from app.db import retailer_accounts
 from app.db.models import RetailerAccount, User
-from app.hellofresh import boxes
-from app.hellofresh.client import PAUSED, RUNNING, HelloFreshClient, HelloFreshError, NeedsLogin, TokenStore, unwrap
+from app.hellofresh import boxes, changes
+from app.hellofresh.client import PAUSED, RUNNING, HelloFreshClient, HelloFreshError, NeedsLogin, TokenStore
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/hellofresh", tags=["hellofresh"])
@@ -327,15 +327,12 @@ def _change_week(client: HelloFreshClient, when: str, body: WeekIn, status: str)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="A week is 2026-W42 or any date in it, e.g. 2026-10-19") from exc
     subscription_id = body.subscription_id or _only(boxes.live_ids(_call(client.subscriptions)), "subscription")
-    delivery = unwrap(_call(client.delivery, subscription_id, week))
-    if delivery.get("status") == status:
-        return {"week": week, "subscription_id": subscription_id, "status": status, "changed": False}
-    if not boxes.changeable(delivery):
-        raise HTTPException(status_code=409, detail=f"{week} is past its cutoff ({delivery.get('cutoffDate')}): "
+    change = _call(changes.set_week, client, subscription_id, week, status)
+    if change.refused:
+        raise HTTPException(status_code=409, detail=f"{week} is {change.refused}: "
                                                     "HelloFresh won't change it now")
-    _call(client.set_delivery_status, subscription_id, week, status,
-          cutoff_date=delivery.get("cutoffDate"), delivery_date=delivery.get("deliveryDate"))
-    return {"week": week, "subscription_id": subscription_id, "status": status, "changed": True}
+    return {"week": week, "subscription_id": subscription_id, "status": change.status,
+            "changed": change.changed}
 
 
 @router.post("/weeks/{when}/skip")

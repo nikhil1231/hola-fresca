@@ -36,6 +36,18 @@ say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warn\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m!!\033[0m %s\n' "$*" >&2; exit 1; }
 
+# The live site moved to the `holafresca` docker compose stack (~/infra/stacks/holafresca),
+# which infra-deploy@holafresca.timer rebuilds from origin/main within ~2 minutes of a
+# push. Restarting $SERVICE here does not deploy anything: it collides with the
+# container on :8100 and restart-loops on "address already in use".
+if [ "${HOLAFRESCA_LEGACY_DEPLOY:-0}" != 1 ] && command -v docker >/dev/null 2>&1 \
+    && [ -n "$(docker ps -q --filter label=com.docker.compose.project=holafresca 2>/dev/null)" ]; then
+    say "the live site is the holafresca docker stack: deploying = pushing to $BRANCH"
+    say "infra-deploy@holafresca.timer picks the push up within ~2 minutes; nothing to do here"
+    say "(HOLAFRESCA_LEGACY_DEPLOY=1 forces the old $SERVICE path)"
+    exit 0
+fi
+
 # `ssh box deploy/update.sh` is a non-interactive shell, so ~/.bashrc returns
 # early and nvm is never loaded. Today that is survivable — there is a system
 # npm at /usr/bin/npm on the same node major — but the node this box develops

@@ -8,6 +8,9 @@
 #
 # Push first — this deploys what GitHub has, not what is on your disk.
 #
+# LEGACY: the live site is now the holafresca docker stack, which redeploys by
+# itself after a push to main (see deploy/README.md). update.sh says so and exits.
+#
 # The box is reached by trying several addresses in order, because Tailscale is
 # the usual route but not a dependency: if the tailnet is down and you are on
 # the house LAN, the mDNS name or the LAN address still gets there. Override

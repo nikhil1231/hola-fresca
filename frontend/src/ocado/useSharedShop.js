@@ -254,11 +254,13 @@ export function useSharedShop() {
   }
   const cancel = (selection = {}) => mutate('/queue/cancel', { ...scope(auth), ...selection, target_id: selection.target_id ?? refs.current.queue?.target_id })
   const undo = (actionId) => mutate('/queue/undo', { target_id: refs.current.queue?.target_id, action_id: actionId })
+  const retry = (selection = {}) => mutate('/queue/retry', { ...scope(auth), ...selection, target_id: selection.target_id ?? refs.current.queue?.target_id })
+  const check = (selection = {}) => mutate('/queue/check', { ...scope(auth), ...selection, target_id: selection.target_id ?? refs.current.queue?.target_id })
   const authenticate = (path, body = {}) => mutate(path, { ...scope(auth), ...body }, true)
   const targetId = state?.target_id ?? state?.queue?.target_id
   const otherDeliveryPending = Boolean(targetId) && ['pending', 'running', 'failed'].includes(queue?.status) && queue.target_id !== targetId
   const locked = busy || syncing || stale || !state || !canEditOrder(state?.order) || !targetId || otherDeliveryPending || queue?.status === 'running' || queue?.status === 'failed' || accessExpired
   const clearError = useCallback(() => setError(null), [])
   const selectAccount = (id) => mutate('/account', { ...scope(auth), selected_account_id: Number(id) }, true)
-  return { selection: scope(auth), targetId, selectDelivery, otherDeliveryPending, selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, addOffer, cancel, undo, authenticate, reportError, clearError }
+  return { selection: scope(auth), targetId, selectDelivery, otherDeliveryPending, selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, addOffer, cancel, undo, retry, check, authenticate, reportError, clearError }
 }

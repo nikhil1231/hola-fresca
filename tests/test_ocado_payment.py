@@ -1,4 +1,5 @@
 """Payment handoffs are continued, and unavailable inputs are reported precisely."""
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -104,7 +105,26 @@ def test_frictionless_flow_needs_no_control_clicks():
 
 def test_provider_error_is_not_relabelled_as_a_card_challenge():
     with pytest.raises(payment.PaymentFlowError, match='HTTP 422'):
-        payment._drive(None, [], ['Ocado rejected payment completion (HTTP 422)'])
+        payment._drive(None, [], [(False, 0.0, 'Ocado rejected payment completion (HTTP 422)')])
+
+
+def test_a_provider_error_waits_for_the_merchant_result(monkeypatch):
+    # The live 404 from the provider's /checkout/complete: keep going, and let
+    # Ocado's own validated checkout result decide.
+    import time as _time
+    completed, failures = [], [(True, _time.monotonic(), 'The payment provider rejected payment completion (HTTP 404)')]
+    expected = {'type': payment.DONE, 'orderId': 'o1'}
+    page = SimpleNamespace(frames=[], wait_for_timeout=lambda _: completed.append(expected))
+    monkeypatch.setattr(payment, '_advance', lambda *_: False)
+    assert payment._drive(page, completed, failures) == expected
+
+
+def test_a_provider_error_fails_once_its_grace_runs_out(monkeypatch):
+    monkeypatch.setattr(payment, '_advance', lambda *_: False)
+    page = SimpleNamespace(frames=[], wait_for_timeout=lambda _: None)
+    stale = [(True, -1e9, 'The payment provider rejected payment completion (HTTP 404)')]
+    with pytest.raises(payment.PaymentFlowError, match='HTTP 404'):
+        payment._drive(page, [], stale)
 
 
 def test_payment_tokens_are_not_exposed_in_browser_error_messages(monkeypatch):
@@ -215,7 +235,7 @@ def test_provider_http_error_is_preserved_without_requesting_card_confirmation()
                                json=lambda: {'code': 'INVALID_NONCE'})
     payment._completion_response(response, completed, failures)
     assert completed == []
-    assert failures == ['The payment provider rejected payment completion (HTTP 422; code INVALID_NONCE)']
+    assert [m for _p, _t, m in failures] == ['The payment provider rejected payment completion (HTTP 422; code INVALID_NONCE)']
 
 
 def test_payment_result_from_an_unrelated_frame_is_ignored():
@@ -224,3 +244,31 @@ def test_payment_result_from_an_unrelated_frame_is_ignored():
                                json=lambda: {'type': payment.DONE, 'orderId': 'o1'})
     payment._completion_response(response, completed, failures)
     assert completed == failures == []
+
+
+def test_checkout_enforces_the_card_but_keeps_the_pages_other_payment_fields():
+    """Forcing toSave=False onto the page's saved card preceded provider 404s on every edit."""
+    sent = []
+    route = SimpleNamespace(request=SimpleNamespace(method='POST', post_data_json={
+        'paymentMethod': {'group': 'PAY_NOW', 'type': 'CARDS', 'toSave': True, 'walletItemId': 'w1'},
+        'redirectUrl': 'https://www.ocado.com/checkout/3ds/end'}),
+        abort=lambda: pytest.fail('Must submit'), fallback=lambda post_data: sent.append(json.loads(post_data)))
+    client = SimpleNamespace(checkout_summary=lambda: {'orderId': 'o1'})
+    body = {'paymentMethod': {'group': 'PAY_NOW', 'type': 'CARDS', 'toSave': False, 'walletItemId': 'w1'},
+            'recurringOrder': {'edit': {'replaceItems': False}}}
+    payment._checkout_request(route, client, body, 'o1', [], [])
+    assert sent[0]['paymentMethod'] == {'group': 'PAY_NOW', 'type': 'CARDS', 'toSave': True, 'walletItemId': 'w1'}
+    assert sent[0]['recurringOrder'] == {'edit': {'replaceItems': False}}
+
+
+def test_a_reoffered_place_order_is_not_pressed_after_checkout_was_submitted(monkeypatch):
+    """After a provider error the page shows Place order again; pressing it is a second checkout."""
+    frame = Frame()
+    presses = []
+    frame.buttons = [Control('Place order', click=lambda: presses.append('place'))]
+    page = SimpleNamespace(frames=[frame], wait_for_timeout=lambda _: None)
+    clicked = set()
+    assert payment._advance(page, clicked, []) is True
+    frame.locator = lambda selector: Control(text='payment failed') if selector == 'body' else Elements([])
+    assert payment._advance(page, clicked, [True]) is False
+    assert presses == ['place']

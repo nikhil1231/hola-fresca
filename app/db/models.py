@@ -1357,6 +1357,47 @@ class IngredientMappingProduct(Base):
     product: Mapped[Product | None] = relationship()
 
 
+class HelloFreshWeekDecision(Base):
+    """One week of one HelloFresh subscription that the weekly auto-skip has
+    already settled, and must therefore never touch again.
+
+    HelloFresh stores a delivery as ``RUNNING`` or ``PAUSED`` and nothing else:
+    no author, no history. So a week somebody un-skipped on purpose is
+    indistinguishable from one that has just appeared at the far edge of the
+    rolling window, and a job that skipped everything running would undo that
+    choice a few days later. This table is the half HelloFresh does not keep.
+    The job skips a week the first time it ever sees it and writes a row; a week
+    with a row is left alone for good, whatever its status. An un-skip therefore
+    survives wherever it was made -- here, HelloFresh's app, their website.
+
+    A week found already paused is recorded too, without a write, and that row is
+    not bookkeeping: without it, the first un-skip of that week would read as a
+    new week and be skipped straight back.
+
+    ``outcome`` is what the job did on that one occasion, kept for the record
+    rather than for the rule -- which only asks whether a row exists. A failed
+    write deliberately leaves no row, so the next run tries again.
+    """
+
+    __tablename__ = "hellofresh_week_decisions"
+    __table_args__ = (
+        UniqueConstraint("account_id", "week", name="uq_hellofresh_week_decision"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # The HelloFresh connection in ``retailer_accounts``, which is what carries
+    # the owning user. Two members of a household hold two accounts and settle
+    # their weeks independently of each other.
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("retailer_accounts.id", ondelete="CASCADE"), index=True
+    )
+    week: Mapped[str] = mapped_column(String(16))  # an ISO week, 2026-W53
+    subscription_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # skipped | already_skipped | locked
+    outcome: Mapped[str] = mapped_column(String(16))
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 # ``create_all`` is the fresh-database path and therefore never executes the
 # Alembic migration that installs these triggers.  Register the same DDL on the
 # metadata so fresh and upgraded databases have identical cache semantics.

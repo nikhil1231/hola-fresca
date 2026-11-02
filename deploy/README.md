@@ -42,11 +42,25 @@ systemctl --user enable --now holafresca-testing.service holafresca-testing-sync
 `sync-integration.sh` runs from this `deploy/` dir inside the testing checkout;
 because it is tracked, `git reset --hard` restores it instead of losing it.
 
-## Deploying from another machine
+## Deploying the live site (current)
 
-The live site is `holafresca-dev.service`, which serves the **main checkout's
-working tree** on :8100 — so a deploy is a `git pull` in that tree plus whatever
-the new commits imply, not a build-and-ship.
+holafresca.uk is the **`holafresca` docker compose stack** in
+`~/infra/stacks/holafresca` (container `holafresca`, image
+`infra-holafresca:current`, DB at `/data/holafresca.db` = `~/data/holafresca`
+on the host). `infra-deploy@holafresca.timer` rebuilds it from `origin/main`
+every couple of minutes, so **deploying = pushing to `main`**. Check it landed
+with `docker inspect holafresca --format '{{.State.StartedAt}}'`.
+
+`update.sh` / `hf-deploy` below predate the stack. While the container runs,
+`update.sh` says so and exits without touching anything: restarting
+`holafresca-dev.service` would only collide with the container on :8100. Set
+`HOLAFRESCA_LEGACY_DEPLOY=1` to force the old path.
+
+## Deploying from another machine (legacy, pre-docker)
+
+The live site was `holafresca-dev.service`, which served the **main checkout's
+working tree** on :8100, so a deploy was a `git pull` in that tree plus whatever
+the new commits implied, not a build-and-ship.
 
 ```sh
 hf-deploy            # from the laptop: deploy origin/main

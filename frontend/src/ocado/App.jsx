@@ -79,7 +79,8 @@ function DeliveryPicker({ selection, targetId, queue, busy, onSelect, onClose })
   </Confirm>
 }
 
-function EditingStatus({ queue, busy, cancel, undo, products, now, editingClosed }) {
+function EditingStatus({ queue, busy, cancel, undo, retry, check, products, now, editingClosed }) {
+  const held = queue?.status === 'pending' && !queue?.due_at && Boolean(queue?.error)
   const [open, setOpen] = useState(false)
   const { notify, dismiss } = useToasts()
   const previous = useRef(null)
@@ -89,15 +90,15 @@ function EditingStatus({ queue, busy, cancel, undo, products, now, editingClosed
     const before = previous.current
     previous.current = queue?.status
     let message = null
-    if (queue?.status === 'pending' && queue.actions?.length) message = editingClosed ? 'Editing has closed. Please review your unsaved changes.' : 'Changes noted. You can keep shopping.'
+    if (queue?.status === 'pending' && queue.actions?.length) message = held ? 'Ocado didn’t take your changes. You can try again.' : editingClosed ? 'Editing has closed. Please review your unsaved changes.' : 'Changes noted. You can keep shopping.'
     if (queue?.status === 'succeeded' && before && before !== 'succeeded') message = 'Your changes have been saved.'
     if (queue?.status === 'failed' && before !== 'failed') message = 'Please review your changes.'
     if (message) notify(message, { key: 'editing', type: queue.status === 'failed' || (queue.status === 'pending' && editingClosed) ? 'error' : 'success' })
     else dismiss('editing')
-  }, [queue?.status, queue?.updated_at, queue?.actions?.length, editingClosed, notify, dismiss])
-  const countingDown = queue?.status === 'pending' && !editingClosed
+  }, [queue?.status, queue?.updated_at, queue?.actions?.length, editingClosed, held, notify, dismiss])
+  const countingDown = queue?.status === 'pending' && !editingClosed && !held
   const remaining = countingDown && queue?.due_at ? Math.max(0, Math.min(1, (Date.parse(queue.due_at) - now) / 180000)) : 0
-  const title = queue?.status === 'running' ? 'Saving your changes' : queue?.status === 'failed' ? 'Review your changes' : editingClosed ? 'Review unsaved changes' : 'Editing your shop'
+  const title = queue?.status === 'running' ? 'Saving your changes' : queue?.status === 'failed' ? 'Review your changes' : held ? 'Changes not sent yet' : editingClosed ? 'Review unsaved changes' : 'Editing your shop'
   const progress = <span className="save-progress" role={countingDown ? 'progressbar' : undefined} aria-label="Time remaining before automatic saving" aria-valuemin={countingDown ? 0 : undefined} aria-valuemax={countingDown ? 100 : undefined} aria-valuenow={countingDown ? Math.round(remaining * 100) : undefined}>
     <svg viewBox="0 0 28 28" aria-hidden="true"><circle className="progress-track" cx="14" cy="14" r="11" /><circle className="progress-value" cx="14" cy="14" r="11" pathLength="100" strokeDasharray={`${remaining * 100} 100`} /></svg>
     {queue?.status === 'failed' ? <span aria-hidden="true">!</span> : editingClosed && queue?.status === 'pending' ? <IconLock size={12} aria-hidden="true" /> : <IconClock size={14} aria-hidden="true" />}
@@ -107,12 +108,14 @@ function EditingStatus({ queue, busy, cancel, undo, products, now, editingClosed
 
     {open && active && <Confirm title="Your changes" closeLabel="Keep shopping" onClose={() => setOpen(false)}>
       <div className={`save-summary editing-${queue.status}`}>{progress}<strong>{title}</strong></div>
-      <p className="muted">{queue.status === 'pending' ? editingClosed ? 'Editing has closed for this delivery. These changes haven’t been saved. You can cancel them below.' : 'Take your time. We’ll save these automatically when you’ve finished making changes. The little circle shows the time left.' : queue.status === 'running' ? 'We’re saving these with Ocado. Please wait a moment.' : 'We couldn’t confirm that everything saved. Check your order on Ocado before trying again.'}</p>
+      <p className="muted">{held ? 'Ocado did not accept these changes. We checked that the order was unchanged. You can send them again.' : queue.status === 'pending' ? editingClosed ? 'Editing has closed for this delivery. These changes haven’t been saved. You can cancel them below.' : 'Take your time. We’ll save these automatically when you’ve finished making changes. The little circle shows the time left.' : queue.status === 'running' ? 'We’re saving these with Ocado. Please wait a moment.' : 'We couldn’t confirm that everything saved. Check your order on Ocado before trying again.'}</p>
       <ul className="change-list">{queue.actions.map((action) => <li key={action.id}>
         <span className="change-symbol" aria-hidden="true">{action.kind === 'quantity' ? <ProductImage src={products?.[action.sku]?.image_url} /> : action.kind === 'slot' ? <IconTruckDelivery size={22} /> : <IconCheck size={22} />}</span>
         <div><strong>{action.kind === 'quantity' ? action.name || action.sku : action.kind === 'slot' ? 'Delivery time' : 'Place your order'}</strong><p>{action.kind === 'quantity' ? action.quantity === 0 ? 'Remove from basket' : `${action.quantity} ${action.quantity === 1 ? 'pack' : 'packs'}${action.original_quantity != null ? ` · previously ${action.original_quantity}` : ''}` : action.kind === 'slot' ? `${day(action.start)}, ${slotTime(action.start, action.end)}` : 'Using your saved payment method'}</p></div>
         {queue.status === 'pending' && <button type="button" className="change-undo" disabled={busy} aria-label={`Undo ${action.kind === 'quantity' ? action.name || action.sku : action.kind === 'slot' ? 'delivery time change' : 'place order'}`} onClick={() => undo(action.id)}><IconArrowBackUp size={18} aria-hidden="true" /><span>Undo</span></button>}
       </li>)}</ul>
+      {held && <button type="button" className="button button-primary" disabled={busy} onClick={retry}>{busy ? 'Please wait…' : 'Send changes now'}</button>}
+      {queue.status === 'failed' && <button type="button" className="button button-primary" disabled={busy} onClick={check}>{busy ? 'Please wait…' : 'Check with Ocado'}</button>}
       {queue.error && <details className="save-error"><summary>More information</summary><p>{queue.error}</p></details>}
       {queue.status !== 'running' && <><p className="cancel-explanation">{queue.status === 'failed' ? 'Clearing this list won’t undo any changes Ocado has already saved.' : 'Cancel changes removes everyone’s unsaved edits. Your booked delivery stays in place.'}</p><button type="button" className="button button-outline cancel-changes" disabled={busy} onClick={async () => { if (await cancel()) setOpen(false) }}>{busy ? 'Please wait…' : queue.status === 'failed' ? 'Clear reviewed changes' : 'Cancel changes'}</button></>}
     </Confirm>}
@@ -417,7 +420,7 @@ export default function App() {
   return <div className="ocado-app">
     <a className="skip-link" href="#shop-content">Skip to shop</a>
     <header className="app-header"><div className="header-inner"><a className="brand" href="#" onClick={(event) => { event.preventDefault(); navigate('basket') }} aria-label="Shared shop basket"><span className="brand-mark"><IconLeaf size={24} stroke={1.6} /></span><span>ocado<span className="brand-subtitle">the shared shop</span></span></a><button type="button" className="text-button" disabled={shop.busy || shop.syncing || !online || !ready} onClick={shop.refresh}>{shop.syncing ? 'Updating…' : 'Refresh'}</button></div></header>
-    <div className="app-layout"><EditingStatus key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} products={shop.state?.change_products} undo={shop.undo} now={now} editingClosed={queuedEditingClosed(shop.queue, shop.targetId, order, now)} busy={shop.busy || !online || shop.accessExpired} cancel={() => shop.cancel({ ...shop.selection, target_id: shop.queue.target_id })} /><DeliveryCard order={order} queue={shop.queue} ready={ready} loading={shop.loading} onSlots={() => navigate('slots')} onPick={() => setDeliveryPicker(true)} total={basket?.total} canEdit={canEdit} targetId={shop.targetId} earlier={shop.state?.earlier_delivery} />
+    <div className="app-layout"><EditingStatus key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} products={shop.state?.change_products} undo={shop.undo} retry={() => shop.retry()} check={() => shop.check()} now={now} editingClosed={queuedEditingClosed(shop.queue, shop.targetId, order, now)} busy={shop.busy || !online || shop.accessExpired} cancel={() => shop.cancel({ ...shop.selection, target_id: shop.queue.target_id })} /><DeliveryCard order={order} queue={shop.queue} ready={ready} loading={shop.loading} onSlots={() => navigate('slots')} onPick={() => setDeliveryPicker(true)} total={basket?.total} canEdit={canEdit} targetId={shop.targetId} earlier={shop.state?.earlier_delivery} />
     <div className="workspace">
       {!online && <ToastMessage message="You’re offline. Reconnect before making changes." toastKey="offline" type="error" />}
       {shop.error && <ShopError {...shop} />}
