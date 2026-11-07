@@ -1072,7 +1072,7 @@ def test_product_details_returns_compact_live_product_data(shared_api):
     _login(api)
     fake.products = lambda skus: [{"productId": "milk", "retailerProductId": "123", "name": "Whole Milk",
                                   "packSizeDescription": "2 pints", "price": {"amount": "1.65"},
-                                  "image": {"src": "milk.jpg"},
+                                  "image": {"src": "milk.jpg"}, "guaranteedProductLife": {"quantity": 5, "unit": "DAY"},
                                   "promotions": [{"promoId": OFFER_ID, "description": "2 for £3"}]}]
     fake.product_description = lambda product_id: "Fresh whole milk" if product_id == "123" else None
     response = api.get("/api/ocado-shared/products/milk")
@@ -1082,6 +1082,7 @@ def test_product_details_returns_compact_live_product_data(shared_api):
     assert product["pack"] == "2 pints" and product["image_url"] == "https://www.ocado.com/milk.jpg"
     assert product["description"] == "Fresh whole milk"
     assert product["offers"][0]["label"] == "2 for £3"
+    assert product["shelf_life_days"] == 5
 
 
 def test_product_details_missing_description_preserves_basic_details(shared_api):
@@ -1094,6 +1095,7 @@ def test_product_details_missing_description_preserves_basic_details(shared_api)
     product = api.get("/api/ocado-shared/products/milk").json()["product"]
     assert product["name"] == "Milk" and product["description"] is None
     assert product["description_unavailable"] is True
+    assert product["shelf_life_days"] is None
     fake.products = lambda skus: [{"productId": "other", "name": "Wrong product"}]
     assert api.get("/api/ocado-shared/products/milk").status_code == 404
 

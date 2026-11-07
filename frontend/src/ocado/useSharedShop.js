@@ -5,6 +5,8 @@ import { canEditOrder } from './orderEditing.js'
 export const isReady = (auth) => auth?.status === 'ready'
 const queueKey = (queue) => JSON.stringify(queue)
 const scope = (auth) => ({ account_id: auth?.account_id ?? null, account_version: auth?.account_version ?? 0 })
+// Another delivery's unsaved edits, or a save in progress, block new edits.
+const queueBlocksEdits = (queue, targetId) => queue?.status === 'running' || queue?.status === 'failed' || (['pending', 'running', 'failed'].includes(queue?.status) && queue.target_id !== targetId)
 const sameAccount = (left, right) => left?.account_id === right?.account_id && left?.account_version === right?.account_version
 const deliverySessionKey = (auth) => `ocado:delivery:${auth?.account_id}:${auth?.account_version ?? 0}`
 const rememberedDelivery = (auth) => {
@@ -27,6 +29,9 @@ export function useSharedShop() {
   const [syncing, setSyncing] = useState(false)
   const [stale, setStale] = useState(false)
   const [accessExpired, setAccessExpired] = useState(false)
+  // Quantity edits show at once and are sent one at a time, latest per product.
+  const [optimistic, setOptimistic] = useState({})
+  const quantityWrites = useRef({ waiting: new Map(), flushing: false })
   const refs = useRef({ epoch: 0, mounted: false, writing: false, refreshing: false, refreshAgain: false, auth: null, queue: null, state: null, target: null })
 
   const reportError = useCallback((failure) => {
@@ -106,6 +111,8 @@ export function useSharedShop() {
     if (!wasReady && isReady(next)) setError(null)
     if (changedAccount || wasReady !== isReady(next)) ref.epoch += 1
     if (changedAccount) {
+      quantityWrites.current.waiting.clear()
+      setOptimistic({})
       ref.target = rememberedDelivery(next)
       ref.queue = null
       ref.state = null
@@ -223,12 +230,56 @@ export function useSharedShop() {
     await refresh()
   }, [acceptAuth, refresh, reportError])
 
+  const editableTarget = () => {
+    const ref = refs.current
+    if (!isReady(ref.auth) || !ref.state || !canEditOrder(ref.state.order)) return null
+    return ref.state.target_id ?? ref.state.queue?.target_id ?? null
+  }
   const action = (body) => {
     const ref = refs.current
-    if (ref.writing || ref.refreshing || !isReady(ref.auth) || !ref.state || !canEditOrder(ref.state.order)) return Promise.resolve(false)
-    const target = ref.state.target_id ?? ref.state.queue?.target_id
+    const target = editableTarget()
+    if (ref.writing || ref.refreshing || !target) return Promise.resolve(false)
     if (body.target_id && body.target_id !== target) return Promise.resolve(false)
-    return mutate('/actions', { ...scope(auth), ...body, target_id: target })
+    return mutate('/actions', { ...scope(ref.auth), ...body, target_id: target })
+  }
+  const settleQuantity = (sku, entry) => setOptimistic((previous) => {
+    if (previous[sku] !== entry) return previous
+    const { [sku]: _settled, ...rest } = previous
+    return rest
+  })
+  const flushQuantities = async () => {
+    const writes = quantityWrites.current
+    if (writes.flushing) return
+    writes.flushing = true
+    try {
+      while (writes.waiting.size && refs.current.mounted) {
+        const ref = refs.current
+        if (ref.writing || ref.refreshing) { await new Promise((resolve) => window.setTimeout(resolve, 100)); continue }
+        const [sku, entry] = writes.waiting.entries().next().value
+        writes.waiting.delete(sku)
+        const sendable = editableTarget() === entry.target && !queueBlocksEdits(ref.queue, entry.target)
+        const accepted = sendable && await action({ kind: 'quantity', sku: entry.sku, name: entry.name, quantity: entry.quantity, target_id: entry.target })
+        if (!sendable) reportError(new Error('That change couldn’t be made right now. Please try again.'))
+        // Success: the queue now shows the edit. Failure: drop it, and anything
+        // queued after it, so the basket reverts to what the server holds.
+        if (accepted) settleQuantity(sku, entry)
+        else {
+          writes.waiting.delete(sku)
+          setOptimistic((previous) => { const { [sku]: _dropped, ...rest } = previous; return rest })
+        }
+      }
+    } finally {
+      writes.flushing = false
+    }
+  }
+  const setQuantity = (body, product = {}) => {
+    const target = editableTarget()
+    if (!target || (body.target_id && body.target_id !== target)) return
+    const sku = String(body.sku)
+    const entry = { sku: body.sku, name: body.name, quantity: body.quantity, target, image_url: product.image_url, pack: product.pack, offers: product.offers }
+    setOptimistic((previous) => ({ ...previous, [sku]: entry }))
+    quantityWrites.current.waiting.set(sku, entry)
+    void flushQuantities()
   }
   const addOffer = (body) => {
     const ref = refs.current
@@ -245,6 +296,8 @@ export function useSharedShop() {
     }
     ref.epoch += 1
     ref.target = id
+    quantityWrites.current.waiting.clear()
+    setOptimistic({})
     ref.state = null
     setState(null)
     setLoading(true)
@@ -260,8 +313,10 @@ export function useSharedShop() {
   const authenticate = (path, body = {}) => mutate(path, { ...scope(auth), ...body }, true)
   const targetId = state?.target_id ?? state?.queue?.target_id
   const otherDeliveryPending = Boolean(targetId) && ['pending', 'running', 'failed'].includes(queue?.status) && queue.target_id !== targetId
-  const locked = busy || syncing || stale || !state || !canEditOrder(state?.order) || !targetId || otherDeliveryPending || queue?.status === 'running' || queue?.status === 'failed' || accessExpired
+  // Quantity steppers stay usable while a write or refresh is in flight; setQuantity queues behind it.
+  const quantityLocked = stale || !state || !canEditOrder(state?.order) || !targetId || queueBlocksEdits(queue, targetId) || accessExpired
+  const locked = busy || syncing || quantityLocked
   const clearError = useCallback(() => setError(null), [])
   const selectAccount = (id) => mutate('/account', { ...scope(auth), selected_account_id: Number(id) }, true)
-  return { selection: scope(auth), targetId, selectDelivery, otherDeliveryPending, selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, refresh: refreshShop, action, addOffer, cancel, undo, retry, check, authenticate, reportError, clearError }
+  return { selection: scope(auth), targetId, selectDelivery, otherDeliveryPending, selectAccount, auth, state, queue, error, busy, loading, syncing, stale, accessExpired, locked, quantityLocked, optimistic, setQuantity, refresh: refreshShop, action, addOffer, cancel, undo, retry, check, authenticate, reportError, clearError }
 }

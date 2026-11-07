@@ -396,3 +396,59 @@ h2 { letter-spacing: -.7px; font-size: 27px; }
 .reserved-warning svg { flex-shrink: 0; }
 .reserved-warning p, .reserved-history p { overflow-wrap: anywhere; }
 .reserved-history li { padding: .8rem 0; }
+
+/* Compact product tiles: the same row layout in the basket and in search. */
+.product-list,.search-grid { gap: 10px; margin-bottom: 18px; }
+.product-list>.basket-line,.search-product { display: grid; grid-template-columns: 76px minmax(0,1fr); grid-auto-rows: min-content; align-items: start; gap: 0 12px; padding: 10px; border-radius: 12px; }
+.product-list>.basket-line>.product-image-button,.search-product>.product-topline { grid-row: 1 / span 5; width: 76px; height: 76px; margin: 0; }
+.search-product>.product-topline .product-image-button { height: 76px; }
+.search-product>:not(.product-topline) { grid-column: 2; min-width: 0; }
+.stock-badge { padding: 1px 4px; font-size: 11px; }
+.product-list .product-information h3,.search-product h3 { margin: 0; font-size: 15px; line-height: 1.3; }
+.basket-pack { font-size: 13px; }
+.search-product .pack { margin: 1px 0 0; font-size: 13px; }
+.search-product .offers { margin-top: 2px; }
+.search-product .offer-link { min-height: 28px; margin-top: 2px; padding: 2px 7px; font-size: 12px; }
+.pending-item-label { margin: 2px 0 0; font-size: 13px; }
+.pending-item-label span { display: inline; margin-left: 6px; }
+.product-list .line-bottom,.product-bottom { flex-direction: row; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; }
+.product-bottom>div { min-width: 0; }
+.line-price strong,.product-bottom strong,.basket-price .line-price strong { font-size: 17px; }
+.product-bottom small { font-size: 12px; }
+.product-list .quantity,.search-product .quantity { align-self: center; width: auto; border-radius: 9px; }
+.product-list .quantity button,.search-product .quantity button { flex: none; width: 38px; min-width: 38px; height: 38px; }
+.product-list .quantity output,.search-product .quantity output { min-width: 32px; font-size: 18px; }
+.product-list .readonly-quantity strong { font-size: 18px; }
+@media (width<=600px) {
+  .product-list,.search-grid { grid-template-columns: minmax(0,1fr); gap: 8px; }
+}
+
+/* Floating basket total. */
+.total-pill { z-index: 9; color: #fff; background: var(--purple); border: 0; border-radius: 999px; align-items: center; gap: 7px; min-height: 46px; padding: 8px 16px 8px 13px; font-size: 13px; font-weight: 500; display: inline-flex; position: fixed; bottom: 24px; right: 24px; box-shadow: 0 6px 18px #4d216d40; }
+.total-pill strong { font-size: 17px; font-weight: 750; }
+.total-pill:hover { background: #5e2a84; }
+@media (width<=1000px) {
+  .total-pill { bottom: calc(90px + env(safe-area-inset-bottom)); right: 14px; }
+}
+
+/* Multibuy offers on tiles, with how many basket packs count towards them. */
+.product-list .offers { margin-top: 2px; }
+.product-list .offer-link { min-height: 28px; margin-top: 2px; padding: 2px 7px; font-size: 12px; }
+.offer-link>span { min-width: 0; }
+.offer-progress { color: var(--muted); font-size: 11px; font-weight: 500; display: block; }
+.offer-complete { color: #1f6b3a; background: #e8f5ec; }
+.offer-complete .offer-progress { color: #1f6b3a; }
+
+/* Multibuy picker rows: name and pack together, price and stepper on one line. */
+.offer-products .basket-line { grid-template-columns: 60px minmax(0,1fr); gap: 10px; padding: 8px 0; }
+.offer-products .product-image,.offer-products .product-placeholder { width: 60px; height: 60px; }
+.offer-products .product-information h3 { font-size: 15px; line-height: 1.3; }
+.offer-products .line-bottom { flex-wrap: nowrap; margin-top: 4px; }
+.offer-products .line-price { align-items: baseline; gap: 6px; min-width: 0; display: flex; }
+.offer-products .line-price strong { font-size: 16px; }
+.offer-products .line-price small { color: var(--muted); white-space: nowrap; font-size: 12px; }
+.offer-products .quantity { width: auto; border-radius: 9px; }
+.offer-products .quantity button { flex: none; width: 36px; min-width: 36px; height: 36px; }
+.offer-products .quantity output { min-width: 30px; font-size: 17px; }
+.offer-stock { color: #8a3b1c; font-size: 12px; }
+.product-shelf-life { color: var(--purple); align-items: center; gap: 6px; margin-bottom: 10px; font-size: 15px; font-weight: 600; display: flex; }

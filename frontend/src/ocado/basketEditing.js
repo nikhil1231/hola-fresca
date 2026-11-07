@@ -1,5 +1,9 @@
+const known = (fields) => Object.fromEntries(Object.entries(fields).filter(([, value]) => value != null))
+const pendingKind = (from, to) => to === 0 ? 'remove' : from === 0 ? 'add' : 'change'
+
 // Keep confirmed items on screen until Ocado confirms a saved basket.
-export function basketEditing(state, queue, targetId) {
+// `optimistic` holds quantity edits not yet accepted by the server, shown at once.
+export function basketEditing(state, queue, targetId, optimistic = {}) {
   if (!state) return []
   const metadata = new Map((state.basket?.lines || []).map((line) => [String(line.sku), line]))
   const confirmed = state.confirmed_lines || (state.basket?.lines || []).filter((line) =>
@@ -16,8 +20,15 @@ export function basketEditing(state, queue, targetId) {
       const quantity = original?.quantity ?? action.original_quantity ?? 0
       if (quantity === action.quantity) continue
       lines.set(sku, { ...metadata.get(sku), ...original, sku, name: action.name || original?.name || metadata.get(sku)?.name || sku,
-        quantity, pending_quantity: action.quantity, pending_kind: action.quantity === 0 ? 'remove' : quantity === 0 ? 'add' : 'change' })
+        quantity, pending_quantity: action.quantity, pending_kind: pendingKind(quantity, action.quantity) })
     }
+  }
+  for (const [sku, edit] of Object.entries(optimistic)) {
+    if (edit.target !== targetId) continue
+    const { pending_quantity: _quantity, pending_kind: _kind, ...current } = lines.get(sku) || {}
+    const quantity = current.quantity ?? 0
+    lines.set(sku, quantity === edit.quantity ? current : { ...known({ name: edit.name, image_url: edit.image_url, pack: edit.pack, offers: edit.offers }), ...known(metadata.get(sku) || {}), ...current, sku,
+      quantity, pending_quantity: edit.quantity, pending_kind: pendingKind(quantity, edit.quantity) })
   }
   return [...lines.values()].filter((line) => line.quantity > 0 || line.pending_quantity > 0)
 }

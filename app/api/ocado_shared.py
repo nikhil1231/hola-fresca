@@ -21,9 +21,10 @@ from app.api.deps import get_active_retailer, get_current_user, get_session, get
 from app.api.schemas import CartLoginIn, CartLoginOut, CartOtpIn
 from app.cart.adapters import OcadoAdapter
 from app.db import retailer_accounts
-from app.db.models import User, RetailerAccount, OcadoSharedSettings, OcadoSharedQueue
+from app.db.models import Product, User, RetailerAccount, OcadoSharedSettings, OcadoSharedQueue
 from app import config
 from app.ocado import orders, shared, shop
+from app.scraper.products.ocado import parse_shelf_life
 from app.ocado.shared_queue import ACTIVE, QueueStore, empty
 
 router = APIRouter(prefix="/api/ocado-shared", tags=["ocado-shared"], dependencies=[Depends(get_current_user)])
@@ -265,7 +266,7 @@ def search(q: str, session: Session = Depends(get_session)):
 
 @router.get("/products/{sku}")
 def product_details(sku: str = Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9-]+$"),
-                    session: Session = Depends(get_session)):
+                    session: Session = Depends(get_session), retailer: str = Depends(get_active_retailer)):
     with _operation(session):
         client = shared.make_client(shared.require_account(session).key)
         rows = client.products([sku])
@@ -281,8 +282,14 @@ def product_details(sku: str = Path(min_length=1, max_length=128, pattern=r"^[A-
                 text = client.product_description(product_id)
             except Exception:
                 unavailable = True
+        # Ocado's guaranteed minimum life; the catalogue's copy covers a live read without it.
+        life_raw, life_days = parse_shelf_life(raw.get("guaranteedProductLife"))
+        if life_days is None:
+            cached = session.scalar(select(Product).where(Product.retailer == retailer, Product.sku == sku))
+            life_raw, life_days = (cached.shelf_life_raw, cached.shelf_life_days) if cached else (None, None)
         return {**_scope(session), "product": {**asdict(products[0]), "description": text,
-                                              "description_unavailable": unavailable}}
+                                              "description_unavailable": unavailable,
+                                              "shelf_life": life_raw, "shelf_life_days": life_days}}
 
 
 @router.get("/slots")

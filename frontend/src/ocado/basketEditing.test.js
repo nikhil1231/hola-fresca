@@ -41,3 +41,13 @@ test('pending appearance survives saving and is replaced only by the successful 
 test('another delivery’s changes cannot alter this basket', () => {
   assert.equal(basketEditing(state, queue(0), 'today')[0].pending_kind, undefined)
 })
+test('optimistic edits show immediately over the confirmed and queued basket', () => {
+  const optimistic = { milk: { sku: 'milk', quantity: 4, target: 'next' }, eggs: { sku: 'eggs', name: 'Eggs', image_url: 'eggs.jpg', quantity: 1, target: 'next' } }
+  const lines = basketEditing(state, queue(3), 'next', optimistic)
+  assert.equal(lines.find((line) => line.sku === 'milk').pending_quantity, 4)
+  assert.equal(lines.find((line) => line.sku === 'milk').cost, 3)
+  const eggs = lines.find((line) => line.sku === 'eggs')
+  assert.deepEqual([eggs.quantity, eggs.pending_quantity, eggs.pending_kind, eggs.image_url], [0, 1, 'add', 'eggs.jpg'])
+  assert.equal(basketEditing(state, queue(3), 'next', { milk: { sku: 'milk', quantity: 2, target: 'next' } })[0].pending_kind, undefined)
+  assert.equal(basketEditing(state, null, 'today', optimistic).length, 1)
+})

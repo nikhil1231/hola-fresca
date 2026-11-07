@@ -25,6 +25,22 @@ const tabs = [
   { id: 'account', label: 'Settings', icon: IconUserCircle },
 ]
 
+// The confirmed total plus unsaved quantity changes, priced from the line or a search result.
+function estimatedTotal(confirmed, lines, prices) {
+  if (confirmed == null || !Number.isFinite(Number(confirmed))) return { amount: null }
+  let amount = Number(confirmed)
+  let estimated = false
+  let partial = false
+  for (const line of lines) {
+    if (line.pending_quantity == null) continue
+    estimated = true
+    const unit = line.quantity > 0 && line.cost != null ? line.cost / line.quantity : prices.get(String(line.sku))
+    if (unit == null || !Number.isFinite(unit)) partial = true
+    else amount += (line.pending_quantity - line.quantity) * unit
+  }
+  return { amount: Math.max(0, amount), estimated, partial }
+}
+
 function Empty({ icon: Icon = IconShoppingBag, title, children }) {
   return <div className="empty-state"><span className="empty-icon"><Icon size={30} stroke={1.5} /></span><h3>{title}</h3><p>{children}</p></div>
 }
@@ -124,7 +140,7 @@ function EditingStatus({ queue, busy, cancel, undo, retry, check, products, now,
   </>
 }
 
-function Basket({ lines, basket, order, queue, locked, action, onSearch, onCheckout, onProduct, canEdit }) {
+function Basket({ lines, basket, order, queue, locked, quantityLocked, changeQuantity, onSearch, onCheckout, onProduct, onOffer, offerCounts: counts, canEdit }) {
   const pending = queue?.status === 'pending' || queue?.status === 'running' || queue?.status === 'failed'
   const quantity = lines.reduce((sum, line) => sum + line.quantity, 0)
   return <>
@@ -132,9 +148,10 @@ function Basket({ lines, basket, order, queue, locked, action, onSearch, onCheck
     {!lines.length ? <Empty title="Room for something delicious">Search for your favourites and add them to your basket.</Empty> : <div className="basket-categories">{basketCategories(lines).map(({ label, items }) => <section className="basket-category" key={label} aria-label={label}><h3 className="basket-category-heading">{label}</h3><div className="product-list">{items.map((line) => <article className={`basket-line ${line.pending_kind ? `basket-editing basket-editing-${line.pending_kind}` : ''}`} key={line.sku}>
       <button type="button" className="product-image-button" aria-label={`View ${line.name || line.sku}`} onClick={() => onProduct(line)}><ProductImage src={line.image_url} /></button>
       <div className="product-information"><h3><button type="button" className="product-title-button" onClick={() => onProduct(line)}>{line.name || line.sku}{line.pack && <> <span className="basket-pack">{line.pack.replace(/(\d+)\s+per\s+pack\b/gi, '$1 pack')}</span></>}</button></h3>
+        <Offers offers={line.offers} onOffer={onOffer} counts={counts} />
         {line.pending_kind && <p className="pending-item-label">{line.pending_kind === 'remove' ? 'Removing' : line.pending_kind === 'add' ? 'Adding' : `Quantity ${line.quantity} → ${line.pending_quantity}`}<span>Not saved yet</span></p>}
         <div className="line-bottom"><div className="basket-price"><p className={`line-price ${line.cost == null ? 'price-pending' : line.original_cost > line.cost ? 'discounted-price' : ''}`}>{line.cost != null && line.original_cost > line.cost && <del className="original-price" aria-label={`Original price ${money(line.original_cost)}`}>{money(line.original_cost)}</del>}<strong>{line.cost == null ? canEdit ? line.pending_kind ? 'Price after saving' : 'Updating price' : 'Price unavailable' : money(line.cost)}</strong></p></div>
-          <Quantity name={line.name || line.sku} quantity={line.pending_quantity ?? line.quantity} readOnly={!canEdit} disabled={locked} onChange={(next) => action({ kind: 'quantity', sku: line.sku, name: line.name || line.sku, quantity: next })} />
+          <Quantity name={line.name || line.sku} quantity={line.pending_quantity ?? line.quantity} readOnly={!canEdit} disabled={quantityLocked} onChange={(next) => changeQuantity({ kind: 'quantity', sku: line.sku, name: line.name || line.sku, quantity: next }, line)} />
         </div>
       </div>
     </article>)}</div></section>)}</div>}
@@ -156,6 +173,12 @@ function ProductImage({ src }) {
   return <img className="product-image" src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(src)} />
 }
 
+// Ocado states a guaranteed minimum life as e.g. "2 WEEK" or "1.5 MONTH".
+const shelfLife = (raw) => {
+  const [quantity, unit = ''] = String(raw).split(' ')
+  return `${quantity} ${unit.toLowerCase()}${Number(quantity) === 1 ? '' : 's'}`
+}
+
 function ProductDetails({ initial, selection, onOffer, onClose }) {
   const [product, setProduct] = useState(initial)
   const [loading, setLoading] = useState(true)
@@ -174,6 +197,7 @@ function ProductDetails({ initial, selection, onOffer, onClose }) {
     <div className="product-details" aria-busy={loading}>
       <ProductImage src={product.image_url} />
       <p className="product-details-pack">{product.pack}</p>
+      {product.shelf_life && <p className="product-shelf-life"><IconClock size={17} aria-hidden="true" />Lasts at least {shelfLife(product.shelf_life)}</p>}
       {product.price != null && <p className={`line-price ${product.base_price > product.price ? 'discounted-price' : ''}`}>{product.base_price > product.price && <del className="original-price">{money(product.base_price)}</del>}<strong>{money(product.price)}</strong></p>}
       <Offers offers={product.offers} onOffer={onOffer} />
       {product.description && <div className="product-description"><h3>About this product</h3><p>{product.description}</p></div>}
@@ -184,9 +208,26 @@ function ProductDetails({ initial, selection, onOffer, onClose }) {
   </Confirm>
 }
 
-function Offers({ offers, onOffer }) {
+// Packs in the basket (including unsaved changes) that count towards each offer.
+const offerCounts = (lines) => {
+  const counts = new Map()
+  for (const line of lines) for (const offer of line.offers || []) counts.set(offer.id, (counts.get(offer.id) || 0) + line.quantity)
+  return counts
+}
+
+function offerProgress(offer, count) {
+  const required = offer.required_quantity
+  if (!required || !count) return null
+  const missing = (required - (count % required)) % required
+  return missing ? { text: `${count} in basket · add ${missing} more`, done: false } : { text: `${count} in basket · offer complete`, done: true }
+}
+
+function Offers({ offers, onOffer, counts }) {
   if (!offers?.length) return null
-  return <div className="offers">{offers.map((offer) => <button type="button" className="offer-link" key={offer.id} onClick={() => onOffer(offer)}>{offer.label}<IconArrowRight size={15} /></button>)}</div>
+  return <div className="offers">{offers.map((offer) => {
+    const progress = offerProgress(offer, counts?.get(offer.id))
+    return <button type="button" className={`offer-link ${progress?.done ? 'offer-complete' : ''}`} key={offer.id} onClick={() => onOffer(offer)}><span>{offer.label}{progress && <small className="offer-progress">{progress.text}</small>}</span><IconArrowRight size={15} /></button>
+  })}</div>
 }
 
 function OfferPicker({ offer, lines, locked, canEdit, selection, targetId, addOffer, addSingle, reportError, onClose }) {
@@ -233,15 +274,15 @@ function OfferPicker({ offer, lines, locked, canEdit, selection, targetId, addOf
         return <section className="offer-group" key={index}>
           {canChooseSet && <h3>Choose {group.quantity}{groups.length > 1 ? ` from group ${index + 1}` : ''} <span className="muted">· {selected} chosen</span></h3>}
           {!visible.length && <p>No matching products in this group.</p>}
-          <div className="offer-products">{visible.map((product) => <article className="basket-line" key={product.sku}><ProductImage src={product.image_url} /><div className="product-information"><h3>{product.name}</h3><p className="pack">{product.pack}{product.in_stock === false ? ' · Out of stock' : ''}</p><div className="line-bottom"><p className="line-price"><strong>{money(product.price)}</strong><small>{quantities.get(product.sku) ? `${quantities.get(product.sku)} already in basket` : 'before multibuy savings'}</small></p><Quantity name={product.name} readOnly={!canEdit} quantity={canChooseSet ? chosen[product.sku] || 0 : quantities.get(product.sku) || 0} disabled={locked || sent || originalTarget !== targetId} unavailable={product.in_stock === false || (canChooseSet && selected >= group.quantity)} onChange={(quantity) => canChooseSet ? setChosen((previous) => ({ ...previous, [product.sku]: quantity })) : addSingle({ kind: 'quantity', sku: product.sku, name: product.name, quantity })} /></div></div></article>)}</div>
+          <div className="offer-products">{visible.map((product) => <article className="basket-line" key={product.sku}><ProductImage src={product.image_url} /><div className="product-information"><h3>{product.name}{product.pack && <> <span className="basket-pack">{product.pack}</span></>}</h3>{product.in_stock === false && <p className="offer-stock">Out of stock</p>}<div className="line-bottom"><p className="line-price"><strong>{money(product.price)}</strong>{quantities.get(product.sku) > 0 && <small>{quantities.get(product.sku)} in basket</small>}</p><Quantity name={product.name} readOnly={!canEdit} quantity={canChooseSet ? chosen[product.sku] || 0 : quantities.get(product.sku) || 0} disabled={locked || sent || originalTarget !== targetId} unavailable={product.in_stock === false || (canChooseSet && selected >= group.quantity)} onChange={(quantity) => canChooseSet ? setChosen((previous) => ({ ...previous, [product.sku]: quantity })) : addSingle({ kind: 'quantity', sku: product.sku, name: product.name, quantity }, product)} /></div></div></article>)}</div>
         </section>
       })}
-      <p className="muted">Ocado confirms availability, offer eligibility and the final price when your changes are sent.</p>
+      <p className="muted">Prices are before multibuy savings. Ocado confirms availability, offer eligibility and the final price when your changes are sent.</p>
     </>}
   </Confirm>
 }
 
-function Search({ lines, locked, action, reportError, onOffer, onProduct, canEdit }) {
+function Search({ lines, locked, changeQuantity, reportError, onOffer, onProduct, offerCounts: counts, canEdit }) {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -276,7 +317,7 @@ function Search({ lines, locked, action, reportError, onOffer, onProduct, canEdi
     {error && <ToastMessage message={error} type="error" />}
     {!query.trim() && <Empty icon={IconSearch} title="What’s on your list?">Find your favourite groceries.</Empty>}
     {result && !result.products?.length && <Empty icon={IconSearch} title="Nothing on this shelf">Try another name or a simpler search.</Empty>}
-    {result?.products?.length > 0 && <><p className="results-label" aria-live="polite">{result.products.length} results for “{result.query}”</p><div className="search-grid">{result.products.map((product) => <article className="search-product" key={product.sku}><div className="product-topline"><button type="button" className="product-image-button" aria-label={`View ${product.name || product.sku}`} onClick={() => onProduct(product)}><ProductImage src={product.image_url} /></button>{product.in_stock === false && <span className="stock-badge">Out of stock</span>}</div><h3><button type="button" className="product-title-button" onClick={() => onProduct(product)}>{product.name || product.sku}</button></h3><p className="pack">{product.pack}</p><Offers offers={product.offers} onOffer={onOffer} /><div className="product-bottom"><div><strong>{money(product.price)}</strong>{product.base_price != null && <span className="was-price">was {money(product.base_price)}</span>}{product.unit_price != null && <small>{money(product.unit_price)}{product.unit_basis ? ` / ${product.unit_basis}` : ''}</small>}</div><Quantity name={product.name || product.sku} readOnly={!canEdit} quantity={quantities.get(String(product.sku)) || 0} disabled={locked} unavailable={product.in_stock === false} onChange={(quantity) => action({ kind: 'quantity', sku: product.sku, name: product.name, quantity })} /></div></article>)}</div></>}
+    {result?.products?.length > 0 && <><p className="results-label" aria-live="polite">{result.products.length} results for “{result.query}”</p><div className="search-grid">{result.products.map((product) => <article className="search-product" key={product.sku}><div className="product-topline"><button type="button" className="product-image-button" aria-label={`View ${product.name || product.sku}`} onClick={() => onProduct(product)}><ProductImage src={product.image_url} /></button>{product.in_stock === false && <span className="stock-badge">Out of stock</span>}</div><h3><button type="button" className="product-title-button" onClick={() => onProduct(product)}>{product.name || product.sku}</button></h3><p className="pack">{product.pack}</p><Offers offers={product.offers} onOffer={onOffer} counts={counts} /><div className="product-bottom"><div><strong>{money(product.price)}</strong>{product.base_price != null && <span className="was-price">was {money(product.base_price)}</span>}{product.unit_price != null && <small>{money(product.unit_price)}{product.unit_basis ? ` / ${product.unit_basis}` : ''}</small>}</div><Quantity name={product.name || product.sku} readOnly={!canEdit} quantity={quantities.get(String(product.sku)) || 0} disabled={locked} unavailable={product.in_stock === false} onChange={(quantity) => changeQuantity({ kind: 'quantity', sku: product.sku, name: product.name, quantity }, product)} /></div></article>)}</div></>}
   </>
 }
 
@@ -413,12 +454,21 @@ export default function App() {
   useEffect(() => { if (!canEdit) setCheckout(false) }, [canEdit])
   useEffect(() => { setCheckout(false); setOffer(null); setProduct(null) }, [shop.targetId])
   const locked = shop.locked || !online || !canEdit
-  const lines = basketEditing(shop.state, shop.queue, shop.targetId)
+  const quantityLocked = shop.quantityLocked || !online || !canEdit
+  // Unit prices seen in search, so an estimated total can include new items.
+  const prices = useRef(new Map())
+  const changeQuantity = (body, product) => {
+    if (product?.price != null) prices.current.set(String(body.sku), Number(product.price))
+    shop.setQuantity(body, product)
+  }
+  const lines = basketEditing(shop.state, shop.queue, shop.targetId, shop.optimistic)
   const effectiveLines = lines.map((line) => ({ ...line, quantity: line.pending_quantity ?? line.quantity })).filter((line) => line.quantity > 0)
   const basket = shop.state?.basket
+  const counts = offerCounts(effectiveLines)
   const totalItems = lines.reduce((sum, line) => sum + line.quantity, 0)
+  const total = estimatedTotal(basket?.total, lines, prices.current)
   const navigate = (next) => { setTab(next); document.getElementById('shop-content')?.focus({ preventScroll: true }) }
-  const basketProps = { lines, basket, order, queue: shop.queue, locked, canEdit, action: shop.action, onProduct: setProduct, onSearch: () => navigate('search'), onCheckout: () => setCheckout({ ...shop.selection, target_id: shop.targetId }) }
+  const basketProps = { lines, basket, order, queue: shop.queue, locked, quantityLocked, changeQuantity, canEdit, onOffer: setOffer, offerCounts: counts, onProduct: setProduct, onSearch: () => navigate('search'), onCheckout: () => setCheckout({ ...shop.selection, target_id: shop.targetId }) }
   return <div className="ocado-app">
     <a className="skip-link" href="#shop-content">Skip to shop</a>
     <header className="app-header"><div className="header-inner"><a className="brand" href="#" onClick={(event) => { event.preventDefault(); navigate('basket') }} aria-label="Shared shop basket"><span className="brand-mark"><IconLeaf size={24} stroke={1.6} /></span><span>ocado<span className="brand-subtitle">the shared shop</span></span></a><button type="button" className="text-button" disabled={shop.busy || shop.syncing || !online || !ready} onClick={shop.refresh}>{shop.syncing ? 'Updating…' : 'Refresh'}</button></div></header>
@@ -435,16 +485,17 @@ export default function App() {
           {(canManageSettings && (!ready || currentTab === 'account')) ? <Account key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selectAccount={shop.selectAccount} queueBlocked={['pending', 'running', 'failed'].includes(shop.queue?.status)} auth={shop.auth} busy={shop.busy} authenticate={shop.authenticate} accessExpired={shop.accessExpired} /> : !ready ? <ToastMessage message="Please ask Nikhil to reconnect Ocado. Your booked delivery is still with Ocado." toastKey="shop-disconnected" type="error" /> : !shop.state ? <ToastMessage message={shop.syncing ? 'Loading your basket…' : 'Refresh the shop to try again.'} toastKey="basket-loading" type={shop.syncing ? 'info' : 'error'} duration={shop.syncing ? 0 : 9000} /> : <>
             {currentTab === 'reserved' && <ReservedRules key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selection={shop.selection} reportError={shop.reportError} />}
             {currentTab === 'basket' && <Basket {...basketProps} />}
-            {currentTab === 'search' && <Search key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} lines={effectiveLines} locked={locked} canEdit={canEdit} action={shop.action} reportError={shop.reportError} onProduct={setProduct} onOffer={setOffer} />}
+            {currentTab === 'search' && <Search key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} lines={effectiveLines} locked={quantityLocked} canEdit={canEdit} changeQuantity={changeQuantity} reportError={shop.reportError} onProduct={setProduct} onOffer={setOffer} offerCounts={counts} />}
             {currentTab === 'slots' && <Slots key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} queue={shop.queue} targetId={shop.targetId} locked={locked} action={shop.action} reportError={shop.reportError} />}
           </>}
         </>}
       </main><p className="app-footnote">Prices and offers are confirmed by Ocado. Times shown for the UK.</p>
     </div></div>
     <nav className="bottom-nav" aria-label="Shared shop navigation">{tabs.filter(({ id }) => (id !== 'account' || canManageSettings) && (id !== 'slots' || canEdit)).map(({ id, label, icon: Icon }) => <button type="button" key={id} className={currentTab === id ? 'active' : ''} aria-current={currentTab === id ? 'page' : undefined} onClick={() => navigate(id)}><span className="nav-icon"><Icon size={23} stroke={currentTab === id ? 2 : 1.6} />{id === 'basket' && totalItems > 0 && <span className="nav-badge">{totalItems > 99 ? '99+' : totalItems}</span>}</span><span>{label}</span></button>)}</nav>
+    {ready && shop.state && total.amount != null && <button type="button" className="total-pill" aria-label={`${total.estimated ? 'Estimated basket total' : 'Basket total'} ${money(total.amount)}. View basket`} onClick={() => navigate('basket')}><IconBasket size={18} aria-hidden="true" /><span>{total.estimated ? 'Est.' : 'Total'}</span><strong>{money(total.amount)}{total.partial ? '+' : ''}</strong></button>}
     {deliveryPicker && <DeliveryPicker key={`${shop.auth?.account_id}:${shop.auth?.account_version}`} selection={shop.selection} targetId={shop.targetId} queue={shop.queue} busy={shop.busy || shop.syncing} onSelect={shop.selectDelivery} onClose={() => setDeliveryPicker(false)} />}
     {product && <ProductDetails key={`${shop.auth?.account_id}:${shop.auth?.account_version}:${product.sku}`} initial={product} selection={shop.selection} onClose={() => setProduct(null)} onOffer={(next) => { setProduct(null); setOffer(next) }} />}
-    {offer && <OfferPicker key={`${shop.auth?.account_id}:${shop.auth?.account_version}:${offer.id}`} offer={offer} lines={effectiveLines} locked={locked} canEdit={canEdit} selection={shop.selection} targetId={shop.targetId} addOffer={shop.addOffer} addSingle={shop.action} reportError={shop.reportError} onClose={() => setOffer(null)} />}
+    {offer && <OfferPicker key={`${shop.auth?.account_id}:${shop.auth?.account_version}:${offer.id}`} offer={offer} lines={effectiveLines} locked={locked} canEdit={canEdit} selection={shop.selection} targetId={shop.targetId} addOffer={shop.addOffer} addSingle={changeQuantity} reportError={shop.reportError} onClose={() => setOffer(null)} />}
     {checkout && <Confirm title="Place your order?" onClose={() => setCheckout(false)}>
       {checkout.target_id !== shop.targetId && <ToastMessage message="Your delivery has changed. Go back and review your basket before confirming." type="error" />}
       <p>You are confirming checkout of the <strong>{order ? 'booked delivery' : 'active shared basket'}</strong> with {totalItems} items, using the shared account’s saved payment method.</p>
