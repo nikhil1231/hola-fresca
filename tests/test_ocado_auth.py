@@ -512,6 +512,11 @@ class _WafWorker(FakeWorker):
         return self.page
 
 
+@pytest.fixture(autouse=True)
+def _no_waf_settle(monkeypatch):
+    monkeypatch.setattr(auth_module, "WAF_SETTLE_S", 0)
+
+
 def _waf_ladder(worker):
     auth = AuthLadder(profile_dir=None, headless=True)
     auth._worker = worker

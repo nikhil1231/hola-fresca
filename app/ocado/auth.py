@@ -50,6 +50,9 @@ WAF_MIN_INTERVAL_S = 60.0
 #: How long to wait for the WAF script to issue its token once the page loads.
 WAF_TOKEN_TIMEOUT_S = 20.0
 WAF_COOKIE = "aws-waf-token"
+#: A short pause once the cookie appears, in case the challenge script is still
+#: confirming it with Ocado and a copy taken that instant would be refused.
+WAF_SETTLE_S = 2.0
 
 #: How long to wait for the password step to resolve into either a logged-in
 #: session or an OTP prompt. Generous, because reCAPTCHA can add several seconds.
@@ -480,6 +483,7 @@ class AuthLadder:
                     time.sleep(0.5)
                 else:
                     return False
+                time.sleep(WAF_SETTLE_S)
                 _export_cookies(worker, session)
                 return True
             finally:
