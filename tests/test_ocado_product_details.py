@@ -30,3 +30,25 @@ def test_ocado_browser_challenge_is_not_treated_as_an_empty_product_list():
                                   request=httpx.Request("GET", "https://www.ocado.com/products"))
     with pytest.raises(RuntimeError, match="browser check"):
         OcadoClient(Challenged()).search("milk")
+
+
+def test_search_goes_quiet_after_a_challenge_instead_of_asking_again():
+    import httpx
+    import pytest
+    from types import SimpleNamespace
+    from app.ocado.client import OcadoChallenged, OcadoClient
+
+    calls = []
+
+    class Challenged:
+        search_blocked_until = 0.0
+
+        def request(self, *args, **kwargs):
+            calls.append(args)
+            return httpx.Response(202, headers={"x-amzn-waf-action": "challenge"},
+                                  request=httpx.Request("GET", "https://www.ocado.com/search"))
+    client = OcadoClient(Challenged())
+    for term in ("m", "mi", "mil", "milk"):
+        with pytest.raises(OcadoChallenged):
+            client.search(term)
+    assert len(calls) == 1

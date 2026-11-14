@@ -42,6 +42,15 @@ BASE_URL = "https://www.ocado.com"
 #: Rung 1 is untouched by this: it is one cheap HTTP request and may run freely.
 SILENT_MIN_INTERVAL_S = 3600.0
 
+#: The shortest gap between two browser visits that fetch a fresh WAF token.
+#: The token is short-lived, so an active shopper needs a new one every few
+#: minutes; this only stops a refresh that keeps failing from becoming a
+#: browser-launch loop.
+WAF_MIN_INTERVAL_S = 60.0
+#: How long to wait for the WAF script to issue its token once the page loads.
+WAF_TOKEN_TIMEOUT_S = 20.0
+WAF_COOKIE = "aws-waf-token"
+
 #: How long to wait for the password step to resolve into either a logged-in
 #: session or an OTP prompt. Generous, because reCAPTCHA can add several seconds.
 LOGIN_TIMEOUT_S = 90.0
@@ -293,6 +302,10 @@ class AuthLadder:
     _pending_session: "OcadoSession | None" = field(default=None, repr=False)
     #: Monotonic stamp of the last rung-2 attempt, for SILENT_MIN_INTERVAL_S.
     _last_silent_at: float | None = field(default=None, repr=False)
+    #: Monotonic stamp and result of the last WAF-token visit, for WAF_MIN_INTERVAL_S.
+    _last_waf_at: float | None = field(default=None, repr=False)
+    _last_waf_ok: bool = field(default=False, repr=False)
+    _waf_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
         if self.headless is None:
@@ -441,6 +454,53 @@ class AuthLadder:
             "silent", "ok" if ok else "failed", trigger=trigger, started_at=started
         )
         return ok
+
+    def refresh_waf_token(self, session: "OcadoSession") -> bool:
+        """Get a fresh ``aws-waf-token`` by loading Ocado in the real browser.
+
+        Ocado sits behind AWS WAF, which wants a token that only its JavaScript
+        challenge can issue; ``httpx`` cannot run that, so once the token the jar
+        holds lapses every API call is answered with a challenge. The stored
+        browser profile can run the script, so visit the site in it and copy the
+        cookies across. Does not log in or touch the SSO session.
+
+        Callers on several threads may arrive together; they queue on the lock,
+        and one that lands within ``WAF_MIN_INTERVAL_S`` of a visit simply shares
+        its outcome rather than launching another browser.
+        """
+
+        def job(worker: _BrowserWorker) -> bool:
+            try:
+                page = worker.start_browser()
+                page.goto(BASE_URL, wait_until="domcontentloaded")
+                deadline = time.monotonic() + WAF_TOKEN_TIMEOUT_S
+                while time.monotonic() < deadline:
+                    if any(c.get("name") == WAF_COOKIE for c in worker.context.cookies()):
+                        break
+                    time.sleep(0.5)
+                else:
+                    return False
+                _export_cookies(worker, session)
+                return True
+            finally:
+                worker.stop_browser()
+
+        if self.stage != AuthStage.IDLE or self.state in (AuthState.NEEDS_PASSWORD, AuthState.AWAITING_OTP):
+            # The visit closes the browser when it is done, which would end a
+            # login that is waiting on a code in it.
+            return False
+        with self._waf_lock:
+            now = time.monotonic()
+            if self._last_waf_at is not None and now - self._last_waf_at < WAF_MIN_INTERVAL_S:
+                return self._last_waf_ok
+            self._last_waf_at = now
+            try:
+                self._last_waf_ok = bool(self.worker.submit(job))
+            except Exception:  # noqa: BLE001 - no token just means the caller reports the challenge
+                log.warning("ocado auth: could not refresh the WAF token", exc_info=True)
+                self._last_waf_ok = False
+            log.info("ocado auth: WAF token refresh %s", "ok" if self._last_waf_ok else "failed")
+            return self._last_waf_ok
 
     def start_login(
         self,

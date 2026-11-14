@@ -65,6 +65,9 @@ class OcadoSession:
             },
         )
         self._csrf_token: str | None = None
+        #: ``time.monotonic()`` before which searches are held back, set when
+        #: Ocado's WAF challenges one (see ``OcadoClient.search``).
+        self.search_blocked_until = 0.0
         self.load()
 
     def close(self) -> None:
@@ -156,6 +159,13 @@ class OcadoSession:
 
         response = self.client.request(method, url, **kwargs)
 
+        # A lapsed WAF token is answered with a challenge, not an error. Fetch a
+        # new one in the real browser and ask again, once.
+        if self._is_waf_challenge(response):
+            refresh = getattr(self.auth, "refresh_waf_token", None)
+            if refresh is not None and refresh(self):
+                response = self.client.request(method, url, **kwargs)
+
         if self._is_csrf_failure(response):
             kwargs = self._with_csrf(kwargs, self.csrf(force=True))
             response = self.client.request(method, url, **kwargs)
@@ -182,6 +192,10 @@ class OcadoSession:
         headers.setdefault("ecom-request-source", "web")
         kwargs["headers"] = headers
         return kwargs
+
+    @staticmethod
+    def _is_waf_challenge(response: httpx.Response) -> bool:
+        return response.headers.get("x-amzn-waf-action", "").lower() in {"challenge", "captcha"}
 
     @staticmethod
     def _is_csrf_failure(response: httpx.Response) -> bool:

@@ -1157,3 +1157,29 @@ def test_refused_batch_in_an_unexplained_state_stays_failed_until_rechecked(setu
     with pytest.raises(shared.SharedError):
         store.recheck(lambda target, actions: shared.verify(_ReadBack(7), target, actions))
     assert store.recheck(lambda target, actions: shared.verify(_ReadBack(2), target, actions))["status"] == "pending"
+
+
+def test_search_repeats_are_answered_from_memory_and_a_challenge_is_a_429(shared_api, monkeypatch):
+    from app.api import ocado_shared as module
+    from app.ocado.client import OcadoChallenged
+    api, fake, _, _, _ = shared_api
+    _login(api)
+    module._search_cache.clear()
+    calls = []
+    outcome = [{}]
+
+    def search(query, size=20):
+        calls.append(query)
+        if isinstance(outcome[0], Exception):
+            raise outcome[0]
+        return outcome[0]
+    monkeypatch.setattr(fake, "search", search)
+
+    assert api.get("/api/ocado-shared/search?q=Milk").status_code == 200
+    assert api.get("/api/ocado-shared/search?q=%20milk%20").status_code == 200
+    assert calls == ["Milk"]
+
+    outcome[0] = OcadoChallenged("Ocado has paused searching after a browser check. Try again in 3 min.")
+    refused = api.get("/api/ocado-shared/search?q=bread")
+    assert refused.status_code == 429
+    assert "browser check" in refused.json()["detail"]

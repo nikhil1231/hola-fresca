@@ -180,3 +180,45 @@ def test_cookies_and_token_survive_a_reload(tmp_path):
     reloaded = make_session(handler, tmp_path)
     assert reloaded.csrf() == "persisted"
     assert reloaded.has_auth_cookies() is True
+
+
+def test_waf_challenge_gets_a_fresh_token_from_the_browser_and_retries_once(tmp_path):
+    calls = []
+
+    def handler(request):
+        calls.append(request.headers.get("cookie"))
+        if "aws-waf-token=fresh" not in (request.headers.get("cookie") or ""):
+            return httpx.Response(202, headers={"x-amzn-waf-action": "challenge"})
+        return httpx.Response(200, json={"ok": True})
+
+    class Auth(FakeAuth):
+        refreshed = 0
+
+        def refresh_waf_token(self, session):
+            self.refreshed += 1
+            session.client.cookies.set("aws-waf-token", "fresh", domain="www.ocado.com")
+            return True
+
+    auth = Auth()
+    response = make_session(handler, tmp_path, auth).request("GET", "/api/search")
+
+    assert response.status_code == 200
+    assert auth.refreshed == 1
+    assert len(calls) == 2
+
+
+def test_waf_challenge_that_cannot_be_cleared_is_returned_not_retried(tmp_path):
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(202, headers={"x-amzn-waf-action": "challenge"})
+
+    class Auth(FakeAuth):
+        def refresh_waf_token(self, session):
+            return False
+
+    response = make_session(handler, tmp_path, Auth()).request("GET", "/api/search")
+
+    assert response.headers["x-amzn-waf-action"] == "challenge"
+    assert len(calls) == 1

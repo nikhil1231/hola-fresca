@@ -496,3 +496,59 @@ def test_an_empty_otp_is_rejected():
         assert "required" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected a ValueError")
+
+
+class _WafWorker(FakeWorker):
+    """A browser whose page loads and whose WAF script issues a token (or not)."""
+
+    def __init__(self, token=True):
+        super().__init__()
+        self.visited = []
+        cookies = [{"name": "aws-waf-token", "value": "t"}] if token else [{"name": "other", "value": "x"}]
+        self.context = SimpleNamespace(cookies=lambda: cookies)
+        self.page = SimpleNamespace(goto=lambda url, **kw: self.visited.append(url))
+
+    def start_browser(self):
+        return self.page
+
+
+def _waf_ladder(worker):
+    auth = AuthLadder(profile_dir=None, headless=True)
+    auth._worker = worker
+    return auth
+
+
+def test_refresh_waf_token_visits_the_site_and_copies_the_cookies(monkeypatch):
+    worker = _WafWorker()
+    session = FakeSession()
+
+    assert _waf_ladder(worker).refresh_waf_token(session) is True
+    assert worker.visited == [auth_module.BASE_URL]
+    assert session.imported and worker.stopped == 1
+
+
+def test_refresh_waf_token_reports_failure_when_no_token_is_issued(monkeypatch):
+    monkeypatch.setattr(auth_module, "WAF_TOKEN_TIMEOUT_S", 0.2)
+    worker = _WafWorker(token=False)
+    session = FakeSession()
+
+    assert _waf_ladder(worker).refresh_waf_token(session) is False
+    assert not session.imported and worker.stopped == 1
+
+
+def test_refresh_waf_token_is_rate_limited_and_shares_the_last_outcome():
+    worker = _WafWorker()
+    auth = _waf_ladder(worker)
+
+    assert auth.refresh_waf_token(FakeSession()) is True
+    assert auth.refresh_waf_token(FakeSession()) is True
+    assert worker.jobs == 1
+
+
+def test_refresh_waf_token_leaves_a_login_in_progress_alone():
+    worker = _WafWorker()
+    auth = _waf_ladder(worker)
+    auth.state = AuthState.AWAITING_OTP
+
+    assert auth.refresh_waf_token(FakeSession()) is False
+    assert worker.jobs == 0

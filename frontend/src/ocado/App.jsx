@@ -282,6 +282,9 @@ function OfferPicker({ offer, lines, locked, canEdit, selection, targetId, addOf
   </Confirm>
 }
 
+const SEARCH_DEBOUNCE_MS = 700
+const SEARCH_MIN_LENGTH = 2
+
 function Search({ lines, locked, changeQuantity, reportError, onOffer, onProduct, offerCounts: counts, canEdit }) {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState(null)
@@ -292,8 +295,10 @@ function Search({ lines, locked, changeQuantity, reportError, onOffer, onProduct
     const value = query.trim()
     setResult(null)
     setError(null)
-    setLoading(Boolean(value))
-    if (!value) return () => controller.abort()
+    // Each search is a live call to Ocado, whose bot check starts refusing every
+    // call after a burst of them. So wait for typing to pause and for two letters.
+    setLoading(value.length >= SEARCH_MIN_LENGTH)
+    if (value.length < SEARCH_MIN_LENGTH) return () => controller.abort()
     const timer = window.setTimeout(async () => {
       try {
         const next = await request(`/search?q=${encodeURIComponent(value)}`, { signal: controller.signal })
@@ -306,7 +311,7 @@ function Search({ lines, locked, changeQuantity, reportError, onOffer, onProduct
       } finally {
         if (!controller.signal.aborted) setLoading(false)
       }
-    }, 350)
+    }, SEARCH_DEBOUNCE_MS)
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [query, reportError])
   const quantities = new Map(lines.map((line) => [String(line.sku), line.quantity]))
@@ -315,7 +320,7 @@ function Search({ lines, locked, changeQuantity, reportError, onOffer, onProduct
     <label className="search-field"><IconSearch size={22} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search for milk, bread, fish…" aria-label="Search Ocado products" autoComplete="off" />{query && <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><IconX size={18} /></button>}</label>
     {loading && <ToastMessage message="Searching the shelves…" toastKey="search-loading" duration={0} />}
     {error && <ToastMessage message={error} type="error" />}
-    {!query.trim() && <Empty icon={IconSearch} title="What’s on your list?">Find your favourite groceries.</Empty>}
+    {query.trim().length < SEARCH_MIN_LENGTH && <Empty icon={IconSearch} title="What’s on your list?">Find your favourite groceries.</Empty>}
     {result && !result.products?.length && <Empty icon={IconSearch} title="Nothing on this shelf">Try another name or a simpler search.</Empty>}
     {result?.products?.length > 0 && <><p className="results-label" aria-live="polite">{result.products.length} results for “{result.query}”</p><div className="search-grid">{result.products.map((product) => <article className="search-product" key={product.sku}><div className="product-topline"><button type="button" className="product-image-button" aria-label={`View ${product.name || product.sku}`} onClick={() => onProduct(product)}><ProductImage src={product.image_url} /></button>{product.in_stock === false && <span className="stock-badge">Out of stock</span>}</div><h3><button type="button" className="product-title-button" onClick={() => onProduct(product)}>{product.name || product.sku}</button></h3><p className="pack">{product.pack}</p><Offers offers={product.offers} onOffer={onOffer} counts={counts} /><div className="product-bottom"><div><strong>{money(product.price)}</strong>{product.base_price != null && <span className="was-price">was {money(product.base_price)}</span>}{product.unit_price != null && <small>{money(product.unit_price)}{product.unit_basis ? ` / ${product.unit_basis}` : ''}</small>}</div><Quantity name={product.name || product.sku} readOnly={!canEdit} quantity={quantities.get(String(product.sku)) || 0} disabled={locked} unavailable={product.in_stock === false} onChange={(quantity) => changeQuantity({ kind: 'quantity', sku: product.sku, name: product.name, quantity }, product)} /></div></article>)}</div></>}
   </>

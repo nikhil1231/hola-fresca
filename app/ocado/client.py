@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from time import monotonic
 from typing import Any
 
 from app.ocado.session import OcadoSession
@@ -43,6 +44,18 @@ SEARCH_PATH = "/api/webproductpagews/v6/product-pages/search"
 
 #: Ocado's own web client sends this for a standard home-delivery basket.
 DEFAULT_SHIPPING_GROUP = "default home delivery"
+
+#: Once Ocado's WAF has challenged the session, searches stop going out for this
+#: long. Every further call to a challenged session is wasted and, going by how
+#: bulk use was treated (see ``purchases.py``), keeps the challenge alive.
+SEARCH_COOLDOWN_SECONDS = 180.0
+
+
+class OcadoChallenged(RuntimeError):
+    """Ocado's WAF is asking for a browser check instead of answering."""
+
+    def __init__(self, message: str = "Ocado is asking for a browser check. Refresh the Ocado connection to continue."):
+        super().__init__(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +117,14 @@ class OcadoClient:
         return self.apply_quantity(deltas)
 
     def search(self, term: str, *, size: int = 20) -> dict[str, Any]:
+        # Typing a query makes several searches in a row, which is what the WAF
+        # objects to. After a challenge, answer from here until the cooldown is
+        # over rather than sending more calls to a session that will be refused.
+        wait = getattr(self.session, "search_blocked_until", 0.0) - monotonic()
+        if wait > 0:
+            raise OcadoChallenged(
+                f"Ocado has paused searching after a browser check. Try again in {max(1, round(wait / 60))} min."
+            )
         return self._json(
             "GET",
             SEARCH_PATH,
@@ -258,7 +279,9 @@ class OcadoClient:
         response = self.session.request(method, path, **kwargs)
         response.raise_for_status()
         if getattr(response, "headers", {}).get("x-amzn-waf-action") in {"challenge", "captcha"}:
-            raise RuntimeError("Ocado is asking for a browser check. Refresh the Ocado connection to continue.")
+            if path == SEARCH_PATH:
+                self.session.search_blocked_until = monotonic() + SEARCH_COOLDOWN_SECONDS
+            raise OcadoChallenged()
         if not response.content:
             return {}
         return response.json()

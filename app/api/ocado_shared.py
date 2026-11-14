@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Annotated, Iterator, Literal
 from uuid import UUID
 
@@ -24,6 +25,7 @@ from app.db import retailer_accounts
 from app.db.models import Product, User, RetailerAccount, OcadoSharedSettings, OcadoSharedQueue
 from app import config
 from app.ocado import orders, shared, shop
+from app.ocado.client import OcadoChallenged
 from app.scraper.products.ocado import parse_shelf_life
 from app.ocado.shared_queue import ACTIVE, QueueStore, empty
 
@@ -53,6 +55,8 @@ def _operation(session: Session, *, blocking: bool = True, bind: bool = True) ->
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except HTTPException:
         raise
+    except OcadoChallenged as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Shared Ocado operation failed: {exc}") from exc
 
@@ -254,14 +258,32 @@ def state(session: Session = Depends(get_session), factory: sessionmaker[Session
                 "queue": {**queue, **scope}, "change_products": change_products}
 
 
+#: Recent searches, so retyping or backspacing over a query costs Ocado nothing.
+#: Prices and stock go stale slowly enough that a couple of minutes is harmless.
+_SEARCH_TTL = 120.0
+_SEARCH_CACHE_MAX = 100
+_search_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+
+
 @router.get("/search")
 def search(q: str, session: Session = Depends(get_session)):
     q = q.strip()
     if not q:
         raise HTTPException(status_code=400, detail="Search for something")
     with _operation(session):
-        client = shared.make_client(shared.require_account(session).key)
-        return {**_scope(session), "query": q, "products": [asdict(product) for product in shop.search_results(client.search(q, size=20), 20)]}
+        account = shared.require_account(session)
+        key = (account.key, q.casefold())
+        now = monotonic()
+        cached = _search_cache.get(key)
+        if cached is None or now - cached[0] > _SEARCH_TTL:
+            client = shared.make_client(account.key)
+            products = [asdict(product) for product in shop.search_results(client.search(q, size=20), 20)]
+            for stale in [k for k, (at, _) in _search_cache.items() if now - at > _SEARCH_TTL]:
+                del _search_cache[stale]
+            if len(_search_cache) >= _SEARCH_CACHE_MAX:
+                _search_cache.pop(next(iter(_search_cache)))
+            _search_cache[key] = cached = (now, products)
+        return {**_scope(session), "query": q, "products": cached[1]}
 
 
 @router.get("/products/{sku}")
