@@ -317,6 +317,7 @@ function Search({ lines, locked, changeQuantity, reportError, onOffer, onProduct
   const quantities = new Map(lines.map((line) => [String(line.sku), line.quantity]))
   return <>
     <div className="section-heading"><h2>Search groceries</h2></div>
+    {!canEdit && <p className="results-label"><IconLock size={14} /> Editing is closed for this delivery, so items can't be added.</p>}
     <label className="search-field"><IconSearch size={22} /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search for milk, bread, fish…" aria-label="Search Ocado products" autoComplete="off" />{query && <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><IconX size={18} /></button>}</label>
     {loading && <ToastMessage message="Searching the shelves…" toastKey="search-loading" duration={0} />}
     {error && <ToastMessage message={error} type="error" />}
