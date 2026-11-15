@@ -989,7 +989,8 @@ def test_basket_categories_use_current_retailer_even_when_photos_exist(factory):
         db.commit()
         class NoFetch:
             def products(self, skus):
-                pytest.fail("Already pictured lines should use catalogue categories without another upstream call")
+                assert skus == ["unknown"], "Only lines the catalogue has no aisle for need an upstream call"
+                return []
         original = shop.Basket((shop.Line("category-milk", "Milk", 2, 3.0, image_url="milk.jpg"),
                                 shop.Line("unknown", "Unknown", 1, 2.0, image_url="unknown.jpg")), 5.0, False)
         result = shared.decorate(original, NoFetch(), db, retailer="ocado")
@@ -1011,6 +1012,19 @@ def test_new_basket_lines_keep_live_product_categories(factory):
         result = shared.decorate(original, Products(), db, retailer="ocado")
         assert result.lines[0].category == "Fresh & Chilled Food > Fruit"
         assert result.lines[0].cost is None
+
+
+def test_pictured_frozen_lines_without_an_aisle_are_filed_as_frozen(factory):
+    from app.ocado import shop
+
+    class Products:
+        def products(self, skus):
+            return [{"productId": "nuggets", "name": "Nuggets", "image": {"src": "n.jpg"},
+                     "iconAttributes": [{"label": "Frozen", "file": "frozen"}]}]
+    with factory() as db:
+        original = shop.Basket((shop.Line("nuggets", "Nuggets", 1, 2.0, image_url="n.jpg"),), 2.0, False)
+        result = shared.decorate(original, Products(), db, retailer="ocado")
+        assert result.lines[0].category == "Frozen Food"
 
 
 def test_undo_one_change_preserves_others_and_last_undo_empties_queue(shared_api):

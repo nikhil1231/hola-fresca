@@ -256,10 +256,12 @@ def decorate(basket: shop.Basket, client: OcadoClient, session: Session, *, reta
     """Catalogue categories for all lines, plus missing pictures and offers; prices stay live."""
     if not basket.lines:
         return basket
-    missing = [line.sku for line in basket.lines if not line.image_url]
     known = {p.sku: p for p in session.scalars(select(Product).where(
         Product.retailer == retailer, Product.sku.in_([line.sku for line in basket.lines])
     ))}
+    # Delivery lines come with pictures but no aisle, so look up what the catalogue lacks.
+    missing = [line.sku for line in basket.lines
+               if not line.image_url or not (line.category or (known[line.sku].category if line.sku in known else None))]
     found = {}
     try:
         if missing:
@@ -270,6 +272,7 @@ def decorate(basket: shop.Basket, client: OcadoClient, session: Session, *, reta
     for line in basket.lines:
         product, cached = found.get(line.sku), known.get(line.sku)
         category = line.category or (product.category if product else None) or (cached.category if cached else None)
+        category = shop.frozen_category(category, bool(cached and cached.is_frozen))
         line = replace(line, category=category)
         if line.image_url:
             lines.append(line)

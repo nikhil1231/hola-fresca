@@ -80,6 +80,11 @@ def basket(payload: Any, names: Callable[[list[str]], dict[str, str]]) -> Basket
     )
 
 
+def frozen_category(category: str | None, is_frozen: bool | None) -> str | None:
+    """Ocado often omits the aisle for frozen stock; its Frozen chip still says so."""
+    return category or ("Frozen Food" if is_frozen else None)
+
+
 def search_results(payload: Any, limit: int) -> list[Found]:
     found = []
     for raw in extract_product_objects(payload):
@@ -91,7 +96,7 @@ def search_results(payload: Any, limit: int) -> list[Found]:
                            pack=product.pack_size_raw, unit_price=product.unit_price,
                            unit_basis=product.unit_price_basis, in_stock=product.in_stock,
                            image_url=product.image_url, base_price=product.base_price,
-                           offers=offers(raw), category=product.category))
+                           offers=offers(raw), category=frozen_category(product.category, product.is_frozen)))
         if len(found) >= limit:
             break
     return found
