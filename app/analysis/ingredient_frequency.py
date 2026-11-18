@@ -48,8 +48,9 @@ class AnalysisResult:
     output_path: Path
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+def _columns(conn, table: str) -> set[str]:
+    from app.db import raw
+    return set(raw.columns(conn, table))
 
 
 def _recipe_filter(conn: sqlite3.Connection, library: str) -> tuple[str, str]:
@@ -138,8 +139,8 @@ def analyze_ingredients(
     library: str = "auto",
     group_by: str = "name",
 ) -> AnalysisResult:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    from app.db import raw
+    conn = raw.connect_readonly(None if db_path == config.DB_PATH else db_path).__enter__()
     where_sql, library_filter = _recipe_filter(conn, library)
     modal_units = _modal_units(conn)
 

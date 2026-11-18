@@ -151,8 +151,8 @@ def _load(conn: sqlite3.Connection):
 
 def suggestions(db_path: Path | None = None) -> tuple[list[Suggestion], float]:
     """Ranked disagreements between our constants and the stated serving weights."""
-    db = db_path or config.DB_PATH
-    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+    from app.db import raw
+    with raw.connect_readonly(db_path) as conn:
         targets, lines, anchored, per_unit, whole = _load(conn)
 
     ratios: dict[int, float] = {}

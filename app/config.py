@@ -279,7 +279,11 @@ OCADO_LOGIN_HEADLESS = os.environ.get("OCADO_LOGIN_HEADLESS", "1").lower() not i
 
 
 def db_url(path: Path | None = None) -> str:
-    """Return a SQLAlchemy URL for the SQLite database at ``path``."""
+    """The SQLAlchemy URL of the database: DATABASE_URL (Postgres, since 2026-11-18) unless a SQLite
+    ``path`` is asked for (tests and tools that still read a SQLite file)."""
+    url = os.environ.get("DATABASE_URL")
+    if url and path is None:
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
     return f"sqlite:///{(path or DB_PATH)}"
 
 

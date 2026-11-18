@@ -3,6 +3,8 @@ uvicorn[standard]
 pytest
 httpx
 sqlalchemy>=2.0
+psycopg[binary]==3.3.9
+psycopg-pool==3.3.3
 alembic
 playwright
 python-dotenv

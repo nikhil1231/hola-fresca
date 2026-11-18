@@ -26,11 +26,11 @@ from one. The CSVs carry everything required to do it.
 from __future__ import annotations
 
 import csv
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 from app import config
+from app.db import raw
 
 # Repo-root directory the CSVs are written to. Deliberately outside ``data/``,
 # which is gitignored wholesale as rebuildable scrape output.
@@ -54,8 +54,8 @@ class ExportResult:
     columns: tuple[str, ...]
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
-    return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+def _columns(conn, table: str) -> list[str]:
+    return raw.columns(conn, table)
 
 
 def _ordered(columns: list[str], key: tuple[str, ...], drop: frozenset[str]) -> list[str]:
@@ -78,7 +78,7 @@ def _write(path: Path, columns: list[str], rows) -> ExportResult:
     return ExportResult(path=path, rows=count, columns=tuple(columns))
 
 
-def export_mappings(conn: sqlite3.Connection, out_dir: Path) -> ExportResult:
+def export_mappings(conn: object, out_dir: Path) -> ExportResult:
     columns = _ordered(_columns(conn, "ingredient_mappings"), _MAPPING_KEY, _MAPPING_DROP)
     select = ", ".join(f'm."{c}"' for c in columns)
     rows = conn.execute(
@@ -87,7 +87,7 @@ def export_mappings(conn: sqlite3.Connection, out_dir: Path) -> ExportResult:
     return _write(out_dir / "ingredient_mappings.csv", columns, rows)
 
 
-def export_mapping_products(conn: sqlite3.Connection, out_dir: Path) -> ExportResult:
+def export_mapping_products(conn: object, out_dir: Path) -> ExportResult:
     """Accepted/rejected products per mapping, re-keyed onto the parent's natural key."""
     own = [
         c
@@ -107,11 +107,7 @@ def export_mapping_products(conn: sqlite3.Connection, out_dir: Path) -> ExportRe
 
 
 def export_all(db_path: Path | None = None, out_dir: Path | None = None) -> list[ExportResult]:
-    """Write both mapping tables. Read-only: the database is opened ``mode=ro``."""
-    db = db_path or config.DB_PATH
-    if not db.exists():
-        raise FileNotFoundError(f"no database at {db}")
+    """Write both mapping tables. Read-only: a read-only transaction (Postgres) or ``mode=ro`` (SQLite)."""
     target = out_dir or EXPORT_DIR
-    uri = f"file:{db}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as conn:
+    with raw.connect_readonly(db_path) as conn:
         return [export_mappings(conn, target), export_mapping_products(conn, target)]

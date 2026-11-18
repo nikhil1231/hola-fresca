@@ -58,6 +58,10 @@ def take_snapshot(
     compress: bool = True,
 ) -> Snapshot:
     """Write a consistent copy of the database to ``dest_dir``."""
+    from app.db import raw
+    if raw.using_postgres(db_path):
+        raise SystemExit("The database is Postgres: snapshots are pg_dumps made by the infra repo's "
+                         "stacks/holafresca/backup (and its pre-deploy hook), not by the app.")
     source = db_path or config.DB_PATH
     if not source.exists():
         raise FileNotFoundError(f"no database at {source}")

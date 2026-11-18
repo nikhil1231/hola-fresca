@@ -193,7 +193,10 @@ def _init_db(engine: Engine) -> None:
         # them.  Seed here too; the helper is idempotent for existing databases
         # where the migration already inserted the rows.
         seed_legacy_ocado_accounts(conn, config.OCADO_ACCOUNTS)
-        for table, columns in _RUNTIME_COLUMNS.items():
+        # Postgres databases start from the models (create_all) or a copy of a migrated SQLite one, so the
+        # SQLite-era column patches and the ledger rebuild below are for SQLite only.
+        sqlite = conn.dialect.name == "sqlite"
+        for table, columns in (_RUNTIME_COLUMNS.items() if sqlite else ()):
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
             for name, decl in columns.items():
                 if name not in existing:
@@ -213,7 +216,8 @@ def _init_db(engine: Engine) -> None:
             conn.execute(
                 text(f"UPDATE {table} SET retailer = 'ocado' WHERE retailer IS NULL OR retailer = ''")
             )
-        _rebuild_old_ocado_ledger_table(conn, default_account)
+        if sqlite:
+            _rebuild_old_ocado_ledger_table(conn, default_account)
 
 
 def _rebuild_old_ocado_ledger_table(conn, default_account: str) -> None:
@@ -286,9 +290,15 @@ def ensure_columns(session: Session, table: str, columns: dict[str, str]) -> Non
     ``create_all`` only creates whole tables, so an already-populated database
     never gains a newly declared column. Maps column name -> SQLite declaration.
     """
-    existing = {row[1] for row in session.execute(text(f"PRAGMA table_info({table})"))}
+    from sqlalchemy import inspect
+
+    bind = session.connection()
+    existing = {c["name"] for c in inspect(bind).get_columns(table)}
+    postgres = bind.dialect.name == "postgresql"
     for name, decl in columns.items():
         if name not in existing:
+            if postgres:   # the SQLite declarations, in Postgres's words
+                decl = decl.replace("DATETIME", "TIMESTAMP").replace("REAL", "DOUBLE PRECISION")
             session.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
     session.commit()
 

@@ -36,7 +36,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.planner_revision import create_trigger_statements
+from app.db.planner_revision import create_trigger_statements_postgres, create_trigger_statements
 
 
 def _utcnow() -> datetime:
@@ -1430,4 +1430,6 @@ class HelloFreshWeekDecision(Base):
 # Alembic migration that installs these triggers.  Register the same DDL on the
 # metadata so fresh and upgraded databases have identical cache semantics.
 for _planner_revision_ddl in create_trigger_statements():
-    event.listen(Base.metadata, "after_create", DDL(_planner_revision_ddl))
+    event.listen(Base.metadata, "after_create", DDL(_planner_revision_ddl).execute_if(dialect="sqlite"))
+for _planner_revision_ddl in create_trigger_statements_postgres():
+    event.listen(Base.metadata, "after_create", DDL(_planner_revision_ddl).execute_if(dialect="postgresql"))

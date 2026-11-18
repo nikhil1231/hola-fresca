@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -413,8 +414,9 @@ def _reserve_price_refresh(
     new user/retailer pair the same one-winner guarantee as the conditional
     update used for an existing pair.
     """
+    insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
     inserted = session.execute(
-        sqlite_insert(UserRetailerPriceRefresh)
+        insert(UserRetailerPriceRefresh)
         .values(user_id=user_id, retailer=retailer, last_refreshed_at=now)
         .on_conflict_do_nothing(index_elements=["user_id", "retailer"])
     )

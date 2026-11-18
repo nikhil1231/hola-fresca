@@ -1,8 +1,12 @@
 """Shared fixtures for the mapping tests: a temp DB seeded with candidates."""
 from __future__ import annotations
 
+import os
+
 import pytest
 from sqlalchemy import select
+
+from app import sqlpg
 
 from app import config
 from app.db.models import Product, ProductSearchHit, User
@@ -27,10 +31,18 @@ def isolated_legacy_retailer_config(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "default.db")
     monkeypatch.setattr(config, "DATA_DIR", test_data_dir)
 
+    pg_base = os.environ.get("TEST_DATABASE_URL")
+    pg_dbs: dict = {}
+
     def isolated_db_url(path=None):
         resolved = (path or config.DB_PATH).resolve()
         if resolved == _REAL_DB_PATH:
             raise RuntimeError("a test attempted to open the real application database")
+        if pg_base:
+            # Postgres mode: each database path a test asks for is its own throwaway Postgres database.
+            if resolved not in pg_dbs:
+                pg_dbs[resolved] = sqlpg.create_test_database(pg_base, "test_holafresca")
+            return pg_dbs[resolved].replace("postgresql://", "postgresql+psycopg://", 1)
         return real_db_url(resolved)
 
     monkeypatch.setattr(config, "db_url", isolated_db_url)
@@ -41,6 +53,9 @@ def isolated_legacy_retailer_config(monkeypatch, tmp_path):
     ocado_session._default_account_factory.cache_clear()
     ocado_session._RUNTIMES.clear()
     yield
+    if pg_dbs:
+        for url in pg_dbs.values():
+            sqlpg.drop_test_database(pg_base, url)
     cache_clear = getattr(deps._session_factory, "cache_clear", None)
     if cache_clear is not None:
         cache_clear()
