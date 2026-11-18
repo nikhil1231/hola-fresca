@@ -156,7 +156,7 @@ def translate(sql, named=False):
 
 
 _ORDER_BY = re.compile(r"\bORDER\s+BY\b", re.I)
-_ORDER_END = re.compile(r"\b(LIMIT|OFFSET|FETCH|FOR|UNION|INTERSECT|EXCEPT|ROWS|RANGE|GROUPS)\b", re.I)
+_ORDER_END = re.compile(r"\b(LIMIT|OFFSET|FETCH|FOR|UNION|INTERSECT|EXCEPT|ROWS|RANGE|GROUPS|RETURNING|ON|WINDOW)\b", re.I)
 
 
 def _sqlite_null_order(sql):

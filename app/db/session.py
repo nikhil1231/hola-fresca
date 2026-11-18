@@ -59,12 +59,10 @@ def make_engine(db_path: Path | None = None) -> Engine:
 
 def _sqlite_flags(engine: Engine) -> None:
     """Postgres behaving as SQLite did where the app relies on it. The models' flags are INTEGER 0/1 columns
-    (``Mapped[bool] = mapped_column(Integer)``), as they were on SQLite, which compared and stored True/False
-    as 1/0: render True/False as 1/0 in SQL, and send Python bools as integers. And NULLs sort as in SQLite."""
+    (``Mapped[bool] = mapped_column(Integer)``), as they were on SQLite, which stored True/False as 1/0: send
+    Python bools as integers (compare the columns with 1/0, not True/False). And NULLs sort as in SQLite."""
     from psycopg.types.numeric import Int8Dumper
     from sqlalchemy import event
-
-    engine.dialect.supports_native_boolean = False
 
     @event.listens_for(engine, "connect")
     def _bools_as_ints(dbapi_connection, _record):

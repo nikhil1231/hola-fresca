@@ -124,7 +124,7 @@ def _skipped_week_starts(session: Session, user_id: int) -> set[str]:
         session.scalars(
             select(PlanWeek.week_start).where(
                 PlanWeek.user_id == user_id,
-                PlanWeek.skipped == True,  # noqa: E712
+                PlanWeek.skipped == 1,   # an INTEGER 0/1 column
             )
         )
     )

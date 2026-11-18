@@ -198,11 +198,11 @@ def seed_legacy_ocado_accounts(
             result = connection.execute(
                 text(
                     "INSERT INTO users (email, name, is_admin, created_at) "
-                    "VALUES (:email, NULL, 0, CURRENT_TIMESTAMP)"
+                    "VALUES (:email, NULL, 0, CURRENT_TIMESTAMP) RETURNING id"
                 ),
                 {"email": wanted_email if email_is_free else None},
             )
-            user_id = result.lastrowid
+            user_id = result.scalar_one()   # RETURNING: SQLite and Postgres alike
             if user_id is None:  # pragma: no cover - SQLite always supplies it
                 raise RuntimeError("could not create a user for the retailer account")
             users.append((user_id, wanted_email if email_is_free else None))

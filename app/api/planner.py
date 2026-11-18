@@ -419,8 +419,10 @@ def _reserve_price_refresh(
         insert(UserRetailerPriceRefresh)
         .values(user_id=user_id, retailer=retailer, last_refreshed_at=now)
         .on_conflict_do_nothing(index_elements=["user_id", "retailer"])
+        .returning(UserRetailerPriceRefresh.id)
     )
-    if inserted.rowcount:
+    # A returned row, not rowcount: through SQLAlchemy, Postgres's rowcount here isn't 0 when nothing went in.
+    if inserted.first() is not None:
         session.commit()
         return True, None
 

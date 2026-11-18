@@ -90,9 +90,15 @@ def _example_recipes(session: Session, source_ids: list[str], limit: int = 4):
     if not source_ids:
         return []
     rows = session.scalars(
+        # The recipes that use any of these ingredients, each once: a subquery rather than a join and DISTINCT,
+        # which Postgres won't order by expressions it doesn't select.
         select(Recipe)
-        .join(RecipeIngredient, RecipeIngredient.recipe_id == Recipe.id)
-        .where(Recipe.curated == 1, RecipeIngredient.source_ingredient_id.in_(source_ids))
+        .where(
+            Recipe.curated == 1,
+            Recipe.id.in_(
+                select(RecipeIngredient.recipe_id).where(RecipeIngredient.source_ingredient_id.in_(source_ids))
+            ),
+        )
         .options(selectinload(Recipe.cuisines), selectinload(Recipe.tags))
         .order_by(
             func.coalesce(Recipe.effective_ratings_count, Recipe.ratings_count)
@@ -103,7 +109,6 @@ def _example_recipes(session: Session, source_ids: list[str], limit: int = 4):
             .nullslast(),
             Recipe.id,
         )
-        .distinct()
         .limit(limit)
     ).all()
     return [_to_card(recipe) for recipe in rows]
