@@ -140,7 +140,8 @@ def analyze_ingredients(
     group_by: str = "name",
 ) -> AnalysisResult:
     from app.db import raw
-    conn = raw.connect_readonly(None if db_path == config.DB_PATH else db_path).__enter__()
+    opened = raw.connect_readonly(None if db_path == config.DB_PATH else db_path)
+    conn = opened.__enter__()   # closed below, once the rows are read
     where_sql, library_filter = _recipe_filter(conn, library)
     modal_units = _modal_units(conn)
 
@@ -187,6 +188,7 @@ def analyze_ingredients(
         if metric_amount is not None and metric_unit:
             metric_totals[key][(recipe_id, metric_unit)] += metric_amount
 
+    opened.__exit__(None, None, None)
     rows: list[IngredientFrequency] = []
     sorted_keys = sorted(
         recipe_ids_by_key,

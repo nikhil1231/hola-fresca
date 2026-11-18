@@ -52,7 +52,31 @@ _INIT_LOCK = threading.Lock()
 
 def make_engine(db_path: Path | None = None) -> Engine:
     engine = create_engine(config.db_url(db_path), future=True)
+    if engine.dialect.name == "postgresql":
+        _sqlite_flags(engine)
     return engine
+
+
+def _sqlite_flags(engine: Engine) -> None:
+    """Postgres behaving as SQLite did where the app relies on it. The models' flags are INTEGER 0/1 columns
+    (``Mapped[bool] = mapped_column(Integer)``), as they were on SQLite, which compared and stored True/False
+    as 1/0: render True/False as 1/0 in SQL, and send Python bools as integers. And NULLs sort as in SQLite."""
+    from psycopg.types.numeric import Int8Dumper
+    from sqlalchemy import event
+
+    engine.dialect.supports_native_boolean = False
+
+    @event.listens_for(engine, "connect")
+    def _bools_as_ints(dbapi_connection, _record):
+        dbapi_connection.adapters.register_dumper(bool, Int8Dumper)
+
+    # SQLite sorts NULL first ascending and last descending; Postgres the other way round. Every ORDER BY
+    # term without its own NULLS FIRST/LAST gets SQLite's, so lists come out as they did.
+    from app.sqlpg import _sqlite_null_order
+
+    @event.listens_for(engine, "before_cursor_execute", retval=True)
+    def _null_order(_conn, _cursor, statement, parameters, _context, _executemany):
+        return _sqlite_null_order(statement), parameters
 
 
 # Columns declared after a database was first created. ``create_all`` only makes

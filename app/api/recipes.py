@@ -16,7 +16,7 @@ from typing import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from rapidfuzz import fuzz, utils
-from sqlalchemy import Select, and_, func, nullslast, or_, select
+from sqlalchemy import Select, and_, func, nullslast, or_, select, text
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.api import facets as facet_cfg
@@ -1557,7 +1557,8 @@ def get_facets(
         session.execute(
             select(func.coalesce(Recipe.course, facet_cfg.MAIN), func.count())
             .where(*_visible_recipe_condition(user.id))
-            .group_by(func.coalesce(Recipe.course, facet_cfg.MAIN))
+            # By position: Postgres can't match a GROUP BY expression with its own bound value to the select's.
+            .group_by(text("1"))
         ).all()
     )
     courses = [
